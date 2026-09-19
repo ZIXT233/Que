@@ -107,7 +107,10 @@ impl ExternalRuntime {
                 live.notify("external");
             }
         });
-        Self { notices, settings: Some(settings) }
+        Self {
+            notices,
+            settings: Some(settings),
+        }
     }
 
     #[cfg(test)]
@@ -121,17 +124,26 @@ impl ExternalRuntime {
                 live.notify("external");
             }
         });
-        Self { notices, settings: None }
+        Self {
+            notices,
+            settings: None,
+        }
     }
 
     /// Sessions currently on screen, oldest first within each state. Injected into the
     /// queue snapshot on read; `queue.json` never learns about them.
     pub fn notices(&self) -> Vec<ExternalNotice> {
         let settings = self.settings.as_ref().and_then(|s| s.read().ok());
-        let mut list: Vec<ExternalNotice> = self.notices.lock().values()
+        let mut list: Vec<ExternalNotice> = self
+            .notices
+            .lock()
+            .values()
             .filter(|tracked| tracked.dismissed_at.is_none())
             .filter(|tracked| {
-                settings.as_ref().map(|s| s.is_external_ingress_enabled(&tracked.notice.kind)).unwrap_or(true)
+                settings
+                    .as_ref()
+                    .map(|s| s.is_external_ingress_enabled(&tracked.notice.kind))
+                    .unwrap_or(true)
             })
             .map(|tracked| tracked.notice.clone())
             .collect();
@@ -166,11 +178,16 @@ fn drain(
     // Expire first: a missing sink directory must not freeze notices on screen.
     let mut changed = expire(probes, notices);
     let is_enabled = |kind: &str| -> bool {
-        settings.and_then(|s| s.read().ok()).map(|set| set.is_external_ingress_enabled(kind)).unwrap_or(true)
+        settings
+            .and_then(|s| s.read().ok())
+            .map(|set| set.is_external_ingress_enabled(kind))
+            .unwrap_or(true)
     };
     // A held guess has no follow-up hook to promote it, so this poll is its clock.
     changed |= promote_held_asks(probes, notices, Some(&is_enabled));
-    let Ok(entries) = std::fs::read_dir(external_signal_dir()) else { return changed };
+    let Ok(entries) = std::fs::read_dir(external_signal_dir()) else {
+        return changed;
+    };
     let mut files: Vec<_> = entries
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
@@ -183,7 +200,7 @@ fn drain(
     files.sort();
     for path in files.into_iter().take(MAX_FILES_PER_TICK) {
         if let Ok(raw) = std::fs::read_to_string(&path) {
-            if let Ok(signal) = serde_json::from_str::<HookSignal>(&raw) {
+            if let Some(signal) = super::signals::parse_file_signal(&raw) {
                 changed |= apply_with_settings(probes, notices, signal, Some(&is_enabled));
             }
         }
@@ -194,7 +211,11 @@ fn drain(
 }
 
 #[cfg(test)]
-fn apply(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<String, Tracked>>, signal: HookSignal) -> bool {
+fn apply(
+    probes: &Mutex<HashMap<String, ProbeState>>,
+    notices: &Mutex<HashMap<String, Tracked>>,
+    signal: HookSignal,
+) -> bool {
     apply_with_settings(probes, notices, signal, None)
 }
 
@@ -208,8 +229,13 @@ fn apply_with_settings(
     if signal.agent_id.is_some() || now - signal.at > SIGNAL_MAX_AGE_MS {
         return false;
     }
-    let Some(key) = notice_key(&signal) else { return false };
-    let existing_kind = notices.lock().get(&key).map(|tracked| tracked.notice.kind.clone());
+    let Some(key) = notice_key(&signal) else {
+        return false;
+    };
+    let existing_kind = notices
+        .lock()
+        .get(&key)
+        .map(|tracked| tracked.notice.kind.clone());
     let kind = resolve_signal_kind(&signal, existing_kind.as_deref());
     if let Some(check) = is_enabled {
         if !check(&kind) {
@@ -271,7 +297,17 @@ fn apply_with_settings(
         prompt: notice_prompt(&signal, facts.prompt),
         state,
         // The session's own store has the reply in full; the hook only ever has a clip.
-        preview: facts.reply.and_then(|reply| clean_text(&reply, PREVIEW_MAX_CHARS)).or_else(|| notice_preview(&signal)),
+        // Grok also sends Stop during shutdown, sometimes without the answer.
+        // Working clears the previous notice preview, so this never revives an
+        // answer from the preceding turn. Preserve its full length and newlines.
+        preview: facts
+            .reply
+            .and_then(|reply| clean_text(&reply, PREVIEW_MAX_CHARS))
+            .or_else(|| notice_preview(&signal))
+            .or_else(|| {
+                map.get(&key)
+                    .and_then(|tracked| tracked.notice.preview.clone())
+            }),
         turns: facts.turns,
         notification: signal.notification.clone(),
         tool: signal.tool.clone(),
@@ -279,8 +315,17 @@ fn apply_with_settings(
     };
     // A newer event clears the dismissal, so `changed` must account for the notice
     // becoming visible again even when its own fields are identical.
-    let changed = map.get(&key).is_none_or(|tracked| tracked.notice != notice || tracked.dismissed_at.is_some());
-    map.insert(key, Tracked { notice, seen_at: now, dismissed_at: None });
+    let changed = map
+        .get(&key)
+        .is_none_or(|tracked| tracked.notice != notice || tracked.dismissed_at.is_some());
+    map.insert(
+        key,
+        Tracked {
+            notice,
+            seen_at: now,
+            dismissed_at: None,
+        },
+    );
     changed
 }
 
@@ -299,8 +344,12 @@ fn promote_held_asks(
         let mut map = probes.lock();
         let mut out = Vec::new();
         for (key, current) in map.iter_mut() {
-            if current.held_attention_at.is_none() { continue; }
-            let Some(next) = settle_held(current.clone(), now) else { continue };
+            if current.held_attention_at.is_none() {
+                continue;
+            }
+            let Some(next) = settle_held(current.clone(), now) else {
+                continue;
+            };
             out.push(HookSignal {
                 kind: next.kind.clone(),
                 at: now,
@@ -333,21 +382,24 @@ fn set_working(
     now: i64,
 ) -> bool {
     let mut map = notices.lock();
-    let mut notice = map.get(key).map(|tracked| tracked.notice.clone()).unwrap_or_else(|| ExternalNotice {
-        id: key.to_string(),
-        kind: kind.to_string(),
-        session_id: signal.session_id.clone(),
-        project: signal.workspace_root.as_deref().and_then(project_name),
-        cwd: signal.workspace_root.clone(),
-        session_name: None,
-        prompt: None,
-        turns: Vec::new(),
-        state: "working".into(),
-        preview: None,
-        notification: None,
-        tool: None,
-        at: signal.at,
-    });
+    let mut notice = map
+        .get(key)
+        .map(|tracked| tracked.notice.clone())
+        .unwrap_or_else(|| ExternalNotice {
+            id: key.to_string(),
+            kind: kind.to_string(),
+            session_id: signal.session_id.clone(),
+            project: signal.workspace_root.as_deref().and_then(project_name),
+            cwd: signal.workspace_root.clone(),
+            session_name: None,
+            prompt: None,
+            turns: Vec::new(),
+            state: "working".into(),
+            preview: None,
+            notification: None,
+            tool: None,
+            at: signal.at,
+        });
     notice.kind = kind.to_string();
     notice.state = "working".into();
     notice.at = signal.at;
@@ -357,11 +409,21 @@ fn set_working(
     notice.notification = None;
     notice.preview = None;
     let changed = map.get(key).is_none_or(|tracked| tracked.notice != notice);
-    map.insert(key.to_string(), Tracked { notice, seen_at: now, dismissed_at: None });
+    map.insert(
+        key.to_string(),
+        Tracked {
+            notice,
+            seen_at: now,
+            dismissed_at: None,
+        },
+    );
     changed
 }
 
-fn expire(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<String, Tracked>>) -> bool {
+fn expire(
+    probes: &Mutex<HashMap<String, ProbeState>>,
+    notices: &Mutex<HashMap<String, Tracked>>,
+) -> bool {
     let now = now_ms();
     let (changed, live): (bool, HashSet<String>) = {
         let mut map = notices.lock();
@@ -382,7 +444,10 @@ fn notice_key(signal: &HookSignal) -> Option<String> {
             return Some(id.to_string());
         }
     }
-    let root = signal.workspace_root.as_deref()?.trim_end_matches(['/', '\\']);
+    let root = signal
+        .workspace_root
+        .as_deref()?
+        .trim_end_matches(['/', '\\']);
     (!root.is_empty()).then(|| format!("path:{root}"))
 }
 
@@ -396,14 +461,19 @@ fn notice_prompt(signal: &HookSignal, from_file: Option<String>) -> Option<Strin
     if let Some(prompt) = from_file {
         return clean_text(&prompt, PROMPT_MAX_CHARS);
     }
-    let text = signal.prompt.as_deref().or(signal.first_prompt.as_deref())?;
+    let text = signal
+        .prompt
+        .as_deref()
+        .or(signal.first_prompt.as_deref())?;
     clean_text(text, PROMPT_MAX_CHARS)
 }
 
 /// What the session's own store knows, read through the one table that says which
 /// harness can answer what (`session_label::access`).
 fn session_facts(kind: &str, session_id: Option<&str>) -> SessionFacts {
-    let Some(id) = session_id.filter(|id| !id.is_empty()) else { return SessionFacts::default() };
+    let Some(id) = session_id.filter(|id| !id.is_empty()) else {
+        return SessionFacts::default();
+    };
     session_label::session_facts(kind, id)
 }
 
@@ -424,7 +494,10 @@ fn session_id_pattern() -> &'static Regex {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -448,7 +521,10 @@ mod tests {
         }
     }
 
-    fn store() -> (Mutex<HashMap<String, ProbeState>>, Mutex<HashMap<String, Tracked>>) {
+    fn store() -> (
+        Mutex<HashMap<String, ProbeState>>,
+        Mutex<HashMap<String, Tracked>>,
+    ) {
         (Mutex::new(HashMap::new()), Mutex::new(HashMap::new()))
     }
 
@@ -457,12 +533,19 @@ mod tests {
     }
 
     fn only(notices: &Mutex<HashMap<String, Tracked>>) -> ExternalNotice {
-        notices.lock().values().next().map(|tracked| tracked.notice.clone()).expect("one notice")
+        notices
+            .lock()
+            .values()
+            .next()
+            .map(|tracked| tracked.notice.clone())
+            .expect("one notice")
     }
 
     /// Mirrors `ExternalRuntime::notices`, which needs a running watcher to build.
     fn visible(notices: &Mutex<HashMap<String, Tracked>>) -> Vec<ExternalNotice> {
-        let mut list: Vec<ExternalNotice> = notices.lock().values()
+        let mut list: Vec<ExternalNotice> = notices
+            .lock()
+            .values()
             .filter(|tracked| tracked.dismissed_at.is_none())
             .map(|tracked| tracked.notice.clone())
             .collect();
@@ -492,7 +575,11 @@ mod tests {
         // The same attention event must not churn the notice (and its SSE refresh).
         assert!(!apply(&probes, &notices, signal("stop", at)));
         // Back to work: the wait is over, but the session is still out there working.
-        assert!(apply(&probes, &notices, signal("beforeSubmitPrompt", at + 1)));
+        assert!(apply(
+            &probes,
+            &notices,
+            signal("beforeSubmitPrompt", at + 1)
+        ));
         let working = only(&notices);
         assert_eq!(working.state, "working");
         assert_eq!(working.at, at + 1);
@@ -532,7 +619,11 @@ mod tests {
     #[test]
     fn a_session_first_seen_working_still_gets_an_entry() {
         let (probes, notices) = store();
-        assert!(apply(&probes, &notices, signal("beforeSubmitPrompt", now())));
+        assert!(apply(
+            &probes,
+            &notices,
+            signal("beforeSubmitPrompt", now())
+        ));
         let entry = only(&notices);
         assert_eq!(entry.state, "working");
         assert_eq!(entry.kind, "cursor");
@@ -553,6 +644,28 @@ mod tests {
         assert_eq!(raised.notification, None);
     }
 
+    #[test]
+    fn grok_shutdown_stop_keeps_this_turn_reply_only() {
+        let (probes, notices) = store();
+        let at = now();
+        let mut stop = signal("Stop", at);
+        stop.kind = Some("grok".into());
+        let reply = "中文回复\n".repeat(80);
+        stop.reply_preview = Some(reply.trim().into());
+        apply(&probes, &notices, stop.clone());
+        stop.at += 1;
+        stop.reply_preview = None;
+        apply(&probes, &notices, stop.clone());
+        assert_eq!(only(&notices).preview.as_deref(), Some(reply.trim()));
+        let mut submit = stop.clone();
+        submit.at += 1;
+        submit.event = "UserPromptSubmit".into();
+        apply(&probes, &notices, submit);
+        stop.at += 2;
+        apply(&probes, &notices, stop);
+        assert_eq!(only(&notices).preview, None);
+    }
+
     /// A notice is a card the user cannot type into, so the reply is the content:
     /// it keeps the line breaks a CLI reply is built from instead of collapsing them.
     #[test]
@@ -561,7 +674,10 @@ mod tests {
         let mut stop = signal("stop", now());
         stop.reply_preview = Some("第一行\n\n\n第二行 \u{7}尾部".into());
         assert!(apply(&probes, &notices, stop));
-        assert_eq!(only(&notices).preview.as_deref(), Some("第一行\n\n第二行 尾部"));
+        assert_eq!(
+            only(&notices).preview.as_deref(),
+            Some("第一行\n\n第二行 尾部")
+        );
     }
 
     #[test]
@@ -570,7 +686,12 @@ mod tests {
         let mut stop = signal("stop", now());
         stop.reply_preview = Some("x".repeat(20_000));
         assert!(apply(&probes, &notices, stop));
-        assert_eq!(only(&notices).preview.map(|preview| preview.chars().count()), Some(PREVIEW_MAX_CHARS));
+        assert_eq!(
+            only(&notices)
+                .preview
+                .map(|preview| preview.chars().count()),
+            Some(PREVIEW_MAX_CHARS)
+        );
     }
 
     /// Permission waits carry no prompt in the hook payload, so the card falls back
@@ -579,11 +700,17 @@ mod tests {
     fn the_ask_falls_back_to_whatever_the_hook_sent() {
         let mut asked = signal("preToolUse", now());
         asked.prompt = Some("帮我改一下队列排序".into());
-        assert_eq!(notice_prompt(&asked, None).as_deref(), Some("帮我改一下队列排序"));
+        assert_eq!(
+            notice_prompt(&asked, None).as_deref(),
+            Some("帮我改一下队列排序")
+        );
         let mut resumed = signal("preToolUse", now());
         resumed.first_prompt = Some("/resume".into());
         assert_eq!(notice_prompt(&resumed, None).as_deref(), Some("/resume"));
-        assert_eq!(notice_prompt(&asked, Some("来自会话文件的提问".into())).as_deref(), Some("来自会话文件的提问"));
+        assert_eq!(
+            notice_prompt(&asked, Some("来自会话文件的提问".into())).as_deref(),
+            Some("来自会话文件的提问")
+        );
         assert_eq!(notice_prompt(&signal("preToolUse", now()), None), None);
     }
 
@@ -621,7 +748,11 @@ mod tests {
     #[test]
     fn stale_signals_are_skipped() {
         let (probes, notices) = store();
-        assert!(!apply(&probes, &notices, signal("stop", now() - SIGNAL_MAX_AGE_MS - 1)));
+        assert!(!apply(
+            &probes,
+            &notices,
+            signal("stop", now() - SIGNAL_MAX_AGE_MS - 1)
+        ));
         assert!(notices.lock().is_empty());
     }
 
@@ -631,13 +762,19 @@ mod tests {
         let mut anonymous = signal("stop", now());
         anonymous.session_id = None;
         assert!(apply(&probes, &notices, anonymous));
-        assert_eq!(notices.lock().keys().next().map(String::as_str), Some("path:/home/u/Projects/que"));
+        assert_eq!(
+            notices.lock().keys().next().map(String::as_str),
+            Some("path:/home/u/Projects/que")
+        );
     }
 
     #[test]
     fn project_is_the_last_path_segment() {
         assert_eq!(project_name("/home/u/Projects/que").as_deref(), Some("que"));
-        assert_eq!(project_name(r"C:\Users\u\Projects\que\\").as_deref(), Some("que"));
+        assert_eq!(
+            project_name(r"C:\Users\u\Projects\que\\").as_deref(),
+            Some("que")
+        );
         assert_eq!(project_name("/"), None);
     }
 
@@ -646,7 +783,10 @@ mod tests {
         let (probes, notices) = store();
         apply(&probes, &notices, signal("stop", now()));
         assert_eq!(probes.lock().len(), 1);
-        notices.lock().values_mut().for_each(|tracked| tracked.seen_at = now() - NOTICE_TTL_MS - 1);
+        notices
+            .lock()
+            .values_mut()
+            .for_each(|tracked| tracked.seen_at = now() - NOTICE_TTL_MS - 1);
         assert!(expire(&probes, &notices));
         assert!(notices.lock().is_empty());
         assert!(probes.lock().is_empty());
@@ -684,7 +824,11 @@ mod tests {
         let at = now();
         apply(&probes, &notices, signal("stop", at));
         dismiss(&notices, SESSION);
-        assert!(apply(&probes, &notices, signal("beforeSubmitPrompt", at + 1)));
+        assert!(apply(
+            &probes,
+            &notices,
+            signal("beforeSubmitPrompt", at + 1)
+        ));
         // The session went back to work: it is a background entry now, and a hand-close
         // of the old ask does not carry over to the one it is working on.
         let entries = visible(&notices);
@@ -701,12 +845,22 @@ mod tests {
         let disabled_cursor = |k: &str| k != "cursor";
 
         let sig = signal("stop", at);
-        assert!(!apply_with_settings(&probes, &notices, sig, Some(&disabled_cursor)));
+        assert!(!apply_with_settings(
+            &probes,
+            &notices,
+            sig,
+            Some(&disabled_cursor)
+        ));
         assert!(notices.lock().is_empty());
 
         let enabled_cursor = |k: &str| k == "cursor";
         let sig2 = signal("stop", at);
-        assert!(apply_with_settings(&probes, &notices, sig2, Some(&enabled_cursor)));
+        assert!(apply_with_settings(
+            &probes,
+            &notices,
+            sig2,
+            Some(&enabled_cursor)
+        ));
         assert_eq!(notices.lock().len(), 1);
     }
 
@@ -739,4 +893,3 @@ mod tests {
         assert_eq!(resolve_signal_kind(&sig, None), "claude");
     }
 }
-

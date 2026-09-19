@@ -13,8 +13,8 @@
 //! `omp` → `pi`).
 
 use super::debug::{HarnessDebugEvent, ProbeView};
-use super::install::Host;
 pub use super::install::GlobalCtx;
+use super::install::Host;
 use super::label_text::SessionLabel;
 use super::session_label::SessionFacts;
 use super::signals::{default_meaning, HookSignal, Meaning};
@@ -75,8 +75,16 @@ pub struct Adapter {
 }
 
 impl Adapter {
-    pub(crate) fn new(executable: &'static str, args: &'static [&'static str], resume: fn(&str) -> AppResult<Vec<String>>) -> Self {
-        Self { executable, args, resume }
+    pub(crate) fn new(
+        executable: &'static str,
+        args: &'static [&'static str],
+        resume: fn(&str) -> AppResult<Vec<String>>,
+    ) -> Self {
+        Self {
+            executable,
+            args,
+            resume,
+        }
     }
 
     pub fn resume_args(&self, session_id: &str) -> AppResult<Vec<String>> {
@@ -87,7 +95,10 @@ impl Adapter {
 /// Every harness resumes by handing a session id back on the command line, so the id is
 /// checked once, here, before any harness sees it.
 pub(super) fn checked_id(session_id: &str) -> AppResult<&str> {
-    if !regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$").unwrap().is_match(session_id) {
+    if !regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
+        .unwrap()
+        .is_match(session_id)
+    {
         return Err(AppError::machine("HARNESS_SESSION_ID_INVALID"));
     }
     Ok(session_id)
@@ -100,6 +111,7 @@ pub(super) fn resume_flag(session_id: &str) -> AppResult<Vec<String>> {
 
 /// Everything a harness module may look at while describing its hook install.
 pub struct Ctx<'a> {
+    pub version: &'a str,
     pub kind: &'a str,
     pub workspace: &'a QueueWorkspace,
     pub host: &'a Host,
@@ -136,7 +148,10 @@ pub struct UserMerge {
     /// job, not the installer's.
     pub local: fn(existing: Option<&str>, payload: &str, host: &Host) -> AppResult<String>,
     /// Remote install: a `node -e` script plus the argv that follows it.
-    pub remote: Option<(&'static str, fn(host: &Host, path: &str, payload: &str) -> Vec<String>)>,
+    pub remote: Option<(
+        &'static str,
+        fn(host: &Host, path: &str, payload: &str) -> Vec<String>,
+    )>,
 }
 
 /// A version floor checked synchronously at launch: a CLI that cannot report the
@@ -175,7 +190,11 @@ pub struct LaunchTweaks {
 /// even more), so short deadlines turn into "hook timed out" on real sessions —
 /// the same reason Cursor runs 15s.
 pub fn default_hook_timeout(windows_local: bool) -> u32 {
-    if windows_local { 15 } else { 2 }
+    if windows_local {
+        15
+    } else {
+        2
+    }
 }
 
 /// Everything Que knows about one harness, in one place.
@@ -212,7 +231,10 @@ pub trait Harness: Sync {
     /// Describe the per-card hook install. Async because a plan may have to read the
     /// CLI's existing (possibly remote) config first. The default empty plan is never
     /// consulted: a harness without an adapter never reaches the hook installer.
-    fn plan<'a>(&'a self, _ctx: Ctx<'a>) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
+    fn plan<'a>(
+        &'a self,
+        _ctx: Ctx<'a>,
+    ) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
         Box::pin(async { Ok(Plan::default()) })
     }
     /// The user-level install serving sessions Que never launched. Default: none.

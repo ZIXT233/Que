@@ -53,7 +53,7 @@ import { ErrorDialog } from "./ErrorDialog";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { cardWindowLabel, closeCurrentCardWindow, destroyCardWindow, focusMainWindow, isDesktopApp, setCurrentWindowTitle } from "@/lib/card-window";
 import { desktopBridge } from "@/lib/desktop";
-import { externalNoticeKey, externalNoticeTitle, externalQueueCards, externalWorkingNotices, newExternalNotices, startableHarnessCards, toExternalCard, type QueueCard, type QueueWorkspace } from "@/lib/card-queue";
+import { externalNoticeKey, externalNoticeTitle, externalWorkingNotices, newExternalNotices, startableHarnessCards, toExternalCard, type QueueCard, type QueueWorkspace } from "@/lib/card-queue";
 import type { RemoteHost } from "@/lib/remote-hosts";
 import type { SessionInfo } from "@/lib/types";
 
@@ -311,11 +311,9 @@ export function CardQueueShell() {
   const ready = useMemo(() => {
     // The clock invalidates time-dependent ordering even when the API is unchanged.
     void scoreTick;
-    const list = queue ? sortedQueue(queue) : [];
+    const list = queue ? sortedQueue(queue, Date.now(), true) : [];
     const queued = pendingDetach.size === 0 ? list : list.filter((card) => !pendingDetach.has(card.id));
-    // External notices ride the same deck so they read as cards rather than banners.
-    // They land last: the scheduler ranks real work, and these are not work Que owns.
-    return [...queued, ...externalQueueCards(queue?.external)];
+    return queued;
   }, [queue, scoreTick, pendingDetach]);
   const deckIndex = resolveQueueFocus(ready, focus?.id ?? null, focus?.index ?? 0);
   const selectQueueCard = useCallback((index: number) => {

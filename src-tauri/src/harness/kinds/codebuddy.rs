@@ -3,8 +3,8 @@
 //! format. It used to ride in on Claude's registry default; it is spelled out here.
 
 use super::claude::{family_plan, EVENTS};
-use super::registry::{resume_flag, Adapter, Ctx, GlobalCtx, Harness, Plan};
 use super::label_text::{clip, json_text, SessionLabel};
+use super::registry::{resume_flag, Adapter, Ctx, GlobalCtx, Harness, Plan, UserMerge};
 use super::session_find::{find_first, safe_name_id};
 use super::session_label::SessionFacts;
 use crate::error::AppResult;
@@ -17,6 +17,24 @@ pub struct CodeBuddy;
 pub static CODEBUDDY: CodeBuddy = CodeBuddy;
 
 impl Harness for CodeBuddy {
+    fn hook_command(&self, host: &super::install::Host, event: Option<&str>) -> String {
+        // CodeBuddy's default command-hook executor is Git Bash on Windows.
+        // Forward slashes retain drive paths; POSIX quoting handles spaces and $.
+        if host.windows {
+            let executable = host
+                .root
+                .join("que-hook.exe")
+                .to_string_lossy()
+                .into_owned();
+            return [Some(executable.as_str()), Some("codebuddy"), event]
+                .into_iter()
+                .flatten()
+                .map(|value| crate::ssh::shell_quote(&value.replace('\\', "/")))
+                .collect::<Vec<_>>()
+                .join(" ");
+        }
+        host.generic_hook_command(event)
+    }
     fn id(&self) -> &'static str {
         "codebuddy"
     }
@@ -28,21 +46,78 @@ impl Harness for CodeBuddy {
         EVENTS
     }
 
-    fn plan<'a>(&'a self, ctx: Ctx<'a>) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
-        Box::pin(family_plan(ctx, self.events()))
+    fn plan<'a>(
+        &'a self,
+        ctx: Ctx<'a>,
+    ) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
+        Box::pin(async move {
+            if ctx.host.remote {
+                return family_plan(ctx, self.events()).await;
+            }
+            #[cfg(windows)]
+            crate::harness::windows::install_native_hook(&ctx.host.root, "que-hook")?;
+            let command = self.hook_command(ctx.host, None);
+            let mut plan = Plan::default();
+            // One shared registration serves internal and external sessions. Do not
+            // also load the same events through --plugin-dir.
+            plan.files.insert(
+                "codebuddy-user-hooks.json".into(),
+                hook_config(&command).to_string(),
+            );
+            plan.user_config.push(UserMerge {
+                path: codebuddy_home()
+                    .join("settings.json")
+                    .to_string_lossy()
+                    .into_owned(),
+                payload: "codebuddy-user-hooks.json",
+                local: merge_local,
+                remote: None,
+            });
+            Ok(plan)
+        })
     }
 
-    /// External CodeBuddy sessions read the Claude layout through their own manifest,
-    /// so their ingress copy lives under the codebuddy plugin directory; the settings
-    /// merge itself is Claude's.
+    /// Register in CodeBuddy settings for ordinary external launches.
     fn global(&self, ctx: &GlobalCtx) {
-        let _ = ctx.install_ingress("codebuddy");
+        let result = (|| -> AppResult<()> {
+            ctx.install_ingress("codebuddy")?;
+            #[cfg(not(windows))]
+            let command = [&ctx.node, &ctx.hook_path("codebuddy")]
+                .into_iter()
+                .map(|s| crate::ssh::shell_quote(&s.replace('\\', "/")))
+                .collect::<Vec<_>>()
+                .join(" ");
+            #[cfg(windows)]
+            let command = {
+                let exe = crate::harness::windows::install_native_hook(
+                    &ctx.plugins.join("codebuddy"),
+                    "que-hook",
+                )?;
+                format!(
+                    "{} codebuddy",
+                    crate::ssh::shell_quote(&exe.to_string_lossy().replace('\\', "/"))
+                )
+            };
+            let path = codebuddy_home().join("settings.json");
+            let existing = std::fs::read_to_string(&path).ok();
+            let merged = merge_settings(existing.as_deref(), &hook_config(&command))?;
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            crate::paths::atomic_write(&path, &merged)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            crate::debuglog::log_error("install external CodeBuddy hooks", &error);
+        }
     }
 
-    /// The manifest external CodeBuddy sessions read; the next card launch
-    /// rewrites it when the kind is enabled again.
-    fn unglobal(&self, ctx: &GlobalCtx) {
-        let _ = std::fs::remove_file(ctx.plugins.join("codebuddy").join("hooks").join("hooks.json"));
+    /// Remove only Que handlers, preserving unrelated settings.
+    fn unglobal(&self, _ctx: &GlobalCtx) {
+        let path = codebuddy_home().join("settings.json");
+        if let Ok(existing) = std::fs::read_to_string(&path) {
+            if let Ok(merged) = merge_settings(Some(&existing), &serde_json::json!({"hooks":{}})) {
+                let _ = crate::paths::atomic_write(&path, &merged);
+            }
+        }
     }
 
     fn external_ingress(&self) -> bool {
@@ -62,6 +137,68 @@ impl Harness for CodeBuddy {
     }
 }
 
+fn hook_config(command: &str) -> serde_json::Value {
+    let hooks: serde_json::Map<String, serde_json::Value> = EVENTS
+        .iter()
+        .map(|event| {
+            (
+                event.to_string(),
+                serde_json::json!([{"hooks":[{"type":"command","command":command,"timeout":15}]}]),
+            )
+        })
+        .collect();
+    serde_json::json!({"hooks":hooks})
+}
+
+fn merge_local(
+    existing: Option<&str>,
+    payload: &str,
+    _host: &super::install::Host,
+) -> AppResult<String> {
+    merge_settings(existing, &serde_json::from_str(payload)?)
+}
+
+fn merge_settings(existing: Option<&str>, incoming: &serde_json::Value) -> AppResult<String> {
+    let mut value: serde_json::Value = serde_json::from_str(existing.unwrap_or("{}"))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| crate::error::AppError::msg("Invalid CodeBuddy settings"))?;
+    let hooks = object
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| crate::error::AppError::msg("Invalid CodeBuddy hooks"))?;
+    for event in EVENTS {
+        let entries = hooks
+            .entry(event.to_string())
+            .or_insert_with(|| serde_json::json!([]))
+            .as_array_mut()
+            .ok_or_else(|| crate::error::AppError::msg("Invalid CodeBuddy hook event"))?;
+        entries.retain_mut(|group| {
+            let Some(handlers) = group.get_mut("hooks").and_then(|v| v.as_array_mut()) else {
+                return true;
+            };
+            let before = handlers.len();
+            handlers.retain(|handler| {
+                !handler
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|c| {
+                        c.replace('\\', "/")
+                            .contains("/harness-plugins/codebuddy/hook.cjs")
+                            || c.replace('\\', "/")
+                                .contains("/harness-plugins/codebuddy/que-hook.exe")
+                    })
+            });
+            before == handlers.len() || !handlers.is_empty()
+        });
+        if let Some(add) = incoming["hooks"][*event].as_array() {
+            entries.extend(add.iter().cloned());
+        }
+    }
+    Ok(serde_json::to_string_pretty(&value)?)
+}
+
 // —— the session store ——
 
 fn codebuddy_home() -> PathBuf {
@@ -70,13 +207,18 @@ fn codebuddy_home() -> PathBuf {
             return PathBuf::from(path);
         }
     }
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".codebuddy")
+    crate::paths::user_home()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codebuddy")
 }
 
 /// Mirrors CodeBuddy's `PathUtils.getHomeProjectsDir()`: transcripts live at
 /// `<home>/projects/<compressed-cwd>/<session-id>.jsonl`.
 fn transcript_path(session_id: &str) -> Option<PathBuf> {
-    find_first(&[codebuddy_home().join("projects")], &format!("{session_id}.jsonl"))
+    find_first(
+        &[codebuddy_home().join("projects")],
+        &format!("{session_id}.jsonl"),
+    )
 }
 
 fn session_exists(session_id: &str) -> bool {
@@ -90,10 +232,15 @@ fn session_label(session_id: &str) -> SessionLabel {
     if !safe_name_id(session_id) {
         return SessionLabel::default();
     }
-    let Some(body) = transcript_path(session_id).and_then(|path| std::fs::read_to_string(path).ok()) else {
+    let Some(body) =
+        transcript_path(session_id).and_then(|path| std::fs::read_to_string(path).ok())
+    else {
         return SessionLabel::default();
     };
-    SessionLabel { name: session_title(&body), first_prompt: first_user_prompt(&body) }
+    SessionLabel {
+        name: session_title(&body),
+        first_prompt: first_user_prompt(&body),
+    }
 }
 
 /// CodeBuddy keeps titles as transcript entries instead of Claude's sidecar file,
@@ -104,7 +251,9 @@ fn session_title(body: &str) -> Option<String> {
     let mut generated = None;
     let mut topic = None;
     for line in body.lines() {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         if let Some(text) = title_entry(&entry, "custom-title", "customTitle") {
             custom = Some(text);
         } else if let Some(text) = generated_title_entry(&entry, "ai-title", "aiTitle") {
@@ -149,11 +298,17 @@ fn is_placeholder_title(value: &str) -> bool {
 /// transcripts are accepted too so a mixed history still resolves.
 fn first_user_prompt(body: &str) -> Option<String> {
     for line in body.lines() {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         if !is_real_user_message(&entry) {
             continue;
         }
-        if let Some(text) = entry.get("content").and_then(json_text).or_else(|| entry.get("message").and_then(json_text)) {
+        if let Some(text) = entry
+            .get("content")
+            .and_then(json_text)
+            .or_else(|| entry.get("message").and_then(json_text))
+        {
             return Some(text);
         }
     }
@@ -168,11 +323,16 @@ fn is_real_user_message(entry: &serde_json::Value) -> bool {
         }
         // Internal prompts injected by the CLI itself are not user intent.
         let provider = entry.get("providerData");
-        let flag = |key: &str| provider.and_then(|v| v.get(key)).and_then(|v| v.as_bool()) == Some(true);
+        let flag =
+            |key: &str| provider.and_then(|v| v.get(key)).and_then(|v| v.as_bool()) == Some(true);
         if flag("isMeta") || flag("isCompactInternal") || flag("skipRun") {
             return false;
         }
-        if provider.and_then(|v| v.get("agent")).and_then(|v| v.as_str()) == Some("compact") {
+        if provider
+            .and_then(|v| v.get("agent"))
+            .and_then(|v| v.as_str())
+            == Some("compact")
+        {
             return false;
         }
         // A teammate message is someone else's text, not this terminal's prompt.
@@ -228,7 +388,9 @@ pub(super) fn parse_codebuddy_details(body: &str, label: SessionLabel) -> Sessio
     let mut session_cwd = None;
 
     for line in body.lines() {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         if session_cwd.is_none() {
             if let Some(c) = entry.get("cwd").and_then(|v| v.as_str()) {
                 session_cwd = Some(c.to_string());
@@ -263,7 +425,9 @@ pub(super) fn parse_codebuddy_details(body: &str, label: SessionLabel) -> Sessio
             if entry.get("isMeta") == Some(&serde_json::Value::Bool(true)) {
                 continue;
             }
-            let Some(raw_msg) = entry.get("message") else { continue };
+            let Some(raw_msg) = entry.get("message") else {
+                continue;
+            };
             let text = extract_turn_text(raw_msg);
             if text.is_empty() || super::label_text::is_noise(&text) {
                 continue;
@@ -397,7 +561,10 @@ mod tests {
 {"type":"summary","summary":"用户打了个招呼","providerData":{"source":"initial-user-message"}}
 {"type":"message","role":"assistant","content":[{"type":"output_text","text":"这是红黑树的实现代码。"}],"message":{"usage":{"input_tokens":1}}}
 "#;
-        let label = SessionLabel { name: Some("红黑树".into()), first_prompt: Some("实现一个红黑树".into()) };
+        let label = SessionLabel {
+            name: Some("红黑树".into()),
+            first_prompt: Some("实现一个红黑树".into()),
+        };
         let facts = parse_codebuddy_details(body, label);
         assert_eq!(facts.name.as_deref(), Some("红黑树"));
         assert_eq!(facts.cwd.as_deref(), Some("/Users/zixt/projects/trees"));
@@ -410,4 +577,3 @@ mod tests {
         assert_eq!(facts.turns[1].text, "这是红黑树的实现代码。");
     }
 }
-

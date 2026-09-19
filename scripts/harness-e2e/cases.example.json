@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "name": "Codex internal two turns", "kind": "codex", "mode": "internal",
+      "steps": [
+        { "hook": "SessionStart", "timeoutMs": 30000 },
+        { "send": "Reply with QUE_E2E_OK only. Do not use tools.\r" },
+        { "hook": "UserPromptSubmit", "timeoutMs": 3000 },
+        { "hook": "Stop", "state": "attention", "screen": "QUE_E2E_OK", "timeoutMs": 60000 },
+        { "send": "Reply with QUE_E2E_SECOND only. Do not use tools.\r" },
+        { "hook": "UserPromptSubmit", "timeoutMs": 3000 },
+        { "hook": "Stop", "state": "attention", "screen": "QUE_E2E_SECOND", "timeoutMs": 60000 }
+      ]
+    },
+    {
+      "name": "OMP external discovery", "kind": "omp", "mode": "external", "command": "omp --allow-home",
+      "steps": [
+        { "screen": "oh.my.pi|OMP|model", "timeoutMs": 30000 },
+        { "send": "Reply with QUE_E2E_OK only. Do not use tools.\r" },
+        { "externalState": "attention", "screen": "QUE_E2E_OK", "timeoutMs": 60000 }
+      ]
+    },
+    {
+      "name": "OMP ask and resume", "kind": "omp", "mode": "internal",
+      "steps": [
+        { "hook": "SessionStart", "timeoutMs": 30000 },
+        { "send": "Use the ask tool to ask me to choose YES or NO, and wait for my answer.\r" },
+        { "hook": "PreToolUse", "state": "attention", "screen": "YES.*NO|NO.*YES", "timeoutMs": 60000 },
+        { "send": "\r" },
+        { "hook": "Stop", "state": "attention", "timeoutMs": 60000 }
+      ]
+    }
+  ]
+}

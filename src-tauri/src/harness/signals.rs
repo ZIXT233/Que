@@ -35,6 +35,20 @@ pub struct HookSignal {
     pub external: Option<bool>,
 }
 
+/// Native Grok ingress preserves its envelope without starting a JSON/JS runtime.
+/// Other providers keep the existing normalized signal-file contract.
+pub fn parse_file_signal(raw: &str) -> Option<HookSignal> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if let Some(payload) = value.get("queGrokEnvelope") {
+        return super::kinds::grok::native_signal(
+            payload,
+            value.get("at")?.as_i64()?,
+            value.get("external")?.as_bool()?,
+        );
+    }
+    serde_json::from_value(value).ok()
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ProbeState {
     pub reply_preview: Option<String>,
@@ -127,35 +141,63 @@ pub enum Meaning {
 /// and there is nothing to guess about.
 fn asks_the_user(tool: &str) -> bool {
     let name = tool.rsplit(['/', '.']).next().unwrap_or(tool);
-    matches!(name, "request_user_input" | "ask_user_question" | "ask_user" | "ask_question" | "AskUserQuestion")
+    matches!(
+        name,
+        "request_user_input"
+            | "ask_user_question"
+            | "ask_user"
+            | "ask_question"
+            | "AskUserQuestion"
+    )
 }
 
 /// A notification the CLI sends to say a prompt is on screen, rather than to chat.
 fn is_ask_notification(signal: &HookSignal) -> bool {
     signal.event == "Notification"
-        && ["permission_prompt", "ToolPermission", "idle_prompt"].contains(&signal.notification.as_deref().unwrap_or(""))
+        && ["permission_prompt", "ToolPermission", "idle_prompt"]
+            .contains(&signal.notification.as_deref().unwrap_or(""))
 }
 
 /// The shared vocabulary every harness's words are read through. The one per-harness
 /// input is whether a tool start is a gate the CLI answers itself; everything else is
 /// a plain event name.
 pub(crate) fn default_meaning(signal: &HookSignal, guesses_attention: bool) -> Meaning {
-    if signal.agent_id.is_some() { return Meaning::Nothing; }
+    if signal.agent_id.is_some() {
+        return Meaning::Nothing;
+    }
     // An ask-shaped tool is the ask itself, whatever gate the harness owns.
-    let tool_start = matches!(signal.event.as_str(), "PreToolUse" | "BeforeTool" | "preToolUse");
-    if tool_start && asks_the_user(signal.tool.as_deref().unwrap_or("")) { return Meaning::Attention; }
-    if guesses_attention { return Meaning::MaybeAttention; }
-    if is_ask_notification(signal) { return Meaning::Attention; }
+    let tool_start = matches!(
+        signal.event.as_str(),
+        "PreToolUse" | "BeforeTool" | "preToolUse"
+    );
+    if tool_start && asks_the_user(signal.tool.as_deref().unwrap_or("")) {
+        return Meaning::Attention;
+    }
+    if guesses_attention {
+        return Meaning::MaybeAttention;
+    }
+    if is_ask_notification(signal) {
+        return Meaning::Attention;
+    }
     match signal.event.as_str() {
         "SessionStart" | "sessionStart" => Meaning::SessionStart,
         // A prompt was submitted: a new turn.
-        "beforeSubmitPrompt" | "UserPromptSubmit" | "BeforeAgent" | "PreInvocation" => Meaning::TurnStart,
+        "beforeSubmitPrompt" | "UserPromptSubmit" | "BeforeAgent" | "PreInvocation" => {
+            Meaning::TurnStart
+        }
         // Tool traffic: a turn already in progress.
         "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "BeforeTool" | "AfterTool"
-        | "PostInvocation" | "preToolUse" | "postToolUse" | "postToolUseFailure" => Meaning::Working,
+        | "PostInvocation" | "preToolUse" | "postToolUse" | "postToolUseFailure" => {
+            Meaning::Working
+        }
         // A turn that ended — unless the harness reports that it only paused.
-        "stop" | "Stop" | "StopFailure" | "StopCancelled" | "sessionEnd" | "AfterAgent" | "afterAgentResponse" => {
-            if signal.fully_idle == Some(false) { Meaning::Working } else { Meaning::TurnEnd }
+        "stop" | "Stop" | "StopFailure" | "StopCancelled" | "sessionEnd" | "AfterAgent"
+        | "afterAgentResponse" => {
+            if signal.fully_idle == Some(false) {
+                Meaning::Working
+            } else {
+                Meaning::TurnEnd
+            }
         }
         // A permission act the harness reports itself.
         "PermissionRequest" | "beforeShellExecution" | "beforeMCPExecution" => Meaning::Attention,
@@ -173,16 +215,37 @@ pub fn hook_state(meaning: Meaning) -> Option<&'static str> {
 }
 
 pub fn observe_hook(current: ProbeState, raw: HookSignal) -> ProbeState {
-    if raw.agent_id.is_some() { return current; }
+    if raw.agent_id.is_some() {
+        return current;
+    }
     // The signal's own kind names the harness; an unknown name observes through the
     // generic vocabulary, exactly as it did before that name existed.
     let harness = super::registry::resolve(raw.kind.as_deref().unwrap_or(""));
     let meaning = harness.meaning(&raw);
-    let session_id = raw.session_id.as_deref().filter(|id| regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$").unwrap().is_match(id)).map(|s| s.to_string());
+    let session_id = raw
+        .session_id
+        .as_deref()
+        .filter(|id| {
+            regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$")
+                .unwrap()
+                .is_match(id)
+        })
+        .map(|s| s.to_string());
     // Signals already landed on this card (process env). Cursor /resume and TUI
     // session switches often skip sessionStart and reuse a different conversation id.
-    let clean = |value: Option<&String>| value.map(|s| s.chars().filter(|c| !c.is_control()).take(160).collect::<String>()).filter(|s| !s.trim().is_empty());
-    let new_identity = session_id.as_ref().is_some_and(|id| current.session_id.as_ref() != Some(id));
+    let clean = |value: Option<&String>| {
+        value
+            .map(|s| {
+                s.chars()
+                    .filter(|c| !c.is_control())
+                    .take(160)
+                    .collect::<String>()
+            })
+            .filter(|s| !s.trim().is_empty())
+    };
+    let new_identity = session_id
+        .as_ref()
+        .is_some_and(|id| current.session_id.as_ref() != Some(id));
     let mut next = current.clone();
     next.hook_seen = true;
     if new_identity {
@@ -211,18 +274,34 @@ pub fn observe_hook(current: ProbeState, raw: HookSignal) -> ProbeState {
             next.identity_at = Some(raw.at);
         }
     }
-    if raw.at < current.at { return next; }
+    if raw.at < current.at {
+        return next;
+    }
     // A harness that files stragglers once a turn really ended needs the two turn
     // boundaries told apart from the states it also reports.
-    if harness.suppresses_stragglers() && current.turn_completed && !new_identity
-        && meaning != Meaning::TurnStart && meaning != Meaning::TurnEnd {
+    if harness.suppresses_stragglers()
+        && current.turn_completed
+        && !new_identity
+        && meaning != Meaning::TurnStart
+        && meaning != Meaning::TurnEnd
+    {
         return next;
     }
     if harness.suppresses_stragglers() {
         next.turn_completed = meaning == Meaning::TurnEnd;
     }
     if let Some(state) = hook_state(meaning) {
-        next.reply_preview = if state == "working" { None } else { clean(raw.reply_preview.as_ref()).or_else(|| if new_identity { None } else { current.reply_preview.clone() }) };
+        next.reply_preview = if state == "working" {
+            None
+        } else {
+            clean(raw.reply_preview.as_ref()).or_else(|| {
+                if new_identity {
+                    None
+                } else {
+                    current.reply_preview.clone()
+                }
+            })
+        };
         next.state = state.into();
         next.at = raw.at;
         next.source = Some("hook".into());
@@ -249,11 +328,15 @@ pub fn observe_hook(current: ProbeState, raw: HookSignal) -> ProbeState {
 /// could not report. Returns `None` while the guess is still inside its window.
 pub fn settle_held(current: ProbeState, now: i64) -> Option<ProbeState> {
     let held = current.held_attention_at?;
-    if now - held < HELD_ATTENTION_MS { return None; }
+    if now - held < HELD_ATTENTION_MS {
+        return None;
+    }
     // Something already spoke for this card — the CLI's own title, a notification, a
     // turn end. There is no guess left to promote, and raising it again would undo
     // whatever the user just did with it.
-    if current.state != "working" { return None; }
+    if current.state != "working" {
+        return None;
+    }
     Some(ProbeState {
         held_attention_at: None,
         held_tool: None,
@@ -299,7 +382,10 @@ mod tests {
             at: 1,
             ..HookSignal::default()
         };
-        assert_eq!(hook_state(registry::resolve("codebuddy").meaning(&edit)), Some("working"));
+        assert_eq!(
+            hook_state(registry::resolve("codebuddy").meaning(&edit)),
+            Some("working")
+        );
 
         let stop = HookSignal {
             kind: Some("codebuddy".into()),
@@ -307,7 +393,10 @@ mod tests {
             at: 2,
             ..HookSignal::default()
         };
-        assert_eq!(hook_state(registry::resolve("codebuddy").meaning(&stop)), Some("attention"));
+        assert_eq!(
+            hook_state(registry::resolve("codebuddy").meaning(&stop)),
+            Some("attention")
+        );
 
         let blocked = HookSignal {
             kind: Some("codebuddy".into()),
@@ -316,7 +405,10 @@ mod tests {
             at: 3,
             ..HookSignal::default()
         };
-        assert_eq!(hook_state(registry::resolve("codebuddy").meaning(&blocked)), Some("attention"));
+        assert_eq!(
+            hook_state(registry::resolve("codebuddy").meaning(&blocked)),
+            Some("attention")
+        );
     }
 
     /// The translation table is the whole contract: one row per thing a harness can say,
@@ -340,13 +432,30 @@ mod tests {
             ("SessionInfo", Meaning::Nothing),
         ];
         for (event, expected) in cases {
-            let signal = HookSignal { kind: Some("claude".into()), event: event.into(), at: 1, ..HookSignal::default() };
-            assert_eq!(registry::resolve("claude").meaning(&signal), expected, "{event}");
+            let signal = HookSignal {
+                kind: Some("claude".into()),
+                event: event.into(),
+                at: 1,
+                ..HookSignal::default()
+            };
+            assert_eq!(
+                registry::resolve("claude").meaning(&signal),
+                expected,
+                "{event}"
+            );
         }
         // The two things that are not simply a state: a gate the CLI owns, and an ask the
         // CLI states outright.
-        let gate = HookSignal { kind: Some("cursor".into()), event: "preToolUse".into(), at: 1, ..HookSignal::default() };
-        assert_eq!(registry::resolve("cursor").meaning(&gate), Meaning::MaybeAttention);
+        let gate = HookSignal {
+            kind: Some("cursor".into()),
+            event: "preToolUse".into(),
+            at: 1,
+            ..HookSignal::default()
+        };
+        assert_eq!(
+            registry::resolve("cursor").meaning(&gate),
+            Meaning::MaybeAttention
+        );
         let asked = HookSignal {
             kind: Some("claude".into()),
             event: "Notification".into(),
@@ -354,7 +463,10 @@ mod tests {
             at: 1,
             ..HookSignal::default()
         };
-        assert_eq!(registry::resolve("claude").meaning(&asked), Meaning::Attention);
+        assert_eq!(
+            registry::resolve("claude").meaning(&asked),
+            Meaning::Attention
+        );
         // A subagent's events are nobody's card.
         let child = HookSignal {
             kind: Some("claude".into()),
@@ -363,45 +475,60 @@ mod tests {
             at: 1,
             ..HookSignal::default()
         };
-        assert_eq!(registry::resolve("claude").meaning(&child), Meaning::Nothing);
+        assert_eq!(
+            registry::resolve("claude").meaning(&child),
+            Meaning::Nothing
+        );
     }
 
     #[test]
     fn last_submit_prompt_wins() {
-        let started = observe_hook(ProbeState::default(), HookSignal {
-            event: "sessionStart".into(),
-            at: 1,
-            session_id: Some("s1".into()),
-            ..HookSignal::default()
-        });
-        let first = observe_hook(started, HookSignal {
-            event: "beforeSubmitPrompt".into(),
-            at: 2,
-            session_id: Some("s1".into()),
-            prompt: Some("first".into()),
-            ..HookSignal::default()
-        });
-        let next = observe_hook(first, HookSignal {
-            event: "beforeSubmitPrompt".into(),
-            at: 3,
-            session_id: Some("s1".into()),
-            prompt: Some("second".into()),
-            ..HookSignal::default()
-        });
+        let started = observe_hook(
+            ProbeState::default(),
+            HookSignal {
+                event: "sessionStart".into(),
+                at: 1,
+                session_id: Some("s1".into()),
+                ..HookSignal::default()
+            },
+        );
+        let first = observe_hook(
+            started,
+            HookSignal {
+                event: "beforeSubmitPrompt".into(),
+                at: 2,
+                session_id: Some("s1".into()),
+                prompt: Some("first".into()),
+                ..HookSignal::default()
+            },
+        );
+        let next = observe_hook(
+            first,
+            HookSignal {
+                event: "beforeSubmitPrompt".into(),
+                at: 3,
+                session_id: Some("s1".into()),
+                prompt: Some("second".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(next.submit_prompt.as_deref(), Some("second"));
         assert_eq!(next.session_name, None);
     }
 
     #[test]
     fn hook_title_is_session_name() {
-        let next = observe_hook(ProbeState::default(), HookSignal {
-            event: "sessionStart".into(),
-            at: 1,
-            session_id: Some("s1".into()),
-            title: Some("Ask Me".into()),
-            prompt: Some("ignored".into()),
-            ..HookSignal::default()
-        });
+        let next = observe_hook(
+            ProbeState::default(),
+            HookSignal {
+                event: "sessionStart".into(),
+                at: 1,
+                session_id: Some("s1".into()),
+                title: Some("Ask Me".into()),
+                prompt: Some("ignored".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(next.session_name.as_deref(), Some("Ask Me"));
         assert_eq!(next.submit_prompt, None);
     }
@@ -416,37 +543,49 @@ mod tests {
             first_prompt: Some("/resume".into()),
             ..ProbeState::default()
         };
-        let next = observe_hook(resumed, HookSignal {
-            kind: Some("cursor".into()),
-            event: "beforeSubmitPrompt".into(),
-            at: 2,
-            session_id: Some("c6553b99-eef0-4d2a-af62-8deaa625f841".into()),
-            prompt: Some("你好".into()),
-            ..HookSignal::default()
-        });
+        let next = observe_hook(
+            resumed,
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "beforeSubmitPrompt".into(),
+                at: 2,
+                session_id: Some("c6553b99-eef0-4d2a-af62-8deaa625f841".into()),
+                prompt: Some("你好".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(next.state, "working");
         assert!(next.hook_seen);
-        assert_eq!(next.session_id.as_deref(), Some("c6553b99-eef0-4d2a-af62-8deaa625f841"));
+        assert_eq!(
+            next.session_id.as_deref(),
+            Some("c6553b99-eef0-4d2a-af62-8deaa625f841")
+        );
         assert_eq!(next.submit_prompt.as_deref(), Some("你好"));
     }
 
     #[test]
     fn cursor_prompt_binds_without_session_start() {
-        let next = observe_hook(ProbeState {
-            kind: Some("cursor".into()),
-            state: "starting".into(),
-            ..ProbeState::default()
-        }, HookSignal {
-            kind: Some("cursor".into()),
-            event: "beforeSubmitPrompt".into(),
-            at: 1,
-            session_id: Some("c6553b99-eef0-4d2a-af62-8deaa625f841".into()),
-            prompt: Some("你好".into()),
-            ..HookSignal::default()
-        });
+        let next = observe_hook(
+            ProbeState {
+                kind: Some("cursor".into()),
+                state: "starting".into(),
+                ..ProbeState::default()
+            },
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "beforeSubmitPrompt".into(),
+                at: 1,
+                session_id: Some("c6553b99-eef0-4d2a-af62-8deaa625f841".into()),
+                prompt: Some("你好".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(next.state, "working");
         assert!(next.hook_seen);
-        assert_eq!(next.session_id.as_deref(), Some("c6553b99-eef0-4d2a-af62-8deaa625f841"));
+        assert_eq!(
+            next.session_id.as_deref(),
+            Some("c6553b99-eef0-4d2a-af62-8deaa625f841")
+        );
     }
 
     /// Antigravity has no permission event, so a tool start is held rather than
@@ -454,30 +593,36 @@ mod tests {
     /// longer than the window tells the two apart.
     #[test]
     fn antigravity_tool_start_holds_until_it_escalates() {
-        let held = observe_hook(ProbeState {
-            kind: Some("antigravity".into()),
-            state: "working".into(),
-            ..ProbeState::default()
-        }, HookSignal {
-            kind: Some("antigravity".into()),
-            event: "PreToolUse".into(),
-            at: 2,
-            tool: Some("run_command".into()),
-            ..HookSignal::default()
-        });
+        let held = observe_hook(
+            ProbeState {
+                kind: Some("antigravity".into()),
+                state: "working".into(),
+                ..ProbeState::default()
+            },
+            HookSignal {
+                kind: Some("antigravity".into()),
+                event: "PreToolUse".into(),
+                at: 2,
+                tool: Some("run_command".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(held.state, "working");
         assert_eq!(held.held_attention_at, Some(2));
         assert_eq!(held.held_tool.as_deref(), Some("run_command"));
         // Inside the window the card is untouched, however often the poll runs.
         assert!(settle_held(held.clone(), 2 + HELD_ATTENTION_MS - 1).is_none());
         // A tool that answers retracts the guess, and it can never be promoted.
-        let answered = observe_hook(held.clone(), HookSignal {
-            kind: Some("antigravity".into()),
-            event: "PostToolUse".into(),
-            at: 3,
-            tool: Some("run_command".into()),
-            ..HookSignal::default()
-        });
+        let answered = observe_hook(
+            held.clone(),
+            HookSignal {
+                kind: Some("antigravity".into()),
+                event: "PostToolUse".into(),
+                at: 3,
+                tool: Some("run_command".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(answered.state, "working");
         assert_eq!(answered.held_attention_at, None);
         assert!(settle_held(answered, 3 + HELD_ATTENTION_MS).is_none());
@@ -498,32 +643,41 @@ mod tests {
             state: "working".into(),
             ..ProbeState::default()
         };
-        let paused = observe_hook(working.clone(), HookSignal {
-            kind: Some("antigravity".into()),
-            event: "Stop".into(),
-            at: 2,
-            fully_idle: Some(false),
-            ..HookSignal::default()
-        });
+        let paused = observe_hook(
+            working.clone(),
+            HookSignal {
+                kind: Some("antigravity".into()),
+                event: "Stop".into(),
+                at: 2,
+                fully_idle: Some(false),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(paused.state, "working");
         assert!(!paused.turn_completed);
         // A Stop that really ends the turn parks the card on the user.
-        let ended = observe_hook(working, HookSignal {
-            kind: Some("antigravity".into()),
-            event: "Stop".into(),
-            at: 3,
-            fully_idle: Some(true),
-            ..HookSignal::default()
-        });
+        let ended = observe_hook(
+            working,
+            HookSignal {
+                kind: Some("antigravity".into()),
+                event: "Stop".into(),
+                at: 3,
+                fully_idle: Some(true),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(ended.state, "attention");
         assert!(ended.turn_completed);
         // A straggler from that finished turn still cannot move it.
-        let late = observe_hook(ended, HookSignal {
-            kind: Some("antigravity".into()),
-            event: "PreToolUse".into(),
-            at: 4,
-            ..HookSignal::default()
-        });
+        let late = observe_hook(
+            ended,
+            HookSignal {
+                kind: Some("antigravity".into()),
+                event: "PreToolUse".into(),
+                at: 4,
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(late.state, "attention");
     }
 
@@ -532,18 +686,33 @@ mod tests {
     /// its tool gate into that name any more.
     #[test]
     fn a_reported_permission_request_is_still_immediate() {
-        for kind in ["claude", "codebuddy", "codex", "opencode", "pi", "gemini", "grok", "antigravity"] {
-            let next = observe_hook(ProbeState {
-                kind: Some(kind.into()),
-                state: "working".into(),
-                ..ProbeState::default()
-            }, HookSignal {
-                kind: Some(kind.into()),
-                event: "PermissionRequest".into(),
-                at: 2,
-                ..HookSignal::default()
-            });
-            assert_eq!(next.state, "attention", "{kind} must raise on its own permission event");
+        for kind in [
+            "claude",
+            "codebuddy",
+            "codex",
+            "opencode",
+            "pi",
+            "gemini",
+            "grok",
+            "antigravity",
+        ] {
+            let next = observe_hook(
+                ProbeState {
+                    kind: Some(kind.into()),
+                    state: "working".into(),
+                    ..ProbeState::default()
+                },
+                HookSignal {
+                    kind: Some(kind.into()),
+                    event: "PermissionRequest".into(),
+                    at: 2,
+                    ..HookSignal::default()
+                },
+            );
+            assert_eq!(
+                next.state, "attention",
+                "{kind} must raise on its own permission event"
+            );
             assert_eq!(next.held_attention_at, None, "{kind} has nothing to guess");
         }
     }
@@ -552,40 +721,49 @@ mod tests {
     /// a guess too — including the shell and MCP entries that used to be read as asks.
     #[test]
     fn cursor_tool_gate_holds_before_it_is_an_ask() {
-        let start = observe_hook(ProbeState {
-            kind: Some("cursor".into()),
-            state: "working".into(),
-            ..ProbeState::default()
-        }, HookSignal {
-            kind: Some("cursor".into()),
-            event: "preToolUse".into(),
-            at: 2,
-            tool: Some("Shell".into()),
-            ..HookSignal::default()
-        });
+        let start = observe_hook(
+            ProbeState {
+                kind: Some("cursor".into()),
+                state: "working".into(),
+                ..ProbeState::default()
+            },
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "preToolUse".into(),
+                at: 2,
+                tool: Some("Shell".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(start.state, "working");
         assert_eq!(start.held_attention_at, Some(2));
 
-        let gate = observe_hook(ProbeState {
-            kind: Some("cursor".into()),
-            state: "working".into(),
-            ..ProbeState::default()
-        }, HookSignal {
-            kind: Some("cursor".into()),
-            event: "beforeShellExecution".into(),
-            at: 2,
-            ..HookSignal::default()
-        });
+        let gate = observe_hook(
+            ProbeState {
+                kind: Some("cursor".into()),
+                state: "working".into(),
+                ..ProbeState::default()
+            },
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "beforeShellExecution".into(),
+                at: 2,
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(gate.state, "working");
         assert_eq!(gate.held_attention_at, Some(2));
 
-        let after = observe_hook(start.clone(), HookSignal {
-            kind: Some("cursor".into()),
-            event: "postToolUse".into(),
-            at: 3,
-            tool: Some("Shell".into()),
-            ..HookSignal::default()
-        });
+        let after = observe_hook(
+            start.clone(),
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "postToolUse".into(),
+                at: 3,
+                tool: Some("Shell".into()),
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(after.state, "working");
         assert_eq!(after.held_attention_at, None);
 
@@ -597,16 +775,19 @@ mod tests {
     /// has nothing left to promote, and re-raising it would fight the user.
     #[test]
     fn a_clear_report_settles_the_hold() {
-        let held = observe_hook(ProbeState {
-            kind: Some("cursor".into()),
-            state: "working".into(),
-            ..ProbeState::default()
-        }, HookSignal {
-            kind: Some("cursor".into()),
-            event: "preToolUse".into(),
-            at: 2,
-            ..HookSignal::default()
-        });
+        let held = observe_hook(
+            ProbeState {
+                kind: Some("cursor".into()),
+                state: "working".into(),
+                ..ProbeState::default()
+            },
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "preToolUse".into(),
+                at: 2,
+                ..HookSignal::default()
+            },
+        );
         let reported = observe_title(held, "attention", 3);
         assert_eq!(reported.state, "attention");
         assert!(settle_held(reported, 2 + HELD_ATTENTION_MS).is_none());
@@ -616,22 +797,28 @@ mod tests {
     /// definite, so the guess must not come back to life a window later.
     #[test]
     fn a_definite_event_clears_the_hold() {
-        let held = observe_hook(ProbeState {
-            kind: Some("cursor".into()),
-            state: "working".into(),
-            ..ProbeState::default()
-        }, HookSignal {
-            kind: Some("cursor".into()),
-            event: "preToolUse".into(),
-            at: 2,
-            ..HookSignal::default()
-        });
-        let stopped = observe_hook(held, HookSignal {
-            kind: Some("cursor".into()),
-            event: "stop".into(),
-            at: 3,
-            ..HookSignal::default()
-        });
+        let held = observe_hook(
+            ProbeState {
+                kind: Some("cursor".into()),
+                state: "working".into(),
+                ..ProbeState::default()
+            },
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "preToolUse".into(),
+                at: 2,
+                ..HookSignal::default()
+            },
+        );
+        let stopped = observe_hook(
+            held,
+            HookSignal {
+                kind: Some("cursor".into()),
+                event: "stop".into(),
+                at: 3,
+                ..HookSignal::default()
+            },
+        );
         assert_eq!(stopped.state, "attention");
         assert_eq!(stopped.held_attention_at, None);
         assert!(settle_held(stopped.clone(), 3 + HELD_ATTENTION_MS).is_none());

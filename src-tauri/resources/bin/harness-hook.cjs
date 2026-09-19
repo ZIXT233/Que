@@ -1,15 +1,17 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Standalone passive CLI hook. */
 // Shared ingress for built-in CLI adapters. Public contract: docs/harness/hook-api.md
 
-// TEMPORARY lifecycle debug logging: append-only, never blocks the hook. Remove
-// once the codex Windows hook failures are fully diagnosed.
-const DEBUG_LOG = require('path').join(__dirname, 'hook-debug.jsonl');
+// Opt-in lifecycle diagnostics: synchronous disk writes cost time on every hook.
+const DEBUG_STARTED = process.hrtime.bigint();
+const DEBUG_LOG = process.env.QUE_HOOK_DEBUG_FILE || require('path').join(__dirname, 'hook-debug.jsonl');
 function dbg(stage, extra = {}) {
+  if (process.env.QUE_HOOK_DEBUG !== '1') return;
   try {
     require('fs').appendFileSync(
       DEBUG_LOG,
       JSON.stringify({
         ts: new Date().toISOString(),
+        elapsedMs: Number(process.hrtime.bigint() - DEBUG_STARTED) / 1e6,
         pid: process.pid,
         ppid: process.ppid,
         stage,
@@ -19,7 +21,7 @@ function dbg(stage, extra = {}) {
     );
   } catch {}
 }
-dbg('process-start', { argv: process.argv.slice(2) });
+dbg('process-start');
 process.on('uncaughtException', err => {
   dbg('uncaught-exception', { message: err.message, stack: err.stack });
   process.exit(91);
@@ -35,6 +37,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const explicitEvent = process.argv[2];
+const commandMode = require.main === module;
 const cursorEvents = new Set(['sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse', 'stop', 'sessionEnd']);
 function cursorReply(event) {
   if (event === 'beforeSubmitPrompt') return { continue: true };
@@ -48,6 +51,11 @@ if (hpIdx >= 0 && parts[hpIdx + 1]) {
   inferredKind = parts[hpIdx + 1];
 }
 const kind = process.env.QUE_HARNESS_KIND || inferredKind || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
+// Compatibility readers can invoke another CLI's registration. Grok's own
+// registration is authoritative; imported copies must not create duplicate or
+// mislabelled notices, even when QUE_HARNESS_KIND happens to say "grok".
+if (commandMode && process.env.GROK_HOOK_EVENT && inferredKind && inferredKind !== 'grok') process.exit(0);
+if (commandMode && process.env.CURSOR_VERSION && inferredKind === 'claude') process.exit(0);
 let effectiveKind = kind;
 const token = process.env.QUE_HARNESS_CHANNEL;
 const envDirectory = process.env.QUE_HARNESS_SIGNAL_DIR;
@@ -56,29 +64,29 @@ const activePath = path.join(__dirname, 'active.json');
 // SIGNAL_DIR nor CHANNEL. Those sessions are not queue cards, so their events go to the
 // external notification sink instead of being dropped — the queue surfaces them as a
 // transient, never-persisted notice.
-const externalPath = !envDirectory && !token ? externalDirectory() : undefined;
 // Cursor observe hooks ignore stdout, but answering before stdin is fully read
 // lets the worker tear the process down before replyPreview is written. Reply
 // after the signal (beforeSubmitPrompt still returns continue:true).
-if (kind === 'gemini' || kind === 'grok') process.stdout.write('{}\n');
+if (commandMode && (kind === 'gemini' || kind === 'grok')) process.stdout.write('{}\n');
 const knownHarnesses = new Set(['cursor', 'codex', 'antigravity', 'gemini', 'grok', 'claude', 'opencode', 'codebuddy', 'pi', 'omp']);
-if (!envDirectory && !token && !legacyActiveDirectory() && (!kind || !knownHarnesses.has(kind))) {
+if (commandMode && !envDirectory && !token && !legacyActiveDirectory() && (!kind || !knownHarnesses.has(kind))) {
   process.exit(0);
 }
-const at = Date.now();
 let input = '', oversized = false, done = false, finished = false;
 // CLI hook runners kill us on their own deadline (codex 5s, cursor 15s). Fire
 // before theirs so a hung stdin still delivers the signal instead of dying
 // with a "hook timed out" and losing the event.
 const watchdog = Math.max(500, Number(process.env.QUE_HARNESS_WATCHDOG_MS) || 8000);
-const timer = setTimeout(() => { consume(); finish(); }, watchdog);
+const timer = commandMode ? setTimeout(() => { dbg('watchdog-fired'); consume(); finish(); }, watchdog) : undefined;
 function finish() {
   if (finished) return;
   finished = true;
+  dbg('finish', { consumed: done });
   clearTimeout(timer);
   if (effectiveKind === 'cursor') process.stdout.write(JSON.stringify(cursorReply(explicitEvent)) + '\n');
   process.exit(0);
 }
+if (commandMode) {
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
   dbg('stdin-data', { bytes: Buffer.byteLength(chunk) });
@@ -89,6 +97,7 @@ process.stdin.on('data', chunk => {
 process.stdin.on('error', () => { dbg('stdin-error'); finish(); });
 process.stdin.on('end', () => { dbg('stdin-end'); consume(); finish(); });
 process.on('exit', code => { dbg('process-exit', { code }); });
+}
 
 function readActive() {
   try { return JSON.parse(fs.readFileSync(activePath, 'utf8')); }
@@ -141,6 +150,16 @@ function consume() {
   try { payload = JSON.parse(input.replace(/^\uFEFF/, '')); }
   catch { return; }
   done = true;
+  dbg('payload-ready', { event: explicitEvent || payload.hook_event_name || payload.hookEventName });
+  try { deliver(payload); } finally { finish(); }
+}
+
+// Persistent transports share the same event normalization and sinks, without
+// stdin ownership, watchdogs, process exit, or a child process per notification.
+module.exports = { deliver };
+function deliver(payload) {
+  const at = Date.now();
+  const externalPath = !envDirectory && !token ? externalDirectory() : undefined;
   try {
     let eventName = explicitEvent || payload.hook_event_name || ({session_start:"SessionStart",user_prompt_submit:"UserPromptSubmit",pre_tool_use:"PreToolUse",post_tool_use:"PostToolUse",post_tool_use_failure:"PostToolUseFailure",stop_cancelled:"StopCancelled",stop:"Stop",stop_failure:"StopFailure",notification:"Notification"})[payload.hookEventName];
     // The ingress maps names, it never renames an event into a different meaning: a
@@ -238,8 +257,6 @@ function consume() {
       }
       if (external) pruneExternal(directory);
     }
+    dbg('signal-delivered', { event: eventName, ...delivered });
   } catch { /* Observation cannot block the CLI or emit model-visible text. */ }
-  finally {
-    finish();
-  }
 }

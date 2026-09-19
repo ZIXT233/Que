@@ -14,7 +14,10 @@ const MARKER: &str = "\x1b]777;que;";
 
 impl HookOscProbe {
     pub fn new(token: String) -> Self {
-        Self { token, pending: String::new() }
+        Self {
+            token,
+            pending: String::new(),
+        }
     }
 
     pub fn push(&mut self, data: &str) -> Option<HookSignal> {
@@ -26,7 +29,9 @@ impl HookOscProbe {
             };
             self.pending = self.pending[start..].to_string();
             let Some(end) = self.pending.find('\u{7}') else {
-                if self.pending.len() > 16384 { self.pending.clear(); }
+                if self.pending.len() > 16384 {
+                    self.pending.clear();
+                }
                 return None;
             };
             if end < MARKER.len() {
@@ -39,8 +44,13 @@ impl HookOscProbe {
                 if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
                     if value.get("token").and_then(|v| v.as_str()) == Some(self.token.as_str()) {
                         if let Some(signal) = value.get("signal") {
-                            if let Ok(mut parsed) = serde_json::from_value::<HookSignal>(signal.clone()) {
-                                parsed.at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+                            if let Ok(mut parsed) =
+                                serde_json::from_value::<HookSignal>(signal.clone())
+                            {
+                                parsed.at = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
                                 return Some(parsed);
                             }
                         }
@@ -83,7 +93,12 @@ mod tests {
     #[test]
     fn parses_a_que_signal() {
         let mut probe = HookOscProbe::new("token".into());
-        let signal = probe.push(&format!("noise\x1b]777;que;{}\x07trailing", encode("token", "Stop"))).expect("marker length must match the encoded slice");
+        let signal = probe
+            .push(&format!(
+                "noise\x1b]777;que;{}\x07trailing",
+                encode("token", "Stop")
+            ))
+            .expect("marker length must match the encoded slice");
         assert_eq!(signal.event, "Stop");
     }
 
@@ -92,7 +107,13 @@ mod tests {
         let frame = format!("\x1b]777;que;{}\x07", encode("token", "PreToolUse"));
         let mut probe = HookOscProbe::new("token".into());
         let mut signal = None;
-        for (index, chunk) in frame.chars().collect::<Vec<_>>().chunks(7).map(|c| c.iter().collect::<String>()).enumerate() {
+        for (index, chunk) in frame
+            .chars()
+            .collect::<Vec<_>>()
+            .chunks(7)
+            .map(|c| c.iter().collect::<String>())
+            .enumerate()
+        {
             signal = probe.push(&chunk).or(signal);
             let _ = index;
         }
@@ -102,14 +123,19 @@ mod tests {
     #[test]
     fn rejects_a_foreign_token() {
         let mut probe = HookOscProbe::new("token".into());
-        assert!(probe.push(&format!("\x1b]777;que;{}\x07", encode("other", "Stop"))).is_none());
+        assert!(probe
+            .push(&format!("\x1b]777;que;{}\x07", encode("other", "Stop")))
+            .is_none());
     }
 
     #[test]
     fn coalesced_hooks_are_drained_without_waiting_for_another_read() {
         let mut probe = HookOscProbe::new("token".into());
-        let output = format!("\x1b]777;que;{}\x07\x1b]777;que;{}\x07",
-            encode("token", "UserPromptSubmit"), encode("token", "Stop"));
+        let output = format!(
+            "\x1b]777;que;{}\x07\x1b]777;que;{}\x07",
+            encode("token", "UserPromptSubmit"),
+            encode("token", "Stop")
+        );
         assert_eq!(probe.push(&output).unwrap().event, "UserPromptSubmit");
         assert_eq!(probe.push("").unwrap().event, "Stop");
         assert!(probe.push("").is_none());

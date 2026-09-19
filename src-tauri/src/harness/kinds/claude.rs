@@ -16,14 +16,25 @@ use super::session_label::SessionFacts;
 /// prompts and ask-style tools never surface as a tool call, so without it a card waits
 /// forever with no signal to react to.
 pub(super) const EVENTS: &[&str] = &[
-    "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Notification",
-    "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure",
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PermissionRequest",
+    "Notification",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "Stop",
+    "StopFailure",
 ];
 
 /// CodeBuddy keeps the Claude plugin layout but resolves its own manifest directory
 /// first; `hooks/hooks.json` is read the same way.
 fn manifest_dir(kind: &str) -> &'static str {
-    if kind == "codebuddy" { ".codebuddy-plugin" } else { ".claude-plugin" }
+    if kind == "codebuddy" {
+        ".codebuddy-plugin"
+    } else {
+        ".claude-plugin"
+    }
 }
 
 /// The install plan both family members share, apart from the manifest directory.
@@ -33,17 +44,128 @@ pub(super) async fn family_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -
         format!("{}/plugin.json", manifest_dir(ctx.kind)),
         serde_json::json!({ "name": "que-session-state", "version": "1.0.0", "description": "Report this Que terminal's lifecycle" }).to_string(),
     );
+    #[cfg(windows)]
+    let native = if !ctx.host.remote {
+        Some(crate::harness::windows::install_native_hook(
+            &ctx.host.root,
+            "que-hook",
+        )?)
+    } else {
+        None
+    };
     let command = ctx.host.command(None);
     let mut hooks = serde_json::Map::new();
     for &event in events {
-        hooks.insert(event.to_string(), serde_json::json!([{ "hooks": [{ "type": "command", "command": command, "timeout": ctx.host.timeout }] }]));
+        // Claude's exec form passes paths as argv, with no Bash/PowerShell wrapper.
+        // CodeBuddy has its own schema: keep its existing command form.
+        let hook = if ctx.kind == "claude" {
+            {
+                #[cfg(windows)]
+                if let Some(path) = &native {
+                    hooks.insert(event.to_string(), serde_json::json!([{ "hooks": [{ "type":"command", "command":path, "args":["claude"], "timeout":ctx.host.timeout }] }]));
+                    continue;
+                }
+                serde_json::json!({ "type": "command", "command": ctx.host.node, "args": [ctx.host.hook_path], "timeout": ctx.host.timeout })
+            }
+        } else {
+            serde_json::json!({ "type": "command", "command": command, "timeout": ctx.host.timeout })
+        };
+        hooks.insert(event.to_string(), serde_json::json!([{ "hooks": [hook] }]));
     }
-    plan.files.insert("hooks/hooks.json".into(), serde_json::json!({ "hooks": hooks }).to_string());
-    plan.args.extend(["--plugin-dir".into(), ctx.host.root.to_string_lossy().into_owned()]);
+    plan.files.insert(
+        "hooks/hooks.json".into(),
+        serde_json::json!({ "hooks": hooks }).to_string(),
+    );
+    plan.args.extend([
+        "--plugin-dir".into(),
+        ctx.host.root.to_string_lossy().into_owned(),
+    ]);
     Ok(plan)
 }
 
 // —— the harness ——
+
+// Match parsed command/argv strings, not serialized JSON (which doubles Windows
+// backslashes). Remove only our hook, preserving other hooks in a shared group.
+fn remove_owned_hooks(entries: &mut Vec<serde_json::Value>) -> bool {
+    let mut changed = false;
+    entries.retain_mut(|group| {
+        let Some(hooks) = group.get_mut("hooks").and_then(|v| v.as_array_mut()) else {
+            return true;
+        };
+        let before = hooks.len();
+        hooks.retain(|hook| {
+            let owned = |text: &str| {
+                let text = text.replace('\\', "/");
+                [
+                    "harness-plugins/claude/hook.cjs",
+                    "harness-plugins/claude/external-hook.exe",
+                    "harness-plugins/claude/external-hook.sh",
+                ]
+                .iter()
+                .any(|marker| text.contains(marker))
+            };
+            !hook
+                .get("command")
+                .and_then(|v| v.as_str())
+                .is_some_and(owned)
+                && !hook
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|args| args.iter().filter_map(|v| v.as_str()).any(owned))
+        });
+        changed |= hooks.len() != before;
+        !hooks.is_empty() || before == 0
+    });
+    changed
+}
+
+/// An executable without required arguments also works with compatibility readers
+/// that ignore Claude's exec-form `args`. The ambient copy skips Que-owned cards.
+fn install_external_launcher(ctx: &GlobalCtx) -> AppResult<String> {
+    ctx.install_ingress("claude")?;
+    let dir = ctx.plugins.join("claude");
+    #[cfg(windows)]
+    {
+        let body = include_bytes!(concat!(env!("OUT_DIR"), "/que-hook.exe"));
+        let file = dir.join("external-hook.exe");
+        atomic_write(
+            &dir.join("que-hook.sink"),
+            &crate::paths::external_signal_dir().to_string_lossy(),
+        )?;
+        // Avoid rewriting a running executable (Windows denies that operation).
+        if std::fs::read(&file).ok().as_deref() != Some(body.as_slice()) {
+            let temporary = dir.join(format!("external-hook-{}.tmp", uuid::Uuid::new_v4()));
+            std::fs::write(&temporary, body)?;
+            if let Err(error) = std::fs::rename(&temporary, &file) {
+                let _ = std::fs::remove_file(temporary);
+                return Err(error.into());
+            }
+        }
+        // Preserve the ownership suffix, but make the profile prefix a bare
+        // executable token for Grok's shell-based compatibility reader.
+        let profile = ctx.plugins.parent().unwrap_or(&ctx.plugins);
+        let prefix = crate::harness::windows::short_executable_path(&profile.to_string_lossy());
+        Ok(prefix
+            .and_then(|prefix| {
+                file.strip_prefix(profile)
+                    .ok()
+                    .map(|suffix| PathBuf::from(prefix).join(suffix))
+            })
+            .unwrap_or(file)
+            .to_string_lossy()
+            .into_owned())
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file = dir.join("external-hook.sh");
+        let script = format!("#!/bin/sh\n[ -n \"${{GROK_HOOK_EVENT:-}}${{CURSOR_VERSION:-}}${{QUE_HARNESS_SIGNAL_DIR:-}}${{QUE_HARNESS_CHANNEL:-}}\" ] && exit 0\nexec {} {}\n", crate::ssh::shell_quote(&ctx.node), crate::ssh::shell_quote(&ctx.hook_path("claude")));
+        atomic_write(&file, &script)?;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700))?;
+        Ok(file.to_string_lossy().into_owned())
+    }
+}
 
 pub struct Claude;
 
@@ -61,50 +183,79 @@ impl Harness for Claude {
         EVENTS
     }
 
-    fn plan<'a>(&'a self, ctx: Ctx<'a>) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
+    fn plan<'a>(
+        &'a self,
+        ctx: Ctx<'a>,
+    ) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
         Box::pin(family_plan(ctx, self.events()))
     }
 
     /// What a Claude session Que never launched needs: its own ingress, and Que's
     /// entries merged into `~/.claude/settings.json`.
     fn global(&self, ctx: &GlobalCtx) {
-        let _ = ctx.install_ingress("claude");
+        let launcher = match install_external_launcher(ctx) {
+            Ok(path) => path,
+            Err(error) => {
+                crate::debuglog::log_error("install Claude external launcher", &error);
+                return;
+            }
+        };
         let dir = ctx.home.join(".claude");
         // The VS Code extension keeps this file too, so a machine that never ran the CLI
         // still gets managed when its settings directory exists.
-        let has_extension = [".vscode/extensions", ".vscode-insiders/extensions", ".cursor/extensions"]
-            .iter()
-            .any(|ext| {
-                ctx.home.join(ext)
-                    .read_dir()
-                    .ok()
-                    .map(|entries| entries.filter_map(|entry| entry.ok()).any(|entry| entry.file_name().to_string_lossy().starts_with("anthropic.claude-code")))
-                    .unwrap_or(false)
-            });
+        let has_extension = [
+            ".vscode/extensions",
+            ".vscode-insiders/extensions",
+            ".cursor/extensions",
+        ]
+        .iter()
+        .any(|ext| {
+            ctx.home
+                .join(ext)
+                .read_dir()
+                .ok()
+                .map(|entries| {
+                    entries.filter_map(|entry| entry.ok()).any(|entry| {
+                        entry
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with("anthropic.claude-code")
+                    })
+                })
+                .unwrap_or(false)
+        });
         if !dir.exists() && !has_extension {
             return;
         }
         let _ = std::fs::create_dir_all(&dir);
         let settings = dir.join("settings.json");
-        let cmd = format!("{} \"{}\"", ctx.node, ctx.hook_path("claude"));
         let mut value: serde_json::Value = std::fs::read_to_string(&settings)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_else(|| serde_json::json!({}));
         if let Some(obj) = value.as_object_mut() {
-            let mut hooks = obj.get("hooks").and_then(|h| h.as_object()).cloned().unwrap_or_default();
+            let mut hooks = obj
+                .get("hooks")
+                .and_then(|h| h.as_object())
+                .cloned()
+                .unwrap_or_default();
             for &event in self.events() {
                 // Keep whatever the user wrote there; replace only Que's own entries.
-                let mut entries: Vec<serde_json::Value> = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
-                entries.retain(|group| {
-                    let text = group.to_string();
-                    !text.contains("harness-plugins/claude/hook.cjs") && !text.contains("harness-plugins\\claude\\hook.cjs")
-                });
-                entries.push(serde_json::json!({ "hooks": [{ "type": "command", "command": cmd, "timeout": 2 }] }));
+                let mut entries: Vec<serde_json::Value> = hooks
+                    .get(event)
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                remove_owned_hooks(&mut entries);
+                entries.push(serde_json::json!({ "hooks": [{ "type": "command", "command": launcher, "args": [], "timeout": super::registry::default_hook_timeout(cfg!(windows)) }] }));
                 hooks.insert(event.into(), serde_json::Value::Array(entries));
             }
             obj.insert("hooks".into(), serde_json::Value::Object(hooks));
-            let _ = atomic_write(&settings, &serde_json::to_string_pretty(&serde_json::Value::Object(obj.clone())).unwrap_or_default());
+            let _ = atomic_write(
+                &settings,
+                &serde_json::to_string_pretty(&serde_json::Value::Object(obj.clone()))
+                    .unwrap_or_default(),
+            );
         }
     }
 
@@ -112,20 +263,18 @@ impl Harness for Claude {
     /// event list (empty lists go with them), user-written hooks stay.
     fn unglobal(&self, ctx: &GlobalCtx) {
         let settings = ctx.home.join(".claude").join("settings.json");
-        let Ok(existing) = std::fs::read_to_string(&settings) else { return };
-        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&existing) else { return };
+        let Ok(existing) = std::fs::read_to_string(&settings) else {
+            return;
+        };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&existing) else {
+            return;
+        };
         let mut changed = false;
         if let Some(obj) = value.as_object_mut() {
             if let Some(hooks) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) {
                 for &event in self.events() {
                     if let Some(entries) = hooks.get_mut(event).and_then(|v| v.as_array_mut()) {
-                        let before = entries.len();
-                        entries.retain(|group| {
-                            let text = group.to_string();
-                            !text.contains("harness-plugins/claude/hook.cjs")
-                                && !text.contains("harness-plugins\\claude\\hook.cjs")
-                        });
-                        changed |= entries.len() != before;
+                        changed |= remove_owned_hooks(entries);
                         if entries.is_empty() {
                             hooks.remove(event);
                         }
@@ -134,7 +283,10 @@ impl Harness for Claude {
             }
         }
         if changed {
-            let _ = atomic_write(&settings, &serde_json::to_string_pretty(&value).unwrap_or_default());
+            let _ = atomic_write(
+                &settings,
+                &serde_json::to_string_pretty(&value).unwrap_or_default(),
+            );
         }
     }
 
@@ -167,7 +319,9 @@ fn claude_home() -> PathBuf {
     if let Ok(path) = std::env::var("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(path);
     }
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".claude")
+    crate::paths::user_home()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".claude")
 }
 
 fn name_from_sidecar(body: &str) -> Option<String> {
@@ -206,8 +360,12 @@ pub(super) fn session_label(session_id: &str) -> SessionLabel {
 
 fn first_user_prompt(body: &str) -> Option<String> {
     for line in body.lines() {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
-        if entry.get("type").and_then(|v| v.as_str()) != Some("user") || entry.get("isMeta") == Some(&serde_json::Value::Bool(true)) {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if entry.get("type").and_then(|v| v.as_str()) != Some("user")
+            || entry.get("isMeta") == Some(&serde_json::Value::Bool(true))
+        {
             continue;
         }
         if let Some(text) = entry.get("message").and_then(json_text) {
@@ -240,12 +398,16 @@ pub(super) fn claude_session_details(session_id: &str) -> Option<ClaudeSessionDe
     let mut last_assistant = None;
 
     for line in body.lines() {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         let msg_type = entry.get("type").and_then(|v| v.as_str());
         if entry.get("isMeta") == Some(&serde_json::Value::Bool(true)) {
             continue;
         }
-        let Some(raw_msg) = entry.get("message") else { continue };
+        let Some(raw_msg) = entry.get("message") else {
+            continue;
+        };
         let text = match raw_msg {
             serde_json::Value::String(s) => s.trim().to_string(),
             serde_json::Value::Object(o) => {
@@ -298,7 +460,10 @@ mod tests {
 
     #[test]
     fn reads_custom_title() {
-        assert_eq!(name_from_sidecar(r#"{"customTitle":"abc"}"#).as_deref(), Some("abc"));
+        assert_eq!(
+            name_from_sidecar(r#"{"customTitle":"abc"}"#).as_deref(),
+            Some("abc")
+        );
     }
 
     #[test]

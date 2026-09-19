@@ -15,7 +15,11 @@ pub fn app_dark() -> bool {
 /// Pushed through the spawn environment, not a query reply — xterm cannot supply
 /// it, which is why this stayed in the backend after the query responders moved.
 pub fn colorfgbg(dark: bool) -> &'static str {
-    if dark { "15;0" } else { "0;15" }
+    if dark {
+        "15;0"
+    } else {
+        "0;15"
+    }
 }
 
 pub fn is_dark_colorfgbg(value: &str) -> bool {
@@ -41,21 +45,40 @@ impl ThemeNotifyParser {
         for &byte in bytes {
             match self.state {
                 3 | 4 => {
-                    self.state = if (byte == 7 && self.string_is_osc) || byte == 24 || byte == 26 || (self.state == 4 && byte == b'\\') { 0 }
-                        else if byte == 27 { 4 } else { 3 };
+                    self.state = if (byte == 7 && self.string_is_osc)
+                        || byte == 24
+                        || byte == 26
+                        || (self.state == 4 && byte == b'\\')
+                    {
+                        0
+                    } else if byte == 27 {
+                        4
+                    } else {
+                        3
+                    };
                 }
                 1 => {
                     self.state = match byte {
-                        b'[' => { self.csi.clear(); 2 },
-                        b']' | b'P' | b'X' | b'^' | b'_' => { self.string_is_osc = byte == b']'; 3 },
+                        b'[' => {
+                            self.csi.clear();
+                            2
+                        }
+                        b']' | b'P' | b'X' | b'^' | b'_' => {
+                            self.string_is_osc = byte == b']';
+                            3
+                        }
                         27 => 1,
                         _ => 0,
                     };
                 }
                 2 => {
                     if (0x40..=0x7e).contains(&byte) {
-                        if (byte == b'h' || byte == b'l') && self.csi.first() == Some(&b'?')
-                            && self.csi[1..].split(|b| *b == b';').any(|mode| mode == b"2031") {
+                        if (byte == b'h' || byte == b'l')
+                            && self.csi.first() == Some(&b'?')
+                            && self.csi[1..]
+                                .split(|b| *b == b';')
+                                .any(|mode| mode == b"2031")
+                        {
                             change = Some(byte == b'h');
                         }
                         self.state = 0;
@@ -67,7 +90,11 @@ impl ThemeNotifyParser {
                         self.csi.push(byte);
                     }
                 }
-                _ => { if byte == 27 { self.state = 1; } }
+                _ => {
+                    if byte == 27 {
+                        self.state = 1;
+                    }
+                }
             }
         }
         change
@@ -76,7 +103,11 @@ impl ThemeNotifyParser {
 
 /// Mode 2031: 1 = became dark, 2 = became light. Prompts a new OSC 10/11 probe.
 pub fn theme_change_report(dark: bool) -> &'static str {
-    if dark { "\x1b[?997;1n" } else { "\x1b[?997;2n" }
+    if dark {
+        "\x1b[?997;1n"
+    } else {
+        "\x1b[?997;2n"
+    }
 }
 
 #[cfg(test)]

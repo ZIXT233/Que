@@ -26,8 +26,12 @@ use crate::models::RemoteHost;
 use parking_lot::Mutex;
 use russh::client::{self, Handle, KeyboardInteractiveAuthResponse};
 use russh::keys::agent::client::{AgentClient, AgentStream};
-use russh::keys::known_hosts::{check_known_hosts, check_known_hosts_path, learn_known_hosts, learn_known_hosts_path};
-use russh::keys::{load_secret_key, HashAlg, PrivateKeyWithHashAlg, PublicKey, PublicKeyOrCertificate};
+use russh::keys::known_hosts::{
+    check_known_hosts, check_known_hosts_path, learn_known_hosts, learn_known_hosts_path,
+};
+use russh::keys::{
+    load_secret_key, HashAlg, PrivateKeyWithHashAlg, PublicKey, PublicKeyOrCertificate,
+};
 use russh::{ChannelMsg, Disconnect, Sig};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -67,7 +71,11 @@ impl Target {
     pub fn from_host(host: &RemoteHost) -> Target {
         let mut hostname = host.hostname.trim().to_string();
         let mut user = host.user.clone().filter(|value| !value.trim().is_empty());
-        let alias_user = host.id.split_once('@').map(|(left, _)| left.to_string()).filter(|value| !value.is_empty());
+        let alias_user = host
+            .id
+            .split_once('@')
+            .map(|(left, _)| left.to_string())
+            .filter(|value| !value.is_empty());
         if let Some((left, right)) = hostname.clone().split_once('@') {
             if user.is_none() && !left.is_empty() {
                 user = Some(left.to_string());
@@ -110,12 +118,16 @@ pub fn resolve(id: &str) -> AppResult<Target> {
 
 fn resolve_inner(id: &str) -> AppResult<Target> {
     if !host_ok(id) {
-        crate::debuglog::log(&format!("remote: resolve rejected id={id:?} (HOST_INVALID)"));
+        crate::debuglog::log(&format!(
+            "remote: resolve rejected id={id:?} (HOST_INVALID)"
+        ));
         return Err(AppError::machine("HOST_INVALID"));
     }
     let saved = crate::hosts::resolve(id)?;
     if id.starts_with("web-") && saved.is_none() {
-        crate::debuglog::log(&format!("remote: resolve failed id={id:?} (HOST_DELETED, no saved host)"));
+        crate::debuglog::log(&format!(
+            "remote: resolve failed id={id:?} (HOST_DELETED, no saved host)"
+        ));
         return Err(AppError::machine("HOST_DELETED"));
     }
     let host = saved.unwrap_or(RemoteHost {
@@ -133,7 +145,9 @@ fn resolve_inner(id: &str) -> AppResult<Target> {
 }
 
 fn host_ok(value: &str) -> bool {
-    regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]*$").unwrap().is_match(value)
+    regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]*$")
+        .unwrap()
+        .is_match(value)
 }
 
 fn local_user() -> String {
@@ -162,7 +176,11 @@ struct Trust {
 /// The text the user is asked to confirm, and the exact token that comes back
 /// when they accept it. One function produces both, so the two cannot drift.
 fn trust_prompt(host: &str, port: u16, key: &PublicKey) -> String {
-    let label = if port == 22 { host.to_string() } else { format!("[{host}]:{port}") };
+    let label = if port == 22 {
+        host.to_string()
+    } else {
+        format!("[{host}]:{port}")
+    };
     format!(
         "The authenticity of host '{label}' can't be established.\n{} key fingerprint is {}.",
         key.algorithm(),
@@ -203,7 +221,10 @@ struct Client {
 impl client::Handler for Client {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, server_public_key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &PublicKeyOrCertificate,
+    ) -> Result<bool, Self::Error> {
         let key = match server_public_key {
             PublicKeyOrCertificate::PublicKey { key, .. } => key,
             // A CA-signed host certificate cannot be pinned in known_hosts the
@@ -215,7 +236,11 @@ impl client::Handler for Client {
                     self.host,
                     certificate.algorithm()
                 );
-                crate::debuglog::log(&format!("remote: host key check on {} -> REFUSED certificate ({})", self.host, certificate.algorithm()));
+                crate::debuglog::log(&format!(
+                    "remote: host key check on {} -> REFUSED certificate ({})",
+                    self.host,
+                    certificate.algorithm()
+                ));
                 self.trust.lock().fatal = Some(reason);
                 return Ok(false);
             }
@@ -223,7 +248,10 @@ impl client::Handler for Client {
         let fingerprint = key.fingerprint(HashAlg::Sha256).to_string();
         match verify_host(&self.host, self.port, key) {
             Ok(true) => {
-                crate::debuglog::log(&format!("remote: host key check on {} -> PINNED ({fingerprint})", self.host));
+                crate::debuglog::log(&format!(
+                    "remote: host key check on {} -> PINNED ({fingerprint})",
+                    self.host
+                ));
                 Ok(true)
             }
             Ok(false) => {
@@ -235,8 +263,12 @@ impl client::Handler for Client {
                 ));
                 if self.accept.as_deref() == Some(prompt.as_str()) {
                     if let Err(error) = record_host(&self.host, self.port, key) {
-                        crate::debuglog::log(&format!("remote: learning host key for {} FAILED: {error}", self.host));
-                        self.trust.lock().fatal = Some(format!("Could not record the host key: {error}"));
+                        crate::debuglog::log(&format!(
+                            "remote: learning host key for {} FAILED: {error}",
+                            self.host
+                        ));
+                        self.trust.lock().fatal =
+                            Some(format!("Could not record the host key: {error}"));
                         return Ok(false);
                     }
                     crate::debuglog::log(&format!("remote: learned host key for {}", self.host));
@@ -249,7 +281,10 @@ impl client::Handler for Client {
             // worth stopping on, so surface it as its own code instead of the
             // generic "unknown host" flow.
             Err(error) => {
-                crate::debuglog::log(&format!("remote: host key check on {} -> MISMATCH/ERROR: {error}", self.host));
+                crate::debuglog::log(&format!(
+                    "remote: host key check on {} -> MISMATCH/ERROR: {error}",
+                    self.host
+                ));
                 Err(error.into())
             }
         }
@@ -291,20 +326,34 @@ fn pool() -> &'static AsyncMutex<HashMap<String, Pooled>> {
 }
 
 /// The pooled session for a Que host id, connecting if it is not up yet.
-pub async fn session_with(host: &str, password: Option<String>, accept: Option<String>) -> AppResult<Arc<Session>> {
+pub async fn session_with(
+    host: &str,
+    password: Option<String>,
+    accept: Option<String>,
+) -> AppResult<Arc<Session>> {
     let target = resolve(host)?;
     connect_pooled(&target, password, accept).await
 }
 
 /// The pooled session for an explicit target, used to validate a host before it
 /// is saved.
-pub async fn connect_target(target: &Target, password: Option<String>, accept: Option<String>) -> AppResult<Arc<Session>> {
+pub async fn connect_target(
+    target: &Target,
+    password: Option<String>,
+    accept: Option<String>,
+) -> AppResult<Arc<Session>> {
     connect_pooled(target, password, accept).await
 }
 
-async fn connect_pooled(target: &Target, password: Option<String>, accept: Option<String>) -> AppResult<Arc<Session>> {
+async fn connect_pooled(
+    target: &Target,
+    password: Option<String>,
+    accept: Option<String>,
+) -> AppResult<Arc<Session>> {
     let mut guard = pool().lock().await;
-    let existing = guard.get(&target.id).map(|entry| (entry.session.clone(), entry.password.clone()));
+    let existing = guard
+        .get(&target.id)
+        .map(|entry| (entry.session.clone(), entry.password.clone()));
     // A reconnect for the same host can reuse whatever password worked before.
     let password = match &existing {
         Some((_, cached)) => password.or_else(|| cached.clone()),
@@ -315,7 +364,10 @@ async fn connect_pooled(target: &Target, password: Option<String>, accept: Optio
             crate::debuglog::log(&format!("remote: pooled session alive for {}", target.id));
             return Ok(session);
         }
-        crate::debuglog::log(&format!("remote: pooled session for {} is dead, re-dialling", target.id));
+        crate::debuglog::log(&format!(
+            "remote: pooled session for {} is dead, re-dialling",
+            target.id
+        ));
         guard.remove(&target.id);
     }
     drop(guard);
@@ -328,19 +380,32 @@ async fn connect_pooled(target: &Target, password: Option<String>, accept: Optio
     let winner = guard.get(&target.id).map(|entry| entry.session.clone());
     if let Some(winner) = winner {
         if !winner.closed().await {
-            crate::debuglog::log(&format!("remote: another caller dialled {} first; discarding our session", target.id));
+            crate::debuglog::log(&format!(
+                "remote: another caller dialled {} first; discarding our session",
+                target.id
+            ));
             drop(guard);
             let _ = session.disconnect().await;
             return Ok(winner);
         }
         guard.remove(&target.id);
     }
-    guard.insert(target.id.clone(), Pooled { session: session.clone(), password });
+    guard.insert(
+        target.id.clone(),
+        Pooled {
+            session: session.clone(),
+            password,
+        },
+    );
     crate::debuglog::log(&format!("remote: pooled new session for {}", target.id));
     Ok(session)
 }
 
-async fn connect(target: &Target, password: Option<String>, accept: Option<String>) -> AppResult<Session> {
+async fn connect(
+    target: &Target,
+    password: Option<String>,
+    accept: Option<String>,
+) -> AppResult<Session> {
     let trust = Arc::new(Mutex::new(Trust::default()));
     let handler = Client {
         host: target.hostname.clone(),
@@ -356,44 +421,94 @@ async fn connect(target: &Target, password: Option<String>, accept: Option<Strin
     });
     crate::debuglog::log(&format!("remote: connecting to {}", target.label()));
     let started = std::time::Instant::now();
-    let opened = tokio::time::timeout(CONNECT_TIMEOUT, client::connect(config, (target.hostname.as_str(), target.port), handler)).await;
+    let opened = tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        client::connect(config, (target.hostname.as_str(), target.port), handler),
+    )
+    .await;
     let handle = match opened {
         Err(_) => {
-            crate::debuglog::error("ssh", &format!("connect {} timed out after {}s", target.label(), CONNECT_TIMEOUT.as_secs()));
+            crate::debuglog::error(
+                "ssh",
+                &format!(
+                    "connect {} timed out after {}s",
+                    target.label(),
+                    CONNECT_TIMEOUT.as_secs()
+                ),
+            );
             return Err(AppError::machine("TIMEOUT"));
         }
         Ok(Err(error)) => {
             // Log the raw russh error text first: it is the most precise signal
             // of what actually failed on the wire, before classification.
-            crate::debuglog::error("ssh", &format!(
-                "connect {} failed after {}ms: {error}",
-                target.label(),
-                started.elapsed().as_millis()
-            ));
+            crate::debuglog::error(
+                "ssh",
+                &format!(
+                    "connect {} failed after {}ms: {error}",
+                    target.label(),
+                    started.elapsed().as_millis()
+                ),
+            );
             let error = classify(&error, &trust);
             crate::debuglog::log_error("remote connect classified", &error);
             return Err(error);
         }
         Ok(Ok(handle)) => {
-            crate::debuglog::info("ssh", &format!("connected {} in {}ms", target.label(), started.elapsed().as_millis()));
+            crate::debuglog::info(
+                "ssh",
+                &format!(
+                    "connected {} in {}ms",
+                    target.label(),
+                    started.elapsed().as_millis()
+                ),
+            );
             handle
         }
     };
-    let session = Session { handle: AsyncMutex::new(handle), target: target.clone() };
+    let session = Session {
+        handle: AsyncMutex::new(handle),
+        target: target.clone(),
+    };
     let auth_started = std::time::Instant::now();
-    match tokio::time::timeout(AUTH_TIMEOUT, authenticate(&session, target, password.as_deref())).await {
+    match tokio::time::timeout(
+        AUTH_TIMEOUT,
+        authenticate(&session, target, password.as_deref()),
+    )
+    .await
+    {
         Ok(Ok(())) => {
-            crate::debuglog::info("ssh", &format!("auth ok {} in {}ms", target.label(), auth_started.elapsed().as_millis()));
+            crate::debuglog::info(
+                "ssh",
+                &format!(
+                    "auth ok {} in {}ms",
+                    target.label(),
+                    auth_started.elapsed().as_millis()
+                ),
+            );
             Ok(session)
         }
         Ok(Err(error)) => {
-            crate::debuglog::error("ssh", &format!("auth failed {} after {}ms", target.label(), auth_started.elapsed().as_millis()));
+            crate::debuglog::error(
+                "ssh",
+                &format!(
+                    "auth failed {} after {}ms",
+                    target.label(),
+                    auth_started.elapsed().as_millis()
+                ),
+            );
             crate::debuglog::log_error("remote auth", &error);
             session.disconnect().await;
             Err(error)
         }
         Err(_) => {
-            crate::debuglog::error("ssh", &format!("auth timed out {} after {}s", target.label(), AUTH_TIMEOUT.as_secs()));
+            crate::debuglog::error(
+                "ssh",
+                &format!(
+                    "auth timed out {} after {}s",
+                    target.label(),
+                    AUTH_TIMEOUT.as_secs()
+                ),
+            );
             session.disconnect().await;
             Err(AppError::machine("TIMEOUT"))
         }
@@ -402,7 +517,9 @@ async fn connect(target: &Target, password: Option<String>, accept: Option<Strin
 
 /// Whether Que currently holds an authenticated connection to `host`.
 pub async fn is_connected(host: &str) -> bool {
-    let Ok(target) = resolve(host) else { return false };
+    let Ok(target) = resolve(host) else {
+        return false;
+    };
     let guard = pool().lock().await;
     match guard.get(&target.id) {
         Some(entry) => !entry.session.closed().await,
@@ -443,12 +560,18 @@ async fn agent_client() -> Option<AnyAgent> {
 /// Candidate private keys, in the order OpenSSH itself would try them: whatever
 /// `~/.ssh/config` names for this host first, then the default file names.
 fn key_paths(identity_file: Option<&str>) -> Vec<PathBuf> {
-    let Some(home) = dirs::home_dir() else { return vec![] };
+    let Some(home) = dirs::home_dir() else {
+        return vec![];
+    };
     let ssh = home.join(".ssh");
     let mut paths = Vec::new();
     if let Some(value) = identity_file {
         let expanded = crate::paths::expand_user(value);
-        paths.push(if expanded.is_absolute() { expanded } else { ssh.join(expanded) });
+        paths.push(if expanded.is_absolute() {
+            expanded
+        } else {
+            ssh.join(expanded)
+        });
     }
     for name in ["id_ed25519", "id_ecdsa", "id_rsa"] {
         paths.push(ssh.join(name));
@@ -461,7 +584,12 @@ async fn authenticate(session: &Session, target: &Target, password: Option<&str>
     let handle = &mut *guard;
     // Asking for this once keeps the extension-info round trip out of the
     // per-key loop.
-    let rsa_hash = handle.best_supported_rsa_hash().await.ok().flatten().flatten();
+    let rsa_hash = handle
+        .best_supported_rsa_hash()
+        .await
+        .ok()
+        .flatten()
+        .flatten();
     let mut attempts = 0u32;
     crate::debuglog::log(&format!(
         "remote: auth {} user={:?} rsa_hash={:?} password_supplied={} agent_available={}",
@@ -475,22 +603,36 @@ async fn authenticate(session: &Session, target: &Target, password: Option<&str>
     if let Some(mut agent) = agent_client().await {
         match agent.request_identities().await {
             Ok(identities) => {
-                crate::debuglog::log(&format!("remote: ssh-agent offered {} identity/identities", identities.len()));
+                crate::debuglog::log(&format!(
+                    "remote: ssh-agent offered {} identity/identities",
+                    identities.len()
+                ));
                 for identity in identities {
                     let key = identity.public_key().into_owned();
                     attempts += 1;
                     let fingerprint = key.fingerprint(HashAlg::Sha256).to_string();
-                    match handle.authenticate_publickey_with(target.user.clone(), key, rsa_hash, &mut agent).await {
+                    match handle
+                        .authenticate_publickey_with(target.user.clone(), key, rsa_hash, &mut agent)
+                        .await
+                    {
                         Ok(result) if result.success() => {
-                            crate::debuglog::log(&format!("remote: authenticated with ssh-agent key {fingerprint}"));
+                            crate::debuglog::log(&format!(
+                                "remote: authenticated with ssh-agent key {fingerprint}"
+                            ));
                             return Ok(());
                         }
-                        Ok(_) => crate::debuglog::log(&format!("remote: ssh-agent key {fingerprint} REJECTED by server")),
-                        Err(error) => crate::debuglog::log(&format!("remote: ssh-agent key {fingerprint} attempt errored: {error}")),
+                        Ok(_) => crate::debuglog::log(&format!(
+                            "remote: ssh-agent key {fingerprint} REJECTED by server"
+                        )),
+                        Err(error) => crate::debuglog::log(&format!(
+                            "remote: ssh-agent key {fingerprint} attempt errored: {error}"
+                        )),
                     }
                 }
             }
-            Err(error) => crate::debuglog::log(&format!("remote: ssh-agent reachable but request_identities failed: {error}")),
+            Err(error) => crate::debuglog::log(&format!(
+                "remote: ssh-agent reachable but request_identities failed: {error}"
+            )),
         }
     }
 
@@ -508,29 +650,51 @@ async fn authenticate(session: &Session, target: &Target, password: Option<&str>
             }
         };
         attempts += 1;
-        match handle.authenticate_publickey(target.user.clone(), PrivateKeyWithHashAlg::new(Arc::new(key), rsa_hash)).await {
+        match handle
+            .authenticate_publickey(
+                target.user.clone(),
+                PrivateKeyWithHashAlg::new(Arc::new(key), rsa_hash),
+            )
+            .await
+        {
             Ok(result) if result.success() => {
                 crate::debuglog::log(&format!("remote: authenticated with {}", path.display()));
                 return Ok(());
             }
-            Ok(_) => crate::debuglog::log(&format!("remote: key {} REJECTED by server", path.display())),
-            Err(error) => crate::debuglog::log(&format!("remote: key {} attempt errored: {error}", path.display())),
+            Ok(_) => crate::debuglog::log(&format!(
+                "remote: key {} REJECTED by server",
+                path.display()
+            )),
+            Err(error) => crate::debuglog::log(&format!(
+                "remote: key {} attempt errored: {error}",
+                path.display()
+            )),
         }
     }
 
     if let Some(password) = password {
         attempts += 1;
-        match handle.authenticate_password(target.user.clone(), password).await {
+        match handle
+            .authenticate_password(target.user.clone(), password)
+            .await
+        {
             Ok(result) if result.success() => {
                 crate::debuglog::log("remote: authenticated with password");
                 return Ok(());
             }
-            Ok(_) => crate::debuglog::log("remote: password auth REJECTED by server; trying keyboard-interactive"),
-            Err(error) => crate::debuglog::log(&format!("remote: password auth attempt errored: {error}")),
+            Ok(_) => crate::debuglog::log(
+                "remote: password auth REJECTED by server; trying keyboard-interactive",
+            ),
+            Err(error) => {
+                crate::debuglog::log(&format!("remote: password auth attempt errored: {error}"))
+            }
         }
         // Servers behind PAM often accept the password only through
         // keyboard-interactive, a method separate from `password`.
-        match handle.authenticate_keyboard_interactive_start(target.user.clone(), None::<String>).await {
+        match handle
+            .authenticate_keyboard_interactive_start(target.user.clone(), None::<String>)
+            .await
+        {
             Ok(mut response) => {
                 for round in 0..KBI_ROUNDS {
                     let answers = match &response {
@@ -547,22 +711,33 @@ async fn authenticate(session: &Session, target: &Target, password: Option<&str>
                             vec![password.to_string(); prompts.len()]
                         }
                     };
-                    match handle.authenticate_keyboard_interactive_respond(answers).await {
+                    match handle
+                        .authenticate_keyboard_interactive_respond(answers)
+                        .await
+                    {
                         Ok(next) => response = next,
                         Err(error) => {
-                            crate::debuglog::log(&format!("remote: keyboard-interactive respond errored: {error}"));
+                            crate::debuglog::log(&format!(
+                                "remote: keyboard-interactive respond errored: {error}"
+                            ));
                             break;
                         }
                     }
                 }
             }
-            Err(error) => crate::debuglog::log(&format!("remote: keyboard-interactive start errored: {error}")),
+            Err(error) => crate::debuglog::log(&format!(
+                "remote: keyboard-interactive start errored: {error}"
+            )),
         }
     } else {
-        crate::debuglog::log("remote: no password available; agent and key files did not authenticate");
+        crate::debuglog::log(
+            "remote: no password available; agent and key files did not authenticate",
+        );
     }
 
-    crate::debuglog::log(&format!("remote: authentication failed after {attempts} attempt(s)"));
+    crate::debuglog::log(&format!(
+        "remote: authentication failed after {attempts} attempt(s)"
+    ));
     Err(AppError::machine("AUTH_REQUIRED"))
 }
 
@@ -572,7 +747,10 @@ async fn authenticate(session: &Session, target: &Target, password: Option<&str>
 async fn agent_probe() -> &'static str {
     #[cfg(windows)]
     {
-        if AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent").await.is_ok() {
+        if AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent")
+            .await
+            .is_ok()
+        {
             return "named-pipe";
         }
         if AgentClient::connect_pageant().await.is_ok() {
@@ -599,7 +777,11 @@ fn classify(error: &russh::Error, trust: &Arc<Mutex<Trust>>) -> AppError {
         return AppError::msg(message.clone());
     }
     if let Some(prompt) = &state.prompt {
-        return AppError::Machine { code: "HOST_TRUST_REQUIRED".into(), prompt: Some(prompt.clone()), detail: None };
+        return AppError::Machine {
+            code: "HOST_TRUST_REQUIRED".into(),
+            prompt: Some(prompt.clone()),
+            detail: None,
+        };
     }
     let code = match error {
         russh::Error::UnknownKey => "HOST_TRUST_REQUIRED",
@@ -610,7 +792,9 @@ fn classify(error: &russh::Error, trust: &Arc<Mutex<Trust>>) -> AppError {
             std::io::ErrorKind::TimedOut => "TIMEOUT",
             _ => code_from_text(&error.to_string()),
         },
-        russh::Error::ConnectionTimeout | russh::Error::KeepaliveTimeout | russh::Error::InactivityTimeout => "TIMEOUT",
+        russh::Error::ConnectionTimeout
+        | russh::Error::KeepaliveTimeout
+        | russh::Error::InactivityTimeout => "TIMEOUT",
         _ => code_from_text(&error.to_string()),
     };
     AppError::machine(code)
@@ -645,7 +829,10 @@ fn exec_error(stderr: &[u8], code: i32) -> AppError {
         return AppError::msg(format!("远程命令以退出码 {code} 结束"));
     }
     let lower = text.to_ascii_lowercase();
-    if lower.contains("not a directory") || lower.contains("can't cd") || lower.contains("no such file or directory") {
+    if lower.contains("not a directory")
+        || lower.contains("can't cd")
+        || lower.contains("no such file or directory")
+    {
         // Keep the code so the UI can route, but carry the remote's own words —
         // "无法读取目录" with no path tells the user nothing.
         return AppError::machine_detail("DIRECTORY", crate::debuglog::clip(&text, 400));
@@ -679,14 +866,24 @@ pub(crate) fn hex_prefix(bytes: &[u8], max: usize) -> String {
 /// `osc` lines; everything else keeps the short preview.
 fn wire_trace(direction: &str, bytes: &[u8]) {
     if !bytes.windows(2).any(|w| w == b"\x1b]") {
-        crate::debuglog::trace("pty", &format!("{direction} {}B: {}", bytes.len(), hex_prefix(bytes, 48)));
+        crate::debuglog::trace(
+            "pty",
+            &format!("{direction} {}B: {}", bytes.len(), hex_prefix(bytes, 48)),
+        );
         return;
     }
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    crate::debuglog::debug("osc", &format!("{direction} t={t} {}B: {}", bytes.len(), hex_prefix(bytes, 512)));
+    crate::debuglog::debug(
+        "osc",
+        &format!(
+            "{direction} t={t} {}B: {}",
+            bytes.len(),
+            hex_prefix(bytes, 512)
+        ),
+    );
 }
 
 /// Drive a remote login/command session for its whole lifetime.
@@ -695,7 +892,14 @@ fn wire_trace(direction: &str, bytes: &[u8]) {
 /// from the protocol. The return value is the remote exit status; a transport
 /// failure comes back as an error, with whatever bytes were already delivered
 /// left in place.
-pub async fn run_pty<S>(host: &str, command: &str, cols: u16, rows: u16, sink: S, commands: mpsc::UnboundedReceiver<PtyCommand>) -> AppResult<i32>
+pub async fn run_pty<S>(
+    host: &str,
+    command: &str,
+    cols: u16,
+    rows: u16,
+    sink: S,
+    commands: mpsc::UnboundedReceiver<PtyCommand>,
+) -> AppResult<i32>
 where
     S: Fn(Vec<u8>) + Send + 'static,
 {
@@ -704,7 +908,14 @@ where
 }
 
 /// [`run_pty`] against connection parameters that are already resolved.
-pub async fn run_pty_target<S>(target: &Target, command: &str, cols: u16, rows: u16, sink: S, mut commands: mpsc::UnboundedReceiver<PtyCommand>) -> AppResult<i32>
+pub async fn run_pty_target<S>(
+    target: &Target,
+    command: &str,
+    cols: u16,
+    rows: u16,
+    sink: S,
+    mut commands: mpsc::UnboundedReceiver<PtyCommand>,
+) -> AppResult<i32>
 where
     S: Fn(Vec<u8>) + Send + 'static,
 {
@@ -712,7 +923,10 @@ where
     let channel = {
         let guard = session.handle.lock().await;
         guard.channel_open_session().await.map_err(|error| {
-            crate::debuglog::error("pty", &format!("channel_open_session failed on {}: {error}", target.label()));
+            crate::debuglog::error(
+                "pty",
+                &format!("channel_open_session failed on {}: {error}", target.label()),
+            );
             AppError::msg(error.to_string())
         })?
     };
@@ -721,14 +935,27 @@ where
         .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
         .await
         .map_err(|error| {
-            crate::debuglog::error("pty", &format!("request_pty failed on {}: {error}", target.label()));
+            crate::debuglog::error(
+                "pty",
+                &format!("request_pty failed on {}: {error}", target.label()),
+            );
             AppError::msg(error.to_string())
         })?;
-    writer.exec(true, command.to_string()).await.map_err(|error| {
-        crate::debuglog::error("pty", &format!("exec request failed on {}: {error}", target.label()));
-        AppError::msg(error.to_string())
-    })?;
-    crate::debuglog::log(&format!("remote pty: running on {} at {cols}x{rows}: {}", target.label(), crate::debuglog::clip(command, 200)));
+    writer
+        .exec(true, command.to_string())
+        .await
+        .map_err(|error| {
+            crate::debuglog::error(
+                "pty",
+                &format!("exec request failed on {}: {error}", target.label()),
+            );
+            AppError::msg(error.to_string())
+        })?;
+    crate::debuglog::log(&format!(
+        "remote pty: running on {} at {cols}x{rows}: {}",
+        target.label(),
+        crate::debuglog::clip(command, 200)
+    ));
 
     let mut exit_code = None;
     let mut end_reason = "remote closed (Eof/Close/None)";
@@ -777,7 +1004,10 @@ where
             },
         }
     }
-    crate::debuglog::info("pty", &format!("remote ended ({end_reason}) exit={:?}", exit_code));
+    crate::debuglog::info(
+        "pty",
+        &format!("remote ended ({end_reason}) exit={:?}", exit_code),
+    );
     Ok(exit_code.unwrap_or(0))
 }
 
@@ -798,20 +1028,39 @@ pub async fn exec_target(target: &Target, command: &str, stdin: &[u8]) -> AppRes
     let channel = {
         let guard = session.handle.lock().await;
         guard.channel_open_session().await.map_err(|error| {
-            crate::debuglog::log(&format!("remote exec: channel_open_session failed on {}: {error}", target.label()));
+            crate::debuglog::log(&format!(
+                "remote exec: channel_open_session failed on {}: {error}",
+                target.label()
+            ));
             AppError::msg(error.to_string())
         })?
     };
     let (mut reader, writer) = channel.split();
-    writer.exec(true, command.to_string()).await.map_err(|error| {
-        crate::debuglog::log(&format!("remote exec: exec request failed on {}: {error}", target.label()));
-        AppError::msg(error.to_string())
-    })?;
-    crate::debuglog::log(&format!("remote exec: exec sent to {} (stdin {} bytes)", target.label(), stdin.len()));
+    writer
+        .exec(true, command.to_string())
+        .await
+        .map_err(|error| {
+            crate::debuglog::log(&format!(
+                "remote exec: exec request failed on {}: {error}",
+                target.label()
+            ));
+            AppError::msg(error.to_string())
+        })?;
+    crate::debuglog::log(&format!(
+        "remote exec: exec sent to {} (stdin {} bytes)",
+        target.label(),
+        stdin.len()
+    ));
     if !stdin.is_empty() {
-        writer.data_bytes(stdin.to_vec()).await.map_err(|error| AppError::msg(error.to_string()))?;
+        writer
+            .data_bytes(stdin.to_vec())
+            .await
+            .map_err(|error| AppError::msg(error.to_string()))?;
     }
-    writer.eof().await.map_err(|error| AppError::msg(error.to_string()))?;
+    writer
+        .eof()
+        .await
+        .map_err(|error| AppError::msg(error.to_string()))?;
 
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -846,7 +1095,9 @@ pub async fn exec_target(target: &Target, command: &str, stdin: &[u8]) -> AppRes
 #[cfg(test)]
 mod tests {
     use super::*;
-    use russh::server::{Auth, ChannelOpenHandle, Msg as ServerMsg, Server as _, Session as ServerSession};
+    use russh::server::{
+        Auth, ChannelOpenHandle, Msg as ServerMsg, Server as _, Session as ServerSession,
+    };
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
 
@@ -887,21 +1138,40 @@ mod tests {
     impl russh::server::Handler for TestServer {
         type Error = russh::Error;
 
-        async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
+        async fn auth_password(
+            &mut self,
+            _user: &str,
+            password: &str,
+        ) -> Result<Auth, Self::Error> {
             Ok(if password == PASSWORD {
                 Auth::Accept
             } else {
-                Auth::Reject { proceed_with_methods: None, partial_success: false }
+                Auth::Reject {
+                    proceed_with_methods: None,
+                    partial_success: false,
+                }
             })
         }
 
         /// Always rejected, so the test exercises the password path even on a
         /// machine that happens to have an ssh-agent running.
-        async fn auth_publickey(&mut self, _user: &str, _key: &russh::keys::ssh_key::PublicKey) -> Result<Auth, Self::Error> {
-            Ok(Auth::Reject { proceed_with_methods: None, partial_success: false })
+        async fn auth_publickey(
+            &mut self,
+            _user: &str,
+            _key: &russh::keys::ssh_key::PublicKey,
+        ) -> Result<Auth, Self::Error> {
+            Ok(Auth::Reject {
+                proceed_with_methods: None,
+                partial_success: false,
+            })
         }
 
-        async fn channel_open_session(&mut self, _channel: russh::Channel<ServerMsg>, reply: ChannelOpenHandle, _session: &mut ServerSession) -> Result<(), Self::Error> {
+        async fn channel_open_session(
+            &mut self,
+            _channel: russh::Channel<ServerMsg>,
+            reply: ChannelOpenHandle,
+            _session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
             reply.accept().await;
             Ok(())
         }
@@ -921,12 +1191,25 @@ mod tests {
             session.channel_success(channel)
         }
 
-        async fn window_change_request(&mut self, channel: russh::ChannelId, col_width: u32, row_height: u32, _pix_width: u32, _pix_height: u32, session: &mut ServerSession) -> Result<(), Self::Error> {
+        async fn window_change_request(
+            &mut self,
+            channel: russh::ChannelId,
+            col_width: u32,
+            row_height: u32,
+            _pix_width: u32,
+            _pix_height: u32,
+            session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
             self.recorded.lock().resizes.push((col_width, row_height));
             session.channel_success(channel)
         }
 
-        async fn exec_request(&mut self, channel: russh::ChannelId, data: &[u8], session: &mut ServerSession) -> Result<(), Self::Error> {
+        async fn exec_request(
+            &mut self,
+            channel: russh::ChannelId,
+            data: &[u8],
+            session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
             let command = String::from_utf8_lossy(data).to_string();
             self.recorded.lock().commands.push(command.clone());
             session.channel_success(channel)?;
@@ -943,7 +1226,12 @@ mod tests {
             session.close(channel)
         }
 
-        async fn data(&mut self, channel: russh::ChannelId, data: &[u8], session: &mut ServerSession) -> Result<(), Self::Error> {
+        async fn data(
+            &mut self,
+            channel: russh::ChannelId,
+            data: &[u8],
+            session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
             self.recorded.lock().received.extend_from_slice(data);
             session.data(channel, data.to_vec())
         }
@@ -951,7 +1239,12 @@ mod tests {
         /// The client hangs a closing tab's job up. Recording it is what makes
         /// "a remote shell does not outlive its pane" a checked promise rather
         /// than an intention.
-        async fn signal(&mut self, _channel: russh::ChannelId, signal: Sig, _session: &mut ServerSession) -> Result<(), Self::Error> {
+        async fn signal(
+            &mut self,
+            _channel: russh::ChannelId,
+            signal: Sig,
+            _session: &mut ServerSession,
+        ) -> Result<(), Self::Error> {
             if matches!(signal, Sig::HUP) {
                 self.recorded.lock().hung_up += 1;
             }
@@ -966,7 +1259,9 @@ mod tests {
         // server's own bind: when it wins, the connection is refused and the test
         // reports that instead of the reason for it. A listener bound before the spawn
         // is already accepting, so there is no window to lose.
-        let socket = TcpListener::bind("127.0.0.1:0").await.expect("bind a test port");
+        let socket = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a test port");
         let port = socket.local_addr().expect("test address").port();
         let config = Arc::new(russh::server::Config {
             keys: vec![russh::keys::PrivateKey::from_openssh(HOST_KEY).expect("test host key")],
@@ -976,7 +1271,10 @@ mod tests {
             ..Default::default()
         });
         let recorded = Arc::new(Mutex::new(Recorded::default()));
-        let mut server = TestServer { recorded: recorded.clone(), id: 0 };
+        let mut server = TestServer {
+            recorded: recorded.clone(),
+            id: 0,
+        };
         tokio::spawn(async move {
             // A swallowed error here is what made a refused connection look like an
             // environment problem: say why the server stopped.
@@ -1029,14 +1327,24 @@ mod tests {
             }
             other => panic!("expected HOST_TRUST_REQUIRED, got {other:?}"),
         };
-        assert!(prompt.contains("SHA256:"), "the prompt should carry the fingerprint: {prompt}");
+        assert!(
+            prompt.contains("SHA256:"),
+            "the prompt should carry the fingerprint: {prompt}"
+        );
 
         // Accepting that exact prompt records the key and completes the connection.
-        connect_target(&target, Some(PASSWORD.into()), Some(prompt)).await.expect("trusted connect");
+        connect_target(&target, Some(PASSWORD.into()), Some(prompt))
+            .await
+            .expect("trusted connect");
 
         // Now it is pinned, so no prompt and no password are needed.
-        connect_target(&target, None, None).await.expect("reconnect from the pool");
-        assert!(pool().lock().await.contains_key(&target.id), "the session should be pooled, not re-dialled");
+        connect_target(&target, None, None)
+            .await
+            .expect("reconnect from the pool");
+        assert!(
+            pool().lock().await.contains_key(&target.id),
+            "the session should be pooled, not re-dialled"
+        );
 
         // An interactive pty: the size the front end asked for is the size the
         // remote server sees, and a later resize is an explicit window-change
@@ -1047,26 +1355,49 @@ mod tests {
         let pty = {
             let target = target.clone();
             tokio::spawn(async move {
-                run_pty_target(&target, "keep-open", 100, 30, move |data: Vec<u8>| sink.lock().extend_from_slice(&data), commands).await
+                run_pty_target(
+                    &target,
+                    "keep-open",
+                    100,
+                    30,
+                    move |data: Vec<u8>| sink.lock().extend_from_slice(&data),
+                    commands,
+                )
+                .await
             })
         };
         {
             let recorded = recorded.clone();
             wait_for(move || recorded.lock().pty.is_some(), "the pty request").await;
         }
-        assert_eq!(recorded.lock().pty, Some(("xterm-256color".into(), 100, 30)));
+        assert_eq!(
+            recorded.lock().pty,
+            Some(("xterm-256color".into(), 100, 30))
+        );
 
-        queue.send(PtyCommand::Resize(120, 40)).expect("send a resize");
+        queue
+            .send(PtyCommand::Resize(120, 40))
+            .expect("send a resize");
         {
             let recorded = recorded.clone();
-            wait_for(move || !recorded.lock().resizes.is_empty(), "the window change").await;
+            wait_for(
+                move || !recorded.lock().resizes.is_empty(),
+                "the window change",
+            )
+            .await;
         }
         assert_eq!(recorded.lock().resizes, vec![(120, 40)]);
 
-        queue.send(PtyCommand::Data(b"ping".into())).expect("send keystrokes");
+        queue
+            .send(PtyCommand::Data(b"ping".into()))
+            .expect("send keystrokes");
         {
             let recorded = recorded.clone();
-            wait_for(move || recorded.lock().received.ends_with(b"ping"), "the keystrokes").await;
+            wait_for(
+                move || recorded.lock().received.ends_with(b"ping"),
+                "the keystrokes",
+            )
+            .await;
         }
         {
             let seen = seen.clone();
@@ -1077,15 +1408,25 @@ mod tests {
         assert_eq!(pty.await.expect("pty task").expect("pty run"), 0);
 
         // One-shot exec reuses the same connection.
-        assert_eq!(exec_target(&target, "echo hi", &[]).await.expect("exec"), b"ready\r\n");
-        assert!(recorded.lock().commands.iter().any(|command| command == "echo hi"));
+        assert_eq!(
+            exec_target(&target, "echo hi", &[]).await.expect("exec"),
+            b"ready\r\n"
+        );
+        assert!(recorded
+            .lock()
+            .commands
+            .iter()
+            .any(|command| command == "echo hi"));
 
         // A non-zero exit status is an error, not a silently empty result.
         let failure = match exec_target(&target, "fail now", &[]).await {
             Ok(output) => panic!("a non-zero exit must error, got {output:?}"),
             Err(error) => error,
         };
-        assert!(failure.to_string().contains('3'), "the exit status should reach the message: {failure}");
+        assert!(
+            failure.to_string().contains('3'),
+            "the exit status should reach the message: {failure}"
+        );
 
         // A remote *side terminal*, driven through `TerminalHub` — the call the
         // card's terminal button makes, with the host arriving as the id the
@@ -1093,7 +1434,8 @@ mod tests {
         // the pane has, forward keystrokes, turn a resize into a window-change,
         // and hang the remote job up when the tab closes. No local pty and no
         // `ssh.exe` take part anywhere in it.
-        let hosts = std::env::temp_dir().join(format!("que-remote-hosts-{}.json", std::process::id()));
+        let hosts =
+            std::env::temp_dir().join(format!("que-remote-hosts-{}.json", std::process::id()));
         std::fs::write(
             &hosts,
             serde_json::to_string(&[crate::models::RemoteHost {
@@ -1114,27 +1456,72 @@ mod tests {
 
         let hub = crate::terminal::TerminalHub::new(crate::live::LiveBus::new());
         let side = "cccccccccccccccccccccccccccccccc";
-        hub.create_remote_shell("/srv/app".into(), 132, 43, Some(side.into()), target.id.clone(), true, Some("card1".into())).expect("start a remote side terminal");
+        hub.create_remote_shell(
+            "/srv/app".into(),
+            132,
+            43,
+            Some(side.into()),
+            target.id.clone(),
+            true,
+            Some("card1".into()),
+        )
+        .expect("start a remote side terminal");
         {
             let recorded = recorded.clone();
-            wait_for(move || recorded.lock().commands.iter().any(|command| command.contains("/srv/app")), "the remote login shell").await;
+            wait_for(
+                move || {
+                    recorded
+                        .lock()
+                        .commands
+                        .iter()
+                        .any(|command| command.contains("/srv/app"))
+                },
+                "the remote login shell",
+            )
+            .await;
         }
         let raw_cmd = crate::ssh::remote_login_shell("/srv/app", crate::terminal_theme::app_dark());
-        let expected = crate::ssh::ssh_login_command(&crate::ssh::wrap_remote_tmux("card_card1_side_cccccccccccccccccccccccccccccccc", "/srv/app", &raw_cmd));
-        assert!(recorded.lock().commands.iter().any(|command| command == &expected));
-        assert_eq!(recorded.lock().pty, Some(("xterm-256color".into(), 132, 43)));
+        let expected = crate::ssh::ssh_login_command(&crate::ssh::wrap_remote_tmux(
+            "card_card1_side_cccccccccccccccccccccccccccccccc",
+            "/srv/app",
+            &raw_cmd,
+        ));
+        assert!(recorded
+            .lock()
+            .commands
+            .iter()
+            .any(|command| command == &expected));
+        assert_eq!(
+            recorded.lock().pty,
+            Some(("xterm-256color".into(), 132, 43))
+        );
 
         assert!(hub.write(side, "echo hi\n"), "keystrokes reach the channel");
         {
             let recorded = recorded.clone();
-            wait_for(move || recorded.lock().received.ends_with(b"echo hi\n"), "the keystrokes on the wire").await;
+            wait_for(
+                move || recorded.lock().received.ends_with(b"echo hi\n"),
+                "the keystrokes on the wire",
+            )
+            .await;
         }
-        wait_for(|| hub.snapshot(side).is_some_and(|snapshot| snapshot.output.contains("echo hi")), "the echoed output in the pane").await;
+        wait_for(
+            || {
+                hub.snapshot(side)
+                    .is_some_and(|snapshot| snapshot.output.contains("echo hi"))
+            },
+            "the echoed output in the pane",
+        )
+        .await;
 
         assert!(hub.resize(side, 90, 50));
         {
             let recorded = recorded.clone();
-            wait_for(move || recorded.lock().resizes.contains(&(90, 50)), "the window change").await;
+            wait_for(
+                move || recorded.lock().resizes.contains(&(90, 50)),
+                "the window change",
+            )
+            .await;
         }
 
         // Closing the tab hangs the remote job up and drops the pane, rather than
@@ -1143,7 +1530,11 @@ mod tests {
         assert!(hub.snapshot(side).is_none(), "a closed pane is gone");
         {
             let recorded = recorded.clone();
-            wait_for(move || recorded.lock().hung_up > 0, "the remote job to be hung up").await;
+            wait_for(
+                move || recorded.lock().hung_up > 0,
+                "the remote job to be hung up",
+            )
+            .await;
         }
 
         std::env::remove_var("QUE_REMOTE_HOSTS");
@@ -1158,14 +1549,24 @@ mod tests {
     fn a_directory_failure_carries_the_remote_text() {
         let error = exec_error(b"bash: cd: /srv/app: No such file or directory", 1);
         match error {
-            AppError::Machine { code, detail: Some(detail), .. } => {
+            AppError::Machine {
+                code,
+                detail: Some(detail),
+                ..
+            } => {
                 assert_eq!(code, "DIRECTORY");
-                assert!(detail.contains("/srv/app"), "the detail should carry the path: {detail}");
+                assert!(
+                    detail.contains("/srv/app"),
+                    "the detail should carry the path: {detail}"
+                );
             }
             other => panic!("expected DIRECTORY with detail, got {other:?}"),
         }
         // Unrelated stderr stays a raw message, which the UI already prints as-is.
-        assert!(matches!(exec_error(b"some other failure", 7), AppError::Message(_)));
+        assert!(matches!(
+            exec_error(b"some other failure", 7),
+            AppError::Message(_)
+        ));
         assert!(matches!(exec_error(b"", 3), AppError::Message(_)));
     }
 }

@@ -62,10 +62,16 @@ mod native {
         tauri::async_runtime::spawn(async move {
             match mgr.first_time_ask_for_notification_permission().await {
                 Ok(granted) => {
-                    crate::debuglog::info("notify", &format!("authorization requested: granted={granted}"));
+                    crate::debuglog::info(
+                        "notify",
+                        &format!("authorization requested: granted={granted}"),
+                    );
                 }
                 Err(err) => {
-                    crate::debuglog::warn("notify", &format!("authorization request error: {err:?}"));
+                    crate::debuglog::warn(
+                        "notify",
+                        &format!("authorization request error: {err:?}"),
+                    );
                 }
             }
         });
@@ -104,11 +110,21 @@ mod native {
         match manager.get_notification_permission_state().await {
             Ok(true) => {}
             Ok(false) => {
-                crate::debuglog::info_card("notify", card_id, None, "permission not yet granted, requesting authorization");
+                crate::debuglog::info_card(
+                    "notify",
+                    card_id,
+                    None,
+                    "permission not yet granted, requesting authorization",
+                );
                 let _ = manager.first_time_ask_for_notification_permission().await;
             }
             Err(err) => {
-                crate::debuglog::warn_card("notify", card_id, None, &format!("failed reading permission state: {err:?}"));
+                crate::debuglog::warn_card(
+                    "notify",
+                    card_id,
+                    None,
+                    &format!("failed reading permission state: {err:?}"),
+                );
             }
         }
         let mut user_info = HashMap::new();
@@ -175,7 +191,12 @@ pub async fn send_completion_notification(
             return Ok(());
         }
         Err(err) => {
-            crate::debuglog::warn_card("notify", &card_id, None, &format!("native failed, fallback: {err}"));
+            crate::debuglog::warn_card(
+                "notify",
+                &card_id,
+                None,
+                &format!("native failed, fallback: {err}"),
+            );
         }
     }
 
@@ -216,4 +237,3 @@ pub async fn check_notification_permission() -> Result<bool, String> {
     #[cfg(not(target_os = "macos"))]
     Ok(true)
 }
-

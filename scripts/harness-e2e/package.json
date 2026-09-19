@@ -1,0 +1,7 @@
+{
+  "name": "que-harness-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node run.mjs" },
+  "dependencies": { "@xterm/headless": "6.0.0" }
+}

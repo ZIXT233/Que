@@ -21,15 +21,22 @@ pub async fn local_environment(force: bool) -> AppResult<HashMap<String, String>
     if !force {
         let cached = ENV_CACHE.lock().await.clone();
         if let Some((at, env)) = cached {
-            if at.elapsed() < ENV_CACHE_TTL { return Ok(env); }
+            if at.elapsed() < ENV_CACHE_TTL {
+                return Ok(env);
+            }
             if cfg!(windows) {
                 if let Ok(guard) = ENV_REFRESH.try_lock() {
                     // Throttle failed refreshes as well; keep the last good value.
-                    if let Some((at, _)) = ENV_CACHE.lock().await.as_mut() { *at = std::time::Instant::now(); }
+                    if let Some((at, _)) = ENV_CACHE.lock().await.as_mut() {
+                        *at = std::time::Instant::now();
+                    }
                     tokio::spawn(async move {
                         let _guard = guard;
                         if let Err(error) = refresh_environment().await {
-                            crate::debuglog::info("harness", &format!("background shell environment refresh failed: {error}"));
+                            crate::debuglog::info(
+                                "harness",
+                                &format!("background shell environment refresh failed: {error}"),
+                            );
                         }
                     });
                 }
@@ -41,7 +48,9 @@ pub async fn local_environment(force: bool) -> AppResult<HashMap<String, String>
     // Another first launch may already have filled the cache while we waited.
     if !force {
         if let Some((at, env)) = ENV_CACHE.lock().await.as_ref() {
-            if at.elapsed() < ENV_CACHE_TTL { return Ok(env.clone()); }
+            if at.elapsed() < ENV_CACHE_TTL {
+                return Ok(env.clone());
+            }
         }
     }
     refresh_environment().await
@@ -53,9 +62,16 @@ async fn refresh_environment() -> AppResult<HashMap<String, String>> {
     Ok(env)
 }
 
-async fn bounded_output(command: &mut tokio::process::Command, timeout: std::time::Duration) -> AppResult<std::process::Output> {
-    command.stdin(std::process::Stdio::null()).kill_on_drop(true).no_window();
-    tokio::time::timeout(timeout, command.output()).await
+async fn bounded_output(
+    command: &mut tokio::process::Command,
+    timeout: std::time::Duration,
+) -> AppResult<std::process::Output> {
+    command
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .no_window();
+    tokio::time::timeout(timeout, command.output())
+        .await
         .map_err(|_| crate::error::AppError::msg("读取用户 Shell 环境超时，请检查 Shell 启动配置"))?
         .map_err(|e| crate::error::AppError::msg(format!("读取用户 Shell 环境失败：{e}")))
 }
@@ -66,19 +82,33 @@ async fn dump_local_environment() -> AppResult<HashMap<String, String>> {
             "$e=@{{}};[Environment]::GetEnvironmentVariables().GetEnumerator()|ForEach-Object{{$e[$_.Key]=[string]$_.Value}};[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);[Console]::Write('{START}');[Console]::Write(($e|ConvertTo-Json -Compress));[Console]::Write('{END}')"
         );
         let mut process = tokio::process::Command::new("powershell.exe");
+        if crate::paths::is_test_profile() {
+            process.arg("-NoProfile");
+        }
         process.args(["-NoLogo", "-NonInteractive", "-Command", &command]);
         process
     } else {
         let command = format!("printf '{START}\\0'; /usr/bin/env -0; printf '{END}\\0'");
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
         let mut process = tokio::process::Command::new(shell);
-        process.args(["-ilc", &command]);
+        process.args([
+            if crate::paths::is_test_profile() {
+                "-c"
+            } else {
+                "-ilc"
+            },
+            &command,
+        ]);
         process
     };
     let output = bounded_output(&mut process, ENV_CAPTURE_TIMEOUT).await?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let start = stdout.find(START).ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
-    let end = stdout[start + START.len()..].find(END).ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
+    let start = stdout
+        .find(START)
+        .ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
+    let end = stdout[start + START.len()..]
+        .find(END)
+        .ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
     let body = &stdout[start + START.len()..start + START.len() + end];
     let mut env: HashMap<String, String> = std::env::vars().collect();
     if cfg!(windows) {
@@ -98,12 +128,24 @@ async fn dump_local_environment() -> AppResult<HashMap<String, String>> {
     Ok(env)
 }
 
-pub fn resolve_local_command(command: &str, env: &HashMap<String, String>, extra_dirs: &[PathBuf]) -> Option<String> {
-    let read = |key: &str| env.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone());
+pub fn resolve_local_command(
+    command: &str,
+    env: &HashMap<String, String>,
+    extra_dirs: &[PathBuf],
+) -> Option<String> {
+    let read = |key: &str| {
+        env.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .map(|(_, v)| v.clone())
+    };
     let path = read("PATH").unwrap_or_default();
     let sep = if cfg!(windows) { ';' } else { ':' };
-    let mut dirs: Vec<PathBuf> = path.split(sep).filter(|s| Path::new(s).is_absolute()).map(PathBuf::from).collect();
-    if let Some(home) = dirs::home_dir() {
+    let mut dirs: Vec<PathBuf> = path
+        .split(sep)
+        .filter(|s| Path::new(s).is_absolute())
+        .map(PathBuf::from)
+        .collect();
+    if let Some(home) = crate::paths::user_home() {
         dirs.push(home.join(".local/bin"));
         // A harness whose CLI may hide in a directory of its own names it.
         for dir in extra_dirs {
@@ -116,7 +158,11 @@ pub fn resolve_local_command(command: &str, env: &HashMap<String, String>, extra
         }
     }
     let extensions: Vec<String> = if cfg!(windows) {
-        read("PATHEXT").unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".into()).split(';').map(|s| s.to_string()).collect()
+        read("PATHEXT")
+            .unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".into())
+            .split(';')
+            .map(|s| s.to_string())
+            .collect()
     } else {
         vec![String::new()]
     };
@@ -138,13 +184,24 @@ mod tests {
     async fn stalled_capture_times_out_instead_of_holding_launches_forever() {
         let mut command = if cfg!(windows) {
             let mut cmd = tokio::process::Command::new("powershell.exe");
-            cmd.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]); cmd
+            cmd.args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ]);
+            cmd
         } else {
             let mut cmd = tokio::process::Command::new("sh");
-            cmd.args(["-c", "exec sleep 30"]); cmd
+            cmd.args(["-c", "exec sleep 30"]);
+            cmd
         };
         let start = std::time::Instant::now();
-        assert!(bounded_output(&mut command, std::time::Duration::from_millis(100)).await.is_err());
+        assert!(
+            bounded_output(&mut command, std::time::Duration::from_millis(100))
+                .await
+                .is_err()
+        );
         assert!(start.elapsed() < std::time::Duration::from_secs(3));
     }
 }

@@ -9,13 +9,17 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn new() -> Self {
-        Self { lock: Mutex::new(()) }
+        Self {
+            lock: Mutex::new(()),
+        }
     }
 
     pub fn read(&self) -> AppResult<AppSettings> {
         match std::fs::read_to_string(settings_file()) {
             Ok(raw) => Ok(serde_json::from_str(&raw).unwrap_or_default()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(AppSettings::default()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(AppSettings::default())
+            }
             Err(error) => Err(error.into()),
         }
     }
@@ -55,10 +59,16 @@ impl SettingsStore {
         Ok(settings)
     }
 
-    pub async fn set_external_ingress(&self, harness: &str, enabled: bool) -> AppResult<AppSettings> {
+    pub async fn set_external_ingress(
+        &self,
+        harness: &str,
+        enabled: bool,
+    ) -> AppResult<AppSettings> {
         let _guard = self.lock.lock().await;
         let mut settings = self.read()?;
-        settings.external_ingress.insert(harness.to_string(), enabled);
+        settings
+            .external_ingress
+            .insert(harness.to_string(), enabled);
         atomic_write(&settings_file(), &serde_json::to_string_pretty(&settings)?)?;
         crate::debuglog::info("app", &format!("external_ingress[{}]={}", harness, enabled));
         Ok(settings)

@@ -33,7 +33,11 @@ pub fn session_exists(kind: &str, session_id: &str) -> Option<bool> {
     registry::find(kind)?.session_exists(session_id)
 }
 
-pub fn read_session_label(kind: &str, session_id: &str, need_first_prompt: bool) -> Option<SessionLabel> {
+pub fn read_session_label(
+    kind: &str,
+    session_id: &str,
+    need_first_prompt: bool,
+) -> Option<SessionLabel> {
     if session_id.is_empty() || session_id.contains('/') || session_id.contains('\\') {
         return None;
     }
@@ -46,17 +50,27 @@ pub fn session_facts(kind: &str, session_id: &str) -> SessionFacts {
     if session_id.is_empty() {
         return SessionFacts::default();
     }
-    registry::find(kind).map(|harness| harness.session_facts(session_id)).unwrap_or_default()
+    registry::find(kind)
+        .map(|harness| harness.session_facts(session_id))
+        .unwrap_or_default()
 }
 
 pub fn refresh_probe_label(state: &mut ProbeState) {
-    let Some(kind) = state.kind.as_deref() else { return };
-    let Some(harness) = registry::find(kind) else { return };
+    let Some(kind) = state.kind.as_deref() else {
+        return;
+    };
+    let Some(harness) = registry::find(kind) else {
+        return;
+    };
     if !harness.refresh_probe_label() || state.remote {
         return;
     }
-    let Some(id) = state.session_id.clone() else { return };
-    let Some(label) = read_session_label(kind, &id, state.first_prompt.is_none()) else { return };
+    let Some(id) = state.session_id.clone() else {
+        return;
+    };
+    let Some(label) = read_session_label(kind, &id, state.first_prompt.is_none()) else {
+        return;
+    };
     if let Some(name) = label.name {
         state.session_name = Some(name);
     }
@@ -68,7 +82,11 @@ pub fn refresh_probe_label(state: &mut ProbeState) {
 /// Trim to what a card can show: keep the line breaks a terminal reply is built from,
 /// drop everything else the hooks process may have leaked in.
 pub(crate) fn clean_text(text: &str, max: usize) -> Option<String> {
-    let kept: String = text.chars().filter(|c| *c == '\n' || !c.is_control()).take(max).collect();
+    let kept: String = text
+        .chars()
+        .filter(|c| *c == '\n' || !c.is_control())
+        .take(max)
+        .collect();
     let mut lines: Vec<&str> = Vec::new();
     for line in kept.lines() {
         let line = line.trim_end();
@@ -95,13 +113,19 @@ mod tests {
 
     #[test]
     fn missing_cursor_session_is_false() {
-        assert_eq!(session_exists("cursor", "00000000-0000-0000-0000-000000000000"), Some(false));
+        assert_eq!(
+            session_exists("cursor", "00000000-0000-0000-0000-000000000000"),
+            Some(false)
+        );
     }
 
     #[test]
     fn a_family_member_reads_its_host_store() {
         // Gemini shares Antigravity's brain directory for labels, but has never claimed
         // session existence.
-        assert_eq!(session_exists("gemini", "00000000-0000-0000-0000-000000000000"), None);
+        assert_eq!(
+            session_exists("gemini", "00000000-0000-0000-0000-000000000000"),
+            None
+        );
     }
 }

@@ -13,7 +13,9 @@ pub struct HostStore {
 
 impl HostStore {
     pub fn new() -> Self {
-        Self { lock: Mutex::new(()) }
+        Self {
+            lock: Mutex::new(()),
+        }
     }
 
     pub async fn list(&self) -> AppResult<Vec<RemoteHost>> {
@@ -56,7 +58,10 @@ impl HostStore {
             return Ok(host);
         }
         if let Some(existing) = hosts.iter_mut().find(|h| h.id == input.id) {
-            *existing = RemoteHost { source: "web".into(), ..input };
+            *existing = RemoteHost {
+                source: "web".into(),
+                ..input
+            };
             let saved = existing.clone();
             write_saved(&hosts)?;
             return Ok(saved);
@@ -82,10 +87,17 @@ impl HostStore {
             return Err(AppError::machine("HOST_READ_ONLY"));
         }
         let mut hidden = hidden_config_hosts()?;
-        if visible { hidden.remove(id); } else { hidden.insert(id.to_string()); }
+        if visible {
+            hidden.remove(id);
+        } else {
+            hidden.insert(id.to_string());
+        }
         let mut values: Vec<_> = hidden.into_iter().collect();
         values.sort();
-        atomic_write(&remote_host_visibility_file(), &serde_json::to_string_pretty(&values)?)?;
+        atomic_write(
+            &remote_host_visibility_file(),
+            &serde_json::to_string_pretty(&values)?,
+        )?;
         Ok(())
     }
 }
@@ -126,17 +138,23 @@ fn read_config(path: PathBuf, seen: &mut HashSet<PathBuf>) -> AppResult<Vec<Remo
     if !seen.insert(path.clone()) || seen.len() > 64 {
         return Ok(vec![]);
     }
-    let Ok(contents) = std::fs::read_to_string(&path) else { return Ok(vec![]) };
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Ok(vec![]);
+    };
     let mut hosts = Vec::new();
     let mut active: Vec<usize> = vec![];
     let alias = Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$").unwrap();
     for line in contents.lines() {
         let words = tokenize(line);
-        let Some(directive) = words.first().map(|s| s.to_ascii_lowercase()) else { continue };
+        let Some(directive) = words.first().map(|s| s.to_ascii_lowercase()) else {
+            continue;
+        };
         if directive == "host" {
             active.clear();
             for name in words.iter().skip(1) {
-                if name.starts_with('#') { break; }
+                if name.starts_with('#') {
+                    break;
+                }
                 if alias.is_match(name) {
                     active.push(hosts.len());
                     hosts.push(RemoteHost {
@@ -154,15 +172,21 @@ fn read_config(path: PathBuf, seen: &mut HashSet<PathBuf>) -> AppResult<Vec<Remo
             }
         } else if directive == "hostname" {
             if let Some(value) = words.get(1) {
-                for index in &active { hosts[*index].hostname = value.clone(); }
+                for index in &active {
+                    hosts[*index].hostname = value.clone();
+                }
             }
         } else if directive == "user" {
             if let Some(value) = words.get(1) {
-                for index in &active { hosts[*index].user = Some(value.clone()); }
+                for index in &active {
+                    hosts[*index].user = Some(value.clone());
+                }
             }
         } else if directive == "port" {
             if let Some(value) = words.get(1).and_then(|s| s.parse().ok()) {
-                for index in &active { hosts[*index].port = Some(value); }
+                for index in &active {
+                    hosts[*index].port = Some(value);
+                }
             }
         } else if directive == "identityfile" {
             // First one wins, matching OpenSSH's behaviour of keeping the
@@ -176,7 +200,9 @@ fn read_config(path: PathBuf, seen: &mut HashSet<PathBuf>) -> AppResult<Vec<Remo
             }
         } else if directive == "include" {
             for pattern in words.iter().skip(1) {
-                if pattern.starts_with('#') { break; }
+                if pattern.starts_with('#') {
+                    break;
+                }
                 let expanded = expand_include(pattern);
                 if let Ok(paths) = glob::glob(&expanded) {
                     for path in paths.flatten() {
@@ -198,7 +224,13 @@ fn read_config(path: PathBuf, seen: &mut HashSet<PathBuf>) -> AppResult<Vec<Remo
 
 fn tokenize(line: &str) -> Vec<String> {
     let re = Regex::new(r#""[^"]*"|'[^']*'|[^\s=]+"#).unwrap();
-    re.find_iter(line).map(|m| m.as_str().trim_matches(|c| c == '"' || c == '\'').to_string()).collect()
+    re.find_iter(line)
+        .map(|m| {
+            m.as_str()
+                .trim_matches(|c| c == '"' || c == '\'')
+                .to_string()
+        })
+        .collect()
 }
 
 fn expand_include(pattern: &str) -> String {
@@ -207,16 +239,23 @@ fn expand_include(pattern: &str) -> String {
     if std::path::Path::new(&replaced).is_absolute() {
         replaced
     } else {
-        home.join(".ssh").join(replaced).to_string_lossy().into_owned()
+        home.join(".ssh")
+            .join(replaced)
+            .to_string_lossy()
+            .into_owned()
     }
 }
 
 fn host_name_ok(value: &str) -> bool {
-    Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9.:-]*$").unwrap().is_match(value)
+    Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9.:-]*$")
+        .unwrap()
+        .is_match(value)
 }
 
 fn user_ok(value: &str) -> bool {
-    Regex::new(r"^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$").unwrap().is_match(value)
+    Regex::new(r"^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$")
+        .unwrap()
+        .is_match(value)
 }
 
 pub fn saved_host(id: &str) -> AppResult<Option<RemoteHost>> {

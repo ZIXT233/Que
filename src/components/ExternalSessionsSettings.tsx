@@ -54,6 +54,7 @@ export function ExternalSessionsSettings() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ externalNotices: nextChecked }),
       });
+      if (!res.ok) throw new Error(`Settings update failed: ${res.status}`);
       if (res.ok) {
         const data = (await res.json()) as { externalNoticesEnabled?: boolean };
         if (typeof data.externalNoticesEnabled === "boolean") {
@@ -77,6 +78,7 @@ export function ExternalSessionsSettings() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ externalHarness: harnessId, enabled: nextChecked }),
       });
+      if (!res.ok) throw new Error(`Settings update failed: ${res.status}`);
       if (res.ok) {
         const data = (await res.json()) as { externalIngress?: Record<string, boolean> };
         if (data.externalIngress) {

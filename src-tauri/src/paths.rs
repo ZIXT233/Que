@@ -1,16 +1,49 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "headless-e2e")]
+static TEST_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn user_home() -> Option<PathBuf> {
+    #[cfg(feature = "headless-e2e")]
+    if let Some(home) = TEST_HOME.get() {
+        return Some(home.clone());
+    }
+    dirs::home_dir()
+}
+
+pub fn is_test_profile() -> bool {
+    #[cfg(feature = "headless-e2e")]
+    {
+        return TEST_HOME.get().is_some();
+    }
+    #[cfg(not(feature = "headless-e2e"))]
+    {
+        false
+    }
+}
+
+#[cfg(feature = "headless-e2e")]
+pub(crate) fn set_test_home(home: PathBuf) {
+    TEST_HOME
+        .set(home)
+        .expect("headless home may only be initialized once");
+}
+
 pub fn data_dir() -> PathBuf {
     if let Ok(path) = std::env::var("QUE_DATA_DIR") {
         return expand_user(&path);
     }
     #[cfg(debug_assertions)]
     {
-        dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".que-dev")
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".que-dev")
     }
     #[cfg(not(debug_assertions))]
     {
-        dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".que")
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".que")
     }
 }
 
@@ -69,7 +102,9 @@ pub fn ssh_runtime_dir(workspace_id: &str) -> PathBuf {
 
 pub fn expand_user(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(rest);
+        return dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(rest);
     }
     if path == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -119,7 +154,13 @@ pub fn resolve_bin_dir(resource_dir: Option<PathBuf>) -> PathBuf {
     if cwd.join("bin").join("harness-hook.cjs").exists() {
         return cwd.join("bin");
     }
-    if cwd.join("src-tauri").join("resources").join("bin").join("harness-hook.cjs").exists() {
+    if cwd
+        .join("src-tauri")
+        .join("resources")
+        .join("bin")
+        .join("harness-hook.cjs")
+        .exists()
+    {
         return cwd.join("src-tauri").join("resources").join("bin");
     }
     cwd.join("bin")

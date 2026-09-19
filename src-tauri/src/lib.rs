@@ -1,13 +1,15 @@
 pub mod api;
-pub mod debuglog;
-mod cwd;
 mod conpty;
 #[cfg(windows)]
 mod conpty_handshake;
+mod cwd;
+pub mod debuglog;
 mod dev_tools;
 mod error;
 mod focus;
 mod harness;
+#[cfg(feature = "headless-e2e")]
+pub mod headless;
 mod hosts;
 mod live;
 mod models;
@@ -21,9 +23,9 @@ mod ssh;
 mod terminal;
 mod terminal_theme;
 mod transcript;
-mod winproc;
 #[cfg(target_os = "windows")]
 mod tray;
+mod winproc;
 
 use api::{build_state, start_server};
 use std::sync::Mutex;
@@ -57,19 +59,35 @@ fn reveal_log(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg("-R").arg(&path).status().map_err(|e| e.to_string())?;
-        std::process::Command::new("open").arg(&path).status().map_err(|e| e.to_string())?;
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .status()
+            .map_err(|e| e.to_string())?;
+        std::process::Command::new("open")
+            .arg(&path)
+            .status()
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).status().map_err(|e| e.to_string())?;
-        std::process::Command::new("cmd").args(["/C", "start", "", path.to_str().unwrap_or("")]).status().map_err(|e| e.to_string())?;
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .status()
+            .map_err(|e| e.to_string())?;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", path.to_str().unwrap_or("")])
+            .status()
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        std::process::Command::new("xdg-open").arg(&path).status().map_err(|e| e.to_string())?;
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .status()
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 }
@@ -122,7 +140,9 @@ pub fn run() {
                     env!("CARGO_PKG_VERSION"),
                     std::env::consts::OS,
                     crate::debuglog::log_path().display(),
-                    crate::debuglog::min_level().map(|l| l.as_str()).unwrap_or("off")
+                    crate::debuglog::min_level()
+                        .map(|l| l.as_str())
+                        .unwrap_or("off")
                 ),
             );
             let resource_dir = app.path().resource_dir().ok();
@@ -134,10 +154,10 @@ pub fn run() {
             // build with a new ingress script leaves the kinds this machine no longer
             // launches on the old one — silently, since the provider's config keeps
             // pointing at the same path. Align them here: at most one small write each.
-            let aligned = crate::harness::sync_installed_hooks(&state.bin_dir, &crate::paths::plugins_dir());
-            #[cfg(debug_assertions)]
-            let should_deploy_external = std::env::var("QUE_DEPLOY_EXTERNAL_HOOKS").is_ok();
-            #[cfg(not(debug_assertions))]
+            let aligned =
+                crate::harness::sync_installed_hooks(&state.bin_dir, &crate::paths::plugins_dir());
+            // Dev and release obey the same saved external-notification settings.
+            // An explicit opt-out remains available for isolated development.
             let should_deploy_external = std::env::var("QUE_SKIP_EXTERNAL_HOOKS").is_err();
 
             if should_deploy_external {
@@ -150,10 +170,14 @@ pub fn run() {
                 );
             }
             if !aligned.is_empty() {
-                crate::debuglog::info("hooks", &format!("plugin hooks realigned: {}", aligned.join(", ")));
+                crate::debuglog::info(
+                    "hooks",
+                    &format!("plugin hooks realigned: {}", aligned.join(", ")),
+                );
             }
             app.manage(state.terminals.clone());
-            let port = tauri::async_runtime::block_on(start_server(state)).map_err(|e| e.to_string())?;
+            let port =
+                tauri::async_runtime::block_on(start_server(state)).map_err(|e| e.to_string())?;
             app.manage(ApiPort(Mutex::new(port)));
             notify::init(&app.handle().clone());
             Ok(())
@@ -174,7 +198,10 @@ pub fn run() {
                     #[cfg(any(target_os = "macos", target_os = "windows"))]
                     {
                         if let Err(error) = window.hide() {
-                            crate::debuglog::warn("app", &format!("could not hide main window: {error}"));
+                            crate::debuglog::warn(
+                                "app",
+                                &format!("could not hide main window: {error}"),
+                            );
                         }
                     }
                     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -189,7 +216,11 @@ pub fn run() {
         .expect("error while building Que")
         .run(|app, event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
                 if !has_visible_windows {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();

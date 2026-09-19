@@ -1,8 +1,8 @@
 use crate::error::{AppError, AppResult};
 use crate::paths::expand_user;
+use crate::winproc::NoWindow;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use crate::winproc::NoWindow;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,7 +60,9 @@ fn list_directories(path: &Path) -> AppResult<Vec<DirectoryEntry>> {
         let file_type = entry.file_type().ok();
         if file_type.is_some_and(|t| t.is_dir()) {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') { continue; }
+            if name.starts_with('.') {
+                continue;
+            }
             entries.push(DirectoryEntry {
                 path: entry.path().to_string_lossy().into_owned(),
                 name,
@@ -73,14 +75,19 @@ fn list_directories(path: &Path) -> AppResult<Vec<DirectoryEntry>> {
 
 #[cfg(windows)]
 fn windows_drives() -> Vec<Drive> {
-    (b'A'..=b'Z').filter_map(|letter| {
-        let path = format!("{}:\\", letter as char);
-        if Path::new(&path).is_dir() {
-            Some(Drive { name: path.clone(), path })
-        } else {
-            None
-        }
-    }).collect()
+    (b'A'..=b'Z')
+        .filter_map(|letter| {
+            let path = format!("{}:\\", letter as char);
+            if Path::new(&path).is_dir() {
+                Some(Drive {
+                    name: path.clone(),
+                    path,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 pub async fn pick_local_folder(locale: Option<String>) -> AppResult<Option<String>> {
@@ -91,7 +98,10 @@ pub async fn pick_local_folder(locale: Option<String>) -> AppResult<Option<Strin
     };
     let output = if cfg!(target_os = "macos") {
         tokio::process::Command::new("osascript")
-            .args(["-e", &format!("POSIX path of (choose folder with prompt \"{title}\")")])
+            .args([
+                "-e",
+                &format!("POSIX path of (choose folder with prompt \"{title}\")"),
+            ])
             .output()
             .await
     } else if cfg!(windows) {
@@ -102,7 +112,11 @@ pub async fn pick_local_folder(locale: Option<String>) -> AppResult<Option<Strin
             .await
     } else {
         tokio::process::Command::new("zenity")
-            .args(["--file-selection", "--directory", &format!("--title={title}")])
+            .args([
+                "--file-selection",
+                "--directory",
+                &format!("--title={title}"),
+            ])
             .output()
             .await
     };

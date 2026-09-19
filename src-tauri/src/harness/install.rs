@@ -23,7 +23,7 @@ pub struct Host {
     /// The harness this install belongs to, resolved once from the registry.
     pub harness: &'static dyn Harness,
     pub remote: bool,
-    /// Only a local Windows host wraps its hook command in PowerShell.
+    /// Whether hook commands need local Windows quoting and executable resolution.
     pub windows: bool,
     /// Where the plugin's files land: the local plugins dir, or the remote cache path.
     pub root: PathBuf,
@@ -41,17 +41,31 @@ pub struct Host {
 impl Host {
     /// Resolve the host this install goes to. `ingress` is the shared hook script's
     /// source, which the remote cache path is derived from.
-    pub async fn open(kind: &str, workspace: &QueueWorkspace, token: &str, ingress: &str) -> AppResult<Host> {
+    pub async fn open(
+        kind: &str,
+        workspace: &QueueWorkspace,
+        token: &str,
+        ingress: &str,
+    ) -> AppResult<Host> {
         let Some(harness) = registry::find(kind) else {
             return Err(AppError::machine("HARNESS_UNSUPPORTED"));
         };
         let mut root = plugin_root(kind);
-        let mut node = which::which("node").map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "node".into());
+        let mut node = which::which("node")
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "node".into());
         let mut ssh_host = None;
         let mut home = None;
         if workspace.kind == "ssh" {
-            let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::msg("工作区不存在"))?.to_string();
-            let remote_home = String::from_utf8_lossy(&ssh_exec(&host, r#"printf "%s" "$HOME""#).await?).trim().to_string();
+            let host = workspace
+                .ssh_host
+                .as_deref()
+                .ok_or_else(|| AppError::msg("工作区不存在"))?
+                .to_string();
+            let remote_home =
+                String::from_utf8_lossy(&ssh_exec(&host, r#"printf "%s" "$HOME""#).await?)
+                    .trim()
+                    .to_string();
             if !remote_home.starts_with('/') {
                 return Err(AppError::machine("REMOTE_HOME_UNKNOWN"));
             }
@@ -61,14 +75,20 @@ impl Host {
             // would surface the login shell's rc noise (ioctl complaints from a
             // pty-less shell) as the error text. The `true` keeps the probe alive, so
             // an empty answer reaches the friendly check below.
-            node = String::from_utf8_lossy(&ssh_login_exec(&host, "command -v node; true").await?).trim().to_string();
+            node = String::from_utf8_lossy(&ssh_login_exec(&host, "command -v node; true").await?)
+                .trim()
+                .to_string();
             if !node.starts_with('/') {
                 return Err(AppError::machine("HARNESS_NODE_MISSING"));
             }
             ssh_host = Some(host);
             home = Some(remote_home);
         }
-        let hook_path = if workspace.kind == "ssh" { format!("{}/hook.cjs", root.display()) } else { root.join("hook.cjs").to_string_lossy().into_owned() };
+        let hook_path = if workspace.kind == "ssh" {
+            format!("{}/hook.cjs", root.display())
+        } else {
+            root.join("hook.cjs").to_string_lossy().into_owned()
+        };
         let windows = workspace.kind == "local" && cfg!(windows);
         let timeout = harness.hook_timeout(windows);
         Ok(Host {
@@ -87,7 +107,9 @@ impl Host {
     }
 
     pub(super) fn host_name(&self) -> AppResult<&str> {
-        self.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))
+        self.ssh_host
+            .as_deref()
+            .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))
     }
 
     pub(super) fn quote(&self, value: &str) -> String {
@@ -111,16 +133,21 @@ impl Host {
 
     /// The generic invocation, with a kind baked into the command line so foreign
     /// sessions still answer the reply the CLI waits for. The prefix is a unix shell
-    /// env-prefix; the Windows PowerShell wrapper has no such spelling, and no harness
-    /// that needs a prefix invokes hooks through it.
+    /// env-prefix; Windows ingress identifies the kind from its installed directory.
     pub fn generic_hook_command_with_prefix(&self, event: Option<&str>, prefix: &str) -> String {
         if self.windows {
             return super::windows::windows_hook_command(&self.node, &self.hook_path, event);
         }
         format!(
             "{prefix}{}{}",
-            [self.node.as_str(), self.hook_path.as_str()].into_iter().map(|value| self.quote(value)).collect::<Vec<_>>().join(" "),
-            event.map(|event| format!(" {}", self.quote(event))).unwrap_or_default()
+            [self.node.as_str(), self.hook_path.as_str()]
+                .into_iter()
+                .map(|value| self.quote(value))
+                .collect::<Vec<_>>()
+                .join(" "),
+            event
+                .map(|event| format!(" {}", self.quote(event)))
+                .unwrap_or_default()
         )
     }
 
@@ -138,13 +165,35 @@ impl Host {
     pub async fn install(&self, plan: &Plan) -> AppResult<()> {
         if self.remote {
             let host = self.host_name()?;
-            let payload = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, serde_json::to_string(&plan.files)?);
-            ssh_exec(host, &[shell_quote(&self.node), "-e".into(), shell_quote(PUSH), shell_quote(&self.root.to_string_lossy()), shell_quote(&payload)].join(" ")).await?;
+            let payload = base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                serde_json::to_string(&plan.files)?,
+            );
+            ssh_exec(
+                host,
+                &[
+                    shell_quote(&self.node),
+                    "-e".into(),
+                    shell_quote(PUSH),
+                    shell_quote(&self.root.to_string_lossy()),
+                    shell_quote(&payload),
+                ]
+                .join(" "),
+            )
+            .await?;
             for merge in &plan.user_config {
                 if let Some((script, args)) = &merge.remote {
                     let payload = self.relative(merge.payload);
-                    let mut argv = vec![shell_quote(&self.node), "-e".to_string(), shell_quote(script)];
-                    argv.extend(args(self, &merge.path, &payload).into_iter().map(|value| shell_quote(&value)));
+                    let mut argv = vec![
+                        shell_quote(&self.node),
+                        "-e".to_string(),
+                        shell_quote(script),
+                    ];
+                    argv.extend(
+                        args(self, &merge.path, &payload)
+                            .into_iter()
+                            .map(|value| shell_quote(&value)),
+                    );
                     ssh_exec(host, &argv.join(" ")).await?;
                 }
             }
@@ -152,14 +201,22 @@ impl Host {
         }
         for (name, body) in &plan.files {
             let path = self.root.join(name);
-            if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             atomic_write(&path, body)?;
         }
         for merge in &plan.user_config {
             let existing = std::fs::read_to_string(&merge.path).ok();
-            let payload = plan.files.get(merge.payload).map(String::as_str).unwrap_or_default();
+            let payload = plan
+                .files
+                .get(merge.payload)
+                .map(String::as_str)
+                .unwrap_or_default();
             let text = (merge.local)(existing.as_deref(), payload, self)?;
-            if let Some(parent) = Path::new(&merge.path).parent() { std::fs::create_dir_all(parent)?; }
+            if let Some(parent) = Path::new(&merge.path).parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             atomic_write(Path::new(&merge.path), &text)?;
         }
         Ok(())
@@ -174,11 +231,17 @@ impl Host {
                 env.insert("QUE_HARNESS_SIGNAL_DIR".into(), signal_dir);
             }
         } else {
-            env.insert("QUE_HARNESS_SIGNAL_DIR".into(), directory.to_string_lossy().into_owned());
+            env.insert(
+                "QUE_HARNESS_SIGNAL_DIR".into(),
+                directory.to_string_lossy().into_owned(),
+            );
         }
         env.insert("QUE_HARNESS_KIND".into(), self.kind.clone());
         // Fire the hook's internal watchdog before the runner's kill deadline.
-        env.insert("QUE_HARNESS_WATCHDOG_MS".into(), ((self.timeout - 2).max(1) * 1000).to_string());
+        env.insert(
+            "QUE_HARNESS_WATCHDOG_MS".into(),
+            ((self.timeout - 2).max(1) * 1000).to_string(),
+        );
         if crate::debuglog::verbose() {
             env.insert("QUE_HARNESS_DEBUG".into(), "1".into());
         }
@@ -201,15 +264,21 @@ impl GlobalCtx {
     pub fn new(bin_dir: &Path, plugins: &Path) -> GlobalCtx {
         GlobalCtx {
             plugins: plugins.to_path_buf(),
-            node: which::which("node").map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "node".into()),
-            home: dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+            node: which::which("node")
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "node".into()),
+            home: crate::paths::user_home().unwrap_or_else(|| PathBuf::from(".")),
             bin_dir: bin_dir.to_path_buf(),
         }
     }
 
     /// Where this harness's ingress script will live, as the CLI is told to call it.
     pub fn hook_path(&self, kind: &str) -> String {
-        self.plugins.join(kind).join("hook.cjs").to_string_lossy().into_owned()
+        self.plugins
+            .join(kind)
+            .join("hook.cjs")
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// Lay the shared ingress script down under a harness's plugin directory.

@@ -53,12 +53,19 @@ static ENV_LOCKED: AtomicBool = AtomicBool::new(false);
 static STDERR: AtomicBool = AtomicBool::new(false);
 static FILE: Mutex<()> = Mutex::new(());
 fn terms() -> parking_lot::MutexGuard<'static, std::collections::HashMap<String, String>> {
-    static TERMS: std::sync::OnceLock<parking_lot::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
-    TERMS.get_or_init(|| parking_lot::Mutex::new(std::collections::HashMap::new())).lock()
+    static TERMS: std::sync::OnceLock<
+        parking_lot::Mutex<std::collections::HashMap<String, String>>,
+    > = std::sync::OnceLock::new();
+    TERMS
+        .get_or_init(|| parking_lot::Mutex::new(std::collections::HashMap::new()))
+        .lock()
 }
 
 pub fn init() {
-    STDERR.store(std::env::var("QUE_LOG_STDERR").is_ok_and(|v| v != "0"), Ordering::Relaxed);
+    STDERR.store(
+        std::env::var("QUE_LOG_STDERR").is_ok_and(|v| v != "0"),
+        Ordering::Relaxed,
+    );
     if let Ok(value) = std::env::var("QUE_LOG") {
         ENV_LOCKED.store(true, Ordering::Relaxed);
         match Level::from_env(&value) {
@@ -77,7 +84,14 @@ pub fn set_verbose(on: bool) {
     if ENV_LOCKED.load(Ordering::Relaxed) {
         return;
     }
-    MIN.store(if on { Level::Debug as u8 } else { Level::Info as u8 }, Ordering::Relaxed);
+    MIN.store(
+        if on {
+            Level::Debug as u8
+        } else {
+            Level::Info as u8
+        },
+        Ordering::Relaxed,
+    );
 }
 
 pub fn verbose() -> bool {
@@ -142,7 +156,11 @@ pub fn write(level: Level, sys: &str, card: Option<&str>, term: Option<&str>, ms
         let _ = std::fs::create_dir_all(parent);
     }
     rotate_if_needed(&path);
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(file, "{line}");
     }
 }
@@ -191,10 +209,23 @@ pub fn warn_card(sys: &str, card: &str, term: Option<&str>, msg: &str) {
 
 pub fn log_error(context: &str, err: &AppError) {
     match err {
-        AppError::Machine { code, prompt, detail } => match (prompt, detail) {
-            (Some(p), Some(d)) => error("error", &format!("{context} Machine code={code} prompt={p:?} detail={d:?}")),
-            (Some(p), None) => error("error", &format!("{context} Machine code={code} prompt={p:?}")),
-            (None, Some(d)) => error("error", &format!("{context} Machine code={code} detail={d:?}")),
+        AppError::Machine {
+            code,
+            prompt,
+            detail,
+        } => match (prompt, detail) {
+            (Some(p), Some(d)) => error(
+                "error",
+                &format!("{context} Machine code={code} prompt={p:?} detail={d:?}"),
+            ),
+            (Some(p), None) => error(
+                "error",
+                &format!("{context} Machine code={code} prompt={p:?}"),
+            ),
+            (None, Some(d)) => error(
+                "error",
+                &format!("{context} Machine code={code} detail={d:?}"),
+            ),
             (None, None) => error("error", &format!("{context} Machine code={code}")),
         },
         AppError::Message(m) => error("error", &format!("{context}: {m}")),
@@ -235,15 +266,26 @@ pub fn read_tail(max_bytes: usize) -> String {
 pub fn filter_text(text: &str, card: Option<&str>, term: Option<&str>) -> String {
     text.lines()
         .filter(|line| {
-            let card_ok = card.is_none_or(|id| line.contains(&format!("card={id}")) || line.contains(&format!(" {id} ")) || line.ends_with(id));
-            let term_ok = term.is_none_or(|id| line.contains(&format!("term={id}")) || line.contains(id));
+            let card_ok = card.is_none_or(|id| {
+                line.contains(&format!("card={id}"))
+                    || line.contains(&format!(" {id} "))
+                    || line.ends_with(id)
+            });
+            let term_ok =
+                term.is_none_or(|id| line.contains(&format!("term={id}")) || line.contains(id));
             card_ok || term_ok
         })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn format_line(level: Level, sys: &str, card: Option<&str>, term: Option<&str>, msg: &str) -> String {
+fn format_line(
+    level: Level,
+    sys: &str,
+    card: Option<&str>,
+    term: Option<&str>,
+    msg: &str,
+) -> String {
     let mut line = format!("[{}] {} {sys}", timestamp(), level.as_str());
     if let Some(card) = card.filter(|s| !s.is_empty()) {
         line.push_str(" card=");
@@ -278,7 +320,10 @@ fn rotate_if_needed(path: &std::path::Path) {
 }
 
 fn timestamp() -> String {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
@@ -301,7 +346,13 @@ mod tests {
 
     #[test]
     fn formats_card_and_term() {
-        let line = format_line(Level::Info, "remote", Some("c1"), Some("t1"), "connected 12ms");
+        let line = format_line(
+            Level::Info,
+            "remote",
+            Some("c1"),
+            Some("t1"),
+            "connected 12ms",
+        );
         assert!(line.contains("INFO remote card=c1 term=t1 connected 12ms"));
     }
 

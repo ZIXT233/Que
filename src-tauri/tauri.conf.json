@@ -34,7 +34,10 @@
       "signingIdentity": "-",
       "hardenedRuntime": false
     },
-    "resources": ["resources/**/*"],
+    "resources": [
+      "resources/bin/**/*",
+      "resources/terminal-palettes-LICENSE.txt"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

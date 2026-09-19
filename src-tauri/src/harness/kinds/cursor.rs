@@ -7,10 +7,12 @@
 //! Its user-level `hooks.json` is shared with hooks the user wrote, so Que merges into it
 //! and only ever replaces entries it can prove are its own.
 
-use super::registry::{resume_flag, Adapter, Ctx, GlobalCtx, Harness, LaunchTweaks, Plan, UserMerge};
 use super::debug::{HarnessDebugEvent, ProbeView};
 use super::install::Host;
 use super::label_text::{clip, SessionLabel};
+use super::registry::{
+    resume_flag, Adapter, Ctx, GlobalCtx, Harness, LaunchTweaks, Plan, UserMerge,
+};
 use super::session_find::{find_all, find_dir, safe_name_id};
 use super::session_label::{clean_text, SessionFacts, TURN_MAX_CHARS};
 use super::signals::HookSignal;
@@ -24,8 +26,16 @@ use std::pin::Pin;
 use std::sync::OnceLock;
 
 const EVENTS: &[&str] = &[
-    "sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse", "postToolUseFailure",
-    "beforeShellExecution", "beforeMCPExecution", "afterAgentResponse", "stop", "sessionEnd",
+    "sessionStart",
+    "beforeSubmitPrompt",
+    "preToolUse",
+    "postToolUse",
+    "postToolUseFailure",
+    "beforeShellExecution",
+    "beforeMCPExecution",
+    "afterAgentResponse",
+    "stop",
+    "sessionEnd",
 ];
 
 /// Merges Que's entries into `~/.cursor/hooks.json` on a remote host, keeping foreign
@@ -34,18 +44,34 @@ const SSH_MERGE: &str = r#"const fs=require("node:fs"),p=require("node:path"),de
 
 async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
+    #[cfg(windows)]
+    if !ctx.host.remote {
+        crate::harness::windows::install_native_hook(&ctx.host.root, "que-cursor-hook")?;
+    }
     plan.files.insert(
         ".cursor-plugin/plugin.json".into(),
         serde_json::json!({ "name": "que-session-state", "version": "1.0.0", "description": "Report this Que terminal's lifecycle" }).to_string(),
     );
     let mut hooks = serde_json::Map::new();
     for event in events {
-        hooks.insert(event.to_string(), serde_json::json!([{ "command": ctx.host.command(Some(event)), "timeout": ctx.host.timeout }]));
+        hooks.insert(
+            event.to_string(),
+            serde_json::json!([command_entry(
+                ctx.host.command(Some(event)),
+                ctx.host.timeout
+            )]),
+        );
     }
     // The plugin's own manifest is inert: the hooks that run come from the user-level
     // file below, which is also where a foreign Cursor session finds them.
-    plan.files.insert("hooks/hooks.json".into(), serde_json::json!({ "version": 1, "hooks": {} }).to_string());
-    plan.files.insert("cursor-user-hooks.json".into(), serde_json::json!({ "version": 1, "hooks": hooks }).to_string());
+    plan.files.insert(
+        "hooks/hooks.json".into(),
+        serde_json::json!({ "version": 1, "hooks": {} }).to_string(),
+    );
+    plan.files.insert(
+        "cursor-user-hooks.json".into(),
+        serde_json::json!({ "version": 1, "hooks": hooks }).to_string(),
+    );
     // No --plugin-dir: the plugin manifest is empty and all lifecycle hooks
     // are registered in the user config below. Loading it only adds CLI work.
     let path = if ctx.workspace.kind == "local" {
@@ -53,14 +79,24 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
     } else {
         // The remote sink has no card directory to report into, so its signals land under
         // this token's cards folder instead.
-        plan.files.insert(format!("cards/{}/.keep", ctx.host.token), String::new());
-        format!("{}/.cursor/hooks.json", ctx.host.home.as_deref().unwrap_or_default())
+        plan.files
+            .insert(format!("cards/{}/.keep", ctx.host.token), String::new());
+        format!(
+            "{}/.cursor/hooks.json",
+            ctx.host.home.as_deref().unwrap_or_default()
+        )
     };
     plan.user_config.push(UserMerge {
         path,
         payload: "cursor-user-hooks.json",
         local: merge_local,
-        remote: Some((SSH_MERGE, |host: &Host, path: &str, payload: &str| vec![path.to_string(), payload.to_string(), host.hook_path.clone()])),
+        remote: Some((SSH_MERGE, |host: &Host, path: &str, payload: &str| {
+            vec![
+                path.to_string(),
+                payload.to_string(),
+                host.hook_path.clone(),
+            ]
+        })),
     });
     Ok(plan)
 }
@@ -77,7 +113,23 @@ fn merge_local(existing: Option<&str>, payload: &str, host: &Host) -> AppResult<
 
 pub struct Cursor;
 
+fn command_entry(command: String, timeout: u32) -> serde_json::Value {
+    // Cursor reads command/timeout. Grok's compatibility reader instead expects
+    // a Claude matcher group here: an empty hooks list makes our entry an inert
+    // group for that reader, without disabling any user compatibility settings.
+    serde_json::json!({ "command": command, "timeout": timeout, "hooks": [] })
+}
+
 pub static CURSOR: Cursor = Cursor;
+
+fn native_command(path: &Path, event: Option<&str>) -> String {
+    // Cursor supplies PowerShell's call operator; quote argv without nesting a shell.
+    let mut command = format!("'{}'", path.to_string_lossy().replace('\'', "''"));
+    if let Some(event) = event {
+        command.push_str(&format!(" '{}'", event.replace('\'', "''")));
+    }
+    command
+}
 
 impl Harness for Cursor {
     fn id(&self) -> &'static str {
@@ -91,25 +143,59 @@ impl Harness for Cursor {
         EVENTS
     }
 
-    fn plan<'a>(&'a self, ctx: Ctx<'a>) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
+    fn plan<'a>(
+        &'a self,
+        ctx: Ctx<'a>,
+    ) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
         Box::pin(plan(ctx, self.events()))
     }
 
     /// What a Cursor session Que never launched needs: its own ingress, plus entries in
     /// the user-level `hooks.json` that IDE chats and plain terminals read from anywhere.
     fn global(&self, ctx: &GlobalCtx) {
+        #[cfg(windows)]
+        if let Err(error) = crate::harness::windows::install_native_hook(
+            &ctx.plugins.join("cursor"),
+            "que-cursor-hook",
+        ) {
+            crate::debuglog::log_error("install native Cursor hook", &error);
+            return;
+        }
         let _ = ctx.install_ingress("cursor");
         let hook_path = ctx.hook_path("cursor");
         let mut hooks = serde_json::Map::new();
         for &event in self.events() {
-            let cmd = format!("QUE_HARNESS_KIND=cursor {} \"{}\" {}", ctx.node, hook_path, event);
-            hooks.insert(event.to_string(), serde_json::json!([{ "command": cmd, "timeout": 15 }]));
+            #[cfg(windows)]
+            let cmd = native_command(&ctx.plugins.join("cursor/que-cursor-hook.exe"), Some(event));
+            #[cfg(not(windows))]
+            let cmd = format!(
+                "QUE_HARNESS_KIND=cursor {} {} {}",
+                crate::ssh::shell_quote(&ctx.node),
+                crate::ssh::shell_quote(&hook_path),
+                event
+            );
+            hooks.insert(
+                event.to_string(),
+                serde_json::json!([command_entry(cmd, 15)]),
+            );
         }
         let path = user_hooks_path();
-        let existing = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_else(|| serde_json::json!({}));
-        if let Ok(merged) = merge_user_hooks(existing, &serde_json::json!({ "version": 1, "hooks": hooks }), &hook_path) {
-            if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
-            let _ = atomic_write(&path, &serde_json::to_string_pretty(&merged).unwrap_or_default());
+        let existing = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Ok(merged) = merge_user_hooks(
+            existing,
+            &serde_json::json!({ "version": 1, "hooks": hooks }),
+            &hook_path,
+        ) {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = atomic_write(
+                &path,
+                &serde_json::to_string_pretty(&merged).unwrap_or_default(),
+            );
         }
     }
 
@@ -118,11 +204,20 @@ impl Harness for Cursor {
     fn unglobal(&self, ctx: &GlobalCtx) {
         let hook_path = ctx.hook_path("cursor");
         let path = user_hooks_path();
-        let Ok(existing) = std::fs::read_to_string(&path) else { return };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&existing) else { return };
-        let Ok(cleaned) = unmerge_user_hooks(value, &hook_path) else { return };
+        let Ok(existing) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&existing) else {
+            return;
+        };
+        let Ok(cleaned) = unmerge_user_hooks(value, &hook_path) else {
+            return;
+        };
         if cleaned != existing {
-            let _ = atomic_write(&path, &serde_json::to_string_pretty(&cleaned).unwrap_or_default());
+            let _ = atomic_write(
+                &path,
+                &serde_json::to_string_pretty(&cleaned).unwrap_or_default(),
+            );
         }
     }
 
@@ -135,17 +230,20 @@ impl Harness for Cursor {
         }
     }
 
-    /// Cursor's hook deadline is longer because the CLI runs a hook per tool call
-    /// through a `.cmd` shim on Windows, where process startup alone eats seconds.
+    /// Cursor still runs command hooks through its own shell executor on Windows;
+    /// allow for that startup cost even though Que avoids a nested helper normally.
     fn hook_timeout(&self, windows_local: bool) -> u32 {
-        if windows_local { 15 } else { 2 }
+        if windows_local {
+            15
+        } else {
+            2
+        }
     }
 
-    /// On Windows the `.cmd` shim wraps cmd → powershell → node; the hook runs on every
-    /// tool call, so the invocation is spelled to skip the interpreters.
+    /// Avoid adding another interpreter to Cursor's own hook shell executor.
     fn hook_command(&self, host: &Host, event: Option<&str>) -> String {
         if host.windows {
-            return crate::harness::windows::windows_hook_command(&host.node, &host.hook_path, event);
+            return native_command(&host.root.join("que-cursor-hook.exe"), event);
         }
         host.generic_hook_command_with_prefix(event, "QUE_HARNESS_KIND=cursor ")
     }
@@ -159,7 +257,8 @@ impl Harness for Cursor {
     /// A tool start whose gate Cursor answers itself (the ingress returns `allow`): the
     /// payload never says whether the user was asked, so every tool call is a guess.
     fn guesses_attention(&self, signal: &HookSignal) -> bool {
-        ["preToolUse", "beforeShellExecution", "beforeMCPExecution"].contains(&signal.event.as_str())
+        ["preToolUse", "beforeShellExecution", "beforeMCPExecution"]
+            .contains(&signal.event.as_str())
     }
 
     fn external_ingress(&self) -> bool {
@@ -178,7 +277,13 @@ impl Harness for Cursor {
     /// answering, and the last assistant turn is the reply a notice shows.
     fn session_details(&self, id: &str) -> Option<SessionFacts> {
         let file = session_file(id)?;
-        let last = |role: Role| file.turns.iter().rev().find(|turn| turn.role == role).map(|turn| turn.text.clone());
+        let last = |role: Role| {
+            file.turns
+                .iter()
+                .rev()
+                .find(|turn| turn.role == role)
+                .map(|turn| turn.text.clone())
+        };
         Some(SessionFacts {
             name: file.title,
             cwd: file.cwd,
@@ -192,20 +297,38 @@ impl Harness for Cursor {
 
     // —— debug ——
 
-    fn debug_clues(&self, probe: Option<&ProbeView>, pty: Option<&PtyProbe>, events: &[HarnessDebugEvent], out: &mut Vec<String>) {
+    fn debug_clues(
+        &self,
+        probe: Option<&ProbeView>,
+        pty: Option<&PtyProbe>,
+        events: &[HarnessDebugEvent],
+        out: &mut Vec<String>,
+    ) {
         let Some(probe) = probe else { return };
         let looks_cursor = !probe.notify_osc_seen.is_empty()
             || events.iter().any(|e| {
                 e.source == "notify-osc"
-                    || matches!(e.event.as_str(), "sessionStart" | "beforeSubmitPrompt" | "afterAgentResponse" | "preToolUse")
+                    || matches!(
+                        e.event.as_str(),
+                        "sessionStart" | "beforeSubmitPrompt" | "afterAgentResponse" | "preToolUse"
+                    )
             });
-        if looks_cursor && probe.notify_osc_seen.is_empty() && !events.iter().any(|e| e.source == "notify-osc") {
+        if looks_cursor
+            && probe.notify_osc_seen.is_empty()
+            && !events.iter().any(|e| e.source == "notify-osc")
+        {
             if pty.is_some_and(|pty| pty.last_focus.as_deref() == Some("focused")) {
                 out.push("流里没见到 OSC 99/9/777，且已向 PTY 写过 CSI I（前台）：Cursor 默认不发桌面通知".into());
             } else {
-                out.push("流里没见到 OSC 99/9/777：要么 Cursor 没发，要么探针 panic 把那一段吞了".into());
+                out.push(
+                    "流里没见到 OSC 99/9/777：要么 Cursor 没发，要么探针 panic 把那一段吞了".into(),
+                );
             }
-        } else if looks_cursor && !events.iter().any(|e| e.source == "notify-osc" && e.event == "Notification") {
+        } else if looks_cursor
+            && !events
+                .iter()
+                .any(|e| e.source == "notify-osc" && e.event == "Notification")
+        {
             out.push(format!(
                 "流里见到了 {}，但没拼出完整通知（分片未结束或探针崩了）",
                 probe.notify_osc_seen.join("/")
@@ -244,7 +367,11 @@ pub(crate) fn direct_node_launch(shim: &str) -> Option<DirectNodeLaunch> {
         // Each installed version carries its own node.exe; the bootstrap never
         // consults PATH. Fall back to PATH node only if an update was interrupted.
         let bundled = version.join("node.exe");
-        let node = if bundled.is_file() { bundled } else { which::which("node").ok()?.into() };
+        let node = if bundled.is_file() {
+            bundled
+        } else {
+            which::which("node").ok()?.into()
+        };
         (node, script)
     };
     let mut env = vec![(
@@ -254,7 +381,10 @@ pub(crate) fn direct_node_launch(shim: &str) -> Option<DirectNodeLaunch> {
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         env.push((
             "NODE_COMPILE_CACHE".into(),
-            PathBuf::from(local).join("cursor-compile-cache").to_string_lossy().into_owned(),
+            PathBuf::from(local)
+                .join("cursor-compile-cache")
+                .to_string_lossy()
+                .into_owned(),
         ));
     }
     Some(DirectNodeLaunch {
@@ -274,12 +404,19 @@ fn latest_cursor_version(dir: &Path) -> Option<PathBuf> {
         if !path.is_dir() {
             continue;
         }
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
         if !re.is_match(name) {
             continue;
         }
-        let Some(stamp) = version_stamp(name) else { continue };
-        if best.as_ref().is_none_or(|b| (stamp, name.to_string()) > (b.0, b.1.clone())) {
+        let Some(stamp) = version_stamp(name) else {
+            continue;
+        };
+        if best
+            .as_ref()
+            .is_none_or(|b| (stamp, name.to_string()) > (b.0, b.1.clone()))
+        {
             best = Some((stamp, name.to_string(), path));
         }
     }
@@ -352,11 +489,17 @@ fn meta_text(body: &str, key: &str) -> Option<String> {
 }
 
 fn cursor_chats() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cursor").join("chats")
+    crate::paths::user_home()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cursor")
+        .join("chats")
 }
 
 fn cursor_projects() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cursor").join("projects")
+    crate::paths::user_home()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cursor")
+        .join("projects")
 }
 
 /// Locate the session's live JSONL transcript in `~/.cursor/projects/*/agent-transcripts/<id>/<id>.jsonl`.
@@ -377,15 +520,17 @@ fn find_transcript_file(session_id: &str) -> Option<PathBuf> {
 }
 
 fn session_exists(session_id: &str) -> bool {
-    safe_name_id(session_id) && (
-        find_transcript_file(session_id).is_some() ||
-        find_dir(&[cursor_chats()], session_id).is_some()
-    )
+    safe_name_id(session_id)
+        && (find_transcript_file(session_id).is_some()
+            || find_dir(&[cursor_chats()], session_id).is_some())
 }
 
 fn session_label(session_id: &str) -> SessionLabel {
     let dir = session_dir(session_id);
-    let name = dir.as_deref().and_then(read_meta).and_then(|b| title_from_meta(&b));
+    let name = dir
+        .as_deref()
+        .and_then(read_meta)
+        .and_then(|b| title_from_meta(&b));
     let first_prompt = find_transcript_file(session_id)
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|body| first_user_prompt(&body))
@@ -411,7 +556,8 @@ fn session_file(session_id: &str) -> Option<CursorSession> {
         .map(|body| parse_transcript(&body))
         .unwrap_or_default();
 
-    let last_prompt_fallback = dir.as_deref()
+    let last_prompt_fallback = dir
+        .as_deref()
         .and_then(|d| read_file(&d.join("prompt_history.json")))
         .and_then(|b| newest_prompt_from_history(&b));
 
@@ -424,7 +570,9 @@ fn session_file(session_id: &str) -> Option<CursorSession> {
 }
 
 fn session_dir(session_id: &str) -> Option<PathBuf> {
-    safe_name_id(session_id).then(|| find_dir(&[cursor_chats()], session_id)).flatten()
+    safe_name_id(session_id)
+        .then(|| find_dir(&[cursor_chats()], session_id))
+        .flatten()
 }
 
 fn read_meta(dir: &Path) -> Option<String> {
@@ -438,13 +586,21 @@ fn read_file(path: &Path) -> Option<String> {
 /// In Cursor's `prompt_history.json`, items are prepend-ordered (index 0 is newest).
 fn newest_prompt_from_history(body: &str) -> Option<String> {
     let rows = serde_json::from_str::<Vec<serde_json::Value>>(body).ok()?;
-    rows.first().and_then(|row| row.as_str().and_then(clip).or_else(|| super::label_text::json_text(row)))
+    rows.first().and_then(|row| {
+        row.as_str()
+            .and_then(clip)
+            .or_else(|| super::label_text::json_text(row))
+    })
 }
 
 /// The earliest prompt in history (last element in prepend-ordered array).
 fn first_prompt_from_history(body: &str) -> Option<String> {
     let rows = serde_json::from_str::<Vec<serde_json::Value>>(body).ok()?;
-    rows.last().and_then(|row| row.as_str().and_then(clip).or_else(|| super::label_text::json_text(row)))
+    rows.last().and_then(|row| {
+        row.as_str()
+            .and_then(clip)
+            .or_else(|| super::label_text::json_text(row))
+    })
 }
 
 /// Parses a Cursor agent-transcript JSONL stream into an ordered list of turns.
@@ -463,10 +619,15 @@ fn parse_transcript(body: &str) -> Vec<Turn> {
             Some("user") => Role::User,
             _ => continue,
         };
-        let raw_text = match value.get("message").and_then(|m| m.get("content")).or_else(|| value.get("content")) {
+        let raw_text = match value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .or_else(|| value.get("content"))
+        {
             Some(serde_json::Value::String(s)) => s.clone(),
             Some(serde_json::Value::Array(arr)) => {
-                let parts: Vec<&str> = arr.iter()
+                let parts: Vec<&str> = arr
+                    .iter()
                     .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
                     .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
                     .collect();
@@ -517,19 +678,24 @@ fn extract_user_query(raw: &str) -> Option<String> {
 
 fn first_user_prompt(body: &str) -> Option<String> {
     for line in body.lines() {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
         if value.get("role").and_then(|v| v.as_str()) != Some("user") {
             continue;
         }
-        let raw_text = match value.get("message").and_then(|m| m.get("content")).or_else(|| value.get("content")) {
+        let raw_text = match value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .or_else(|| value.get("content"))
+        {
             Some(serde_json::Value::String(s)) => s.clone(),
-            Some(serde_json::Value::Array(arr)) => {
-                arr.iter()
-                    .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
-                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
+            Some(serde_json::Value::Array(arr)) => arr
+                .iter()
+                .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n"),
             _ => continue,
         };
         if let Some(ask) = extract_user_query(&raw_text) {
@@ -564,38 +730,61 @@ pub(crate) fn user_hooks_path() -> PathBuf {
     if let Ok(path) = std::env::var("QUE_CURSOR_HOOKS") {
         return PathBuf::from(path);
     }
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cursor/hooks.json")
+    crate::paths::user_home()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cursor/hooks.json")
 }
 
 fn hook_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r#"[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]que[\\/]harness)[\\/].*hook\.cjs"#).unwrap())
+    PATTERN.get_or_init(|| {
+        Regex::new(
+            r#"[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]que[\\/]harness)[\\/].*hook\.cjs"#,
+        )
+        .unwrap()
+    })
 }
 
 /// A command is Que's when it names this hook, or when it carries a PowerShell
 /// `-EncodedCommand` that does.
 fn is_owned_command(command: &str, hook_path: &str) -> bool {
+    if Regex::new(r#"[\\/]harness-plugins[\\/]cursor[\\/]que-cursor-hook\.exe(?:['"\s]|$)"#)
+        .unwrap()
+        .is_match(command)
+    {
+        return true;
+    }
     let pattern = hook_pattern();
     if command.contains(hook_path) || pattern.is_match(command) {
         return true;
     }
-    let Some(encoded) = command.split_once("-EncodedCommand").and_then(|(_, rest)| rest.split_whitespace().next()) else {
+    let Some(encoded) = command
+        .split_once("-EncodedCommand")
+        .and_then(|(_, rest)| rest.split_whitespace().next())
+    else {
         return false;
     };
-    let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded) else {
+    let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+    else {
         return false;
     };
     if bytes.len() % 2 != 0 {
         return false;
     }
-    let units: Vec<u16> = bytes.chunks_exact(2).map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])).collect();
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
     let script = String::from_utf16_lossy(&units);
     script.contains(hook_path) || pattern.is_match(&script)
 }
 
 /// Drop every group whose command belongs to Que's hook; events left empty come
 /// out with them — the inverse of `merge_user_hooks`.
-fn unmerge_user_hooks(mut value: serde_json::Value, hook_path: &str) -> AppResult<serde_json::Value> {
+fn unmerge_user_hooks(
+    mut value: serde_json::Value,
+    hook_path: &str,
+) -> AppResult<serde_json::Value> {
     let hooks = value
         .get_mut("hooks")
         .and_then(|v| v.as_object_mut())
@@ -603,7 +792,10 @@ fn unmerge_user_hooks(mut value: serde_json::Value, hook_path: &str) -> AppResul
     for (_, entries) in hooks.iter_mut() {
         if let Some(list) = entries.as_array_mut() {
             list.retain(|entry| {
-                !is_owned_command(entry.get("command").and_then(|c| c.as_str()).unwrap_or(""), hook_path)
+                !is_owned_command(
+                    entry.get("command").and_then(|c| c.as_str()).unwrap_or(""),
+                    hook_path,
+                )
             });
         }
     }
@@ -614,7 +806,11 @@ fn unmerge_user_hooks(mut value: serde_json::Value, hook_path: &str) -> AppResul
 }
 
 /// Keep every foreign entry, drop Que's old ones, append the new ones.
-fn merge_user_hooks(existing: serde_json::Value, incoming: &serde_json::Value, hook_path: &str) -> AppResult<serde_json::Value> {
+fn merge_user_hooks(
+    existing: serde_json::Value,
+    incoming: &serde_json::Value,
+    hook_path: &str,
+) -> AppResult<serde_json::Value> {
     if !existing.is_null() && (existing.is_array() || !existing.is_object()) {
         return Err(AppError::machine_detail("HARNESS_HOOKS_INVALID", "cursor"));
     }
@@ -627,13 +823,25 @@ fn merge_user_hooks(existing: serde_json::Value, incoming: &serde_json::Value, h
         .unwrap_or_default();
     if let Some(incoming_hooks) = incoming.get("hooks").and_then(|v| v.as_object()) {
         for (event, entries) in incoming_hooks {
-            let previous = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let previous = hooks
+                .get(event)
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             let kept: Vec<serde_json::Value> = previous
                 .into_iter()
-                .filter(|entry| !is_owned_command(entry.get("command").and_then(|c| c.as_str()).unwrap_or(""), hook_path))
+                .filter(|entry| {
+                    !is_owned_command(
+                        entry.get("command").and_then(|c| c.as_str()).unwrap_or(""),
+                        hook_path,
+                    )
+                })
                 .collect();
             let extra = entries.as_array().cloned().unwrap_or_default();
-            hooks.insert(event.clone(), serde_json::Value::Array(kept.into_iter().chain(extra).collect()));
+            hooks.insert(
+                event.clone(),
+                serde_json::Value::Array(kept.into_iter().chain(extra).collect()),
+            );
         }
     }
     current.insert("version".into(), serde_json::json!(1));
@@ -677,22 +885,34 @@ mod tests {
 
     #[test]
     fn merge_rejects_array_config() {
-        let err = merge_user_hooks(serde_json::json!([]), &serde_json::json!({ "hooks": {} }), "/tmp/hook.cjs").unwrap_err();
+        let err = merge_user_hooks(
+            serde_json::json!([]),
+            &serde_json::json!({ "hooks": {} }),
+            "/tmp/hook.cjs",
+        )
+        .unwrap_err();
         assert_eq!(err.to_string(), "HARNESS_HOOKS_INVALID");
     }
 
     #[test]
     fn meta_carries_title_and_workspace() {
-        let body = r#"{"schemaVersion":1,"title":"Test File Session","cwd":"/Users/u/Projects/que"}"#;
+        let body =
+            r#"{"schemaVersion":1,"title":"Test File Session","cwd":"/Users/u/Projects/que"}"#;
         assert_eq!(title_from_meta(body).as_deref(), Some("Test File Session"));
-        assert_eq!(meta_text(body, "cwd").as_deref(), Some("/Users/u/Projects/que"));
+        assert_eq!(
+            meta_text(body, "cwd").as_deref(),
+            Some("/Users/u/Projects/que")
+        );
         assert_eq!(meta_text(r#"{"title":"  "}"#, "title"), None);
     }
 
     #[test]
     fn prompt_history_prepend_order() {
         let body = r#"["最新一条","/resume","你好"]"#;
-        assert_eq!(newest_prompt_from_history(body).as_deref(), Some("最新一条"));
+        assert_eq!(
+            newest_prompt_from_history(body).as_deref(),
+            Some("最新一条")
+        );
         assert_eq!(first_prompt_from_history(body).as_deref(), Some("你好"));
         assert_eq!(newest_prompt_from_history("not json"), None);
     }
@@ -709,11 +929,35 @@ mod tests {
 "#;
         let turns = parse_transcript(stream);
         assert_eq!(turns.len(), 4);
-        assert_eq!(turns[0], Turn { role: Role::User, text: "pretooluse是人看之前还是看之后".into() });
-        assert_eq!(turns[1], Turn { role: Role::Assistant, text: "人看之前。PreToolUse 是工具真正执行前的闸门。".into() });
+        assert_eq!(
+            turns[0],
+            Turn {
+                role: Role::User,
+                text: "pretooluse是人看之前还是看之后".into()
+            }
+        );
+        assert_eq!(
+            turns[1],
+            Turn {
+                role: Role::Assistant,
+                text: "人看之前。PreToolUse 是工具真正执行前的闸门。".into()
+            }
+        );
         // environment_context was ignored
-        assert_eq!(turns[2], Turn { role: Role::User, text: "测试消息".into() });
-        assert_eq!(turns[3], Turn { role: Role::Assistant, text: "收到。这边正常。".into() });
+        assert_eq!(
+            turns[2],
+            Turn {
+                role: Role::User,
+                text: "测试消息".into()
+            }
+        );
+        assert_eq!(
+            turns[3],
+            Turn {
+                role: Role::Assistant,
+                text: "收到。这边正常。".into()
+            }
+        );
     }
 
     #[test]
@@ -728,7 +972,10 @@ mod tests {
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].role, Role::User);
         assert_eq!(turns[1].role, Role::Assistant);
-        assert_eq!(turns[1].text, "正在提交本轮改动并推到远程。\n\n已推到 origin/main：b540732。");
+        assert_eq!(
+            turns[1].text,
+            "正在提交本轮改动并推到远程。\n\n已推到 origin/main：b540732。"
+        );
     }
 
     #[test]
@@ -738,7 +985,10 @@ mod tests {
 {"role":"user","message":{"content":[{"type":"text","text":"<user_query>\n第一句真正的问题\n</user_query>"}]}}
 {"role":"assistant","message":{"content":[{"type":"text","text":"答案"}]}}
 "#;
-        assert_eq!(first_user_prompt(stream).as_deref(), Some("第一句真正的问题"));
+        assert_eq!(
+            first_user_prompt(stream).as_deref(),
+            Some("第一句真正的问题")
+        );
     }
 
     #[test]
@@ -750,7 +1000,9 @@ mod tests {
     #[test]
     fn direct_launch_resolves_newest_cursor_version() {
         let _orig = std::env::var_os("LOCALAPPDATA");
-        unsafe { std::env::set_var("LOCALAPPDATA", r"C:\Users\tester\AppData\Local"); }
+        unsafe {
+            std::env::set_var("LOCALAPPDATA", r"C:\Users\tester\AppData\Local");
+        }
         let root = std::env::temp_dir().join(format!("que-cursor-{}", std::process::id()));
         let versions = root.join("versions");
         std::fs::create_dir_all(versions.join("2026.08.01-aaaa1111")).unwrap();
@@ -763,13 +1015,26 @@ mod tests {
         std::fs::write(&shim, "").unwrap();
         let direct = direct_node_launch(shim.to_str().unwrap()).expect("direct launch");
         assert!(direct.node.contains("2026.09.10-bbbb2222") && direct.node.ends_with("node.exe"));
-        assert!(direct.script.contains("2026.09.10-bbbb2222") && direct.script.ends_with("index.js"));
-        assert_eq!(direct.env.iter().find(|(k, _)| k == "CURSOR_INVOKED_AS").map(|(_, v)| v.as_str()), Some("cursor-agent.cmd"));
+        assert!(
+            direct.script.contains("2026.09.10-bbbb2222") && direct.script.ends_with("index.js")
+        );
+        assert_eq!(
+            direct
+                .env
+                .iter()
+                .find(|(k, _)| k == "CURSOR_INVOKED_AS")
+                .map(|(_, v)| v.as_str()),
+            Some("cursor-agent.cmd")
+        );
         assert!(direct.env.iter().any(|(k, _)| k == "NODE_COMPILE_CACHE"));
         let _ = std::fs::remove_dir_all(root);
         match _orig {
-            Some(val) => unsafe { std::env::set_var("LOCALAPPDATA", val); },
-            None => unsafe { std::env::remove_var("LOCALAPPDATA"); },
+            Some(val) => unsafe {
+                std::env::set_var("LOCALAPPDATA", val);
+            },
+            None => unsafe {
+                std::env::remove_var("LOCALAPPDATA");
+            },
         }
     }
 
@@ -780,10 +1045,16 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let shim = root.join("cursor-agent.cmd");
         std::fs::write(&shim, "").unwrap();
-        assert!(direct_node_launch(shim.to_str().unwrap()).is_none(), "no versions dir yet");
+        assert!(
+            direct_node_launch(shim.to_str().unwrap()).is_none(),
+            "no versions dir yet"
+        );
         let version = root.join("versions").join("2026.09.10-bbbb2222");
         std::fs::create_dir_all(&version).unwrap();
-        assert!(direct_node_launch(shim.to_str().unwrap()).is_none(), "version dir without index.js");
+        assert!(
+            direct_node_launch(shim.to_str().unwrap()).is_none(),
+            "version dir without index.js"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -5,7 +5,10 @@ pub struct SessionLabel {
 }
 
 pub fn clip(value: &str) -> Option<String> {
-    let text = value.chars().filter(|c| !c.is_control()).collect::<String>();
+    let text = value
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>();
     let text = text.trim();
     if text.is_empty() || is_noise(text) {
         return None;
@@ -34,9 +37,16 @@ pub fn json_text(value: &serde_json::Value) -> Option<String> {
                     parts.push(text);
                 }
             }
-            if parts.is_empty() { None } else { clip(&parts.join(" ")) }
+            if parts.is_empty() {
+                None
+            } else {
+                clip(&parts.join(" "))
+            }
         }
-        serde_json::Value::Object(map) => map.get("text").and_then(|v| v.as_str()).and_then(clip)
+        serde_json::Value::Object(map) => map
+            .get("text")
+            .and_then(|v| v.as_str())
+            .and_then(clip)
             .or_else(|| map.get("content").and_then(json_text))
             .or_else(|| map.get("prompt").and_then(json_text)),
         _ => None,

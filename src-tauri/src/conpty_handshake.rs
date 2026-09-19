@@ -10,7 +10,9 @@ pub struct StartupHandshake {
 impl StartupHandshake {
     pub fn feed(&mut self, bytes: &[u8]) -> Option<&'static [u8]> {
         const PREFIX: &[u8] = b"\x1b[1t\x1b[c";
-        if self.finished { return None; }
+        if self.finished {
+            return None;
+        }
         for &byte in bytes {
             if byte != PREFIX[self.matched] {
                 self.finished = true;
@@ -36,7 +38,10 @@ mod tests {
         for split in 0..prefix.len() {
             let mut handshake = StartupHandshake::default();
             assert_eq!(handshake.feed(&prefix[..split]), None);
-            assert_eq!(handshake.feed(&prefix[split..]), Some(b"\x1b[?1;2c".as_slice()));
+            assert_eq!(
+                handshake.feed(&prefix[split..]),
+                Some(b"\x1b[?1;2c".as_slice())
+            );
             assert_eq!(handshake.feed(prefix), None);
         }
     }
@@ -53,6 +58,9 @@ mod tests {
     #[test]
     fn handles_coalesced_startup_modes() {
         let mut handshake = StartupHandshake::default();
-        assert_eq!(handshake.feed(b"\x1b[1t\x1b[c\x1b[?1004h\x1b[?9001h"), Some(b"\x1b[?1;2c".as_slice()));
+        assert_eq!(
+            handshake.feed(b"\x1b[1t\x1b[c\x1b[?1004h\x1b[?9001h"),
+            Some(b"\x1b[?1;2c".as_slice())
+        );
     }
 }

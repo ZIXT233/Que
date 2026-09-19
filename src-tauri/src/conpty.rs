@@ -23,11 +23,29 @@ pub fn host_build_number() -> Option<u32> {
     #[cfg(windows)]
     {
         #[repr(C)]
-        struct Version { size: u32, major: u32, minor: u32, build: u32, platform: u32, service_pack: [u16; 128] }
+        struct Version {
+            size: u32,
+            major: u32,
+            minor: u32,
+            build: u32,
+            platform: u32,
+            service_pack: [u16; 128],
+        }
         #[link(name = "ntdll")]
-        extern "system" { fn RtlGetVersion(version: *mut Version) -> i32; }
-        let mut version = Version { size: std::mem::size_of::<Version>() as u32, major: 0, minor: 0, build: 0, platform: 0, service_pack: [0; 128] };
-        if unsafe { RtlGetVersion(&mut version) } == 0 { return Some(version.build); }
+        extern "system" {
+            fn RtlGetVersion(version: *mut Version) -> i32;
+        }
+        let mut version = Version {
+            size: std::mem::size_of::<Version>() as u32,
+            major: 0,
+            minor: 0,
+            build: 0,
+            platform: 0,
+            service_pack: [0; 128],
+        };
+        if unsafe { RtlGetVersion(&mut version) } == 0 {
+            return Some(version.build);
+        }
     }
     None
 }
@@ -85,12 +103,20 @@ mod imp {
         if !dll.is_file() {
             return false;
         }
-        let wide: Vec<u16> = OsStr::new(&dll).encode_wide().chain(std::iter::once(0)).collect();
-        let handle = unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide.as_ptr()) };
+        let wide: Vec<u16> = OsStr::new(&dll)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let handle =
+            unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide.as_ptr()) };
         let ok = (handle as isize) != 0;
         crate::debuglog::info(
             "conpty",
-            &format!("sideload {} -> {}", dll.display(), if ok { "loaded" } else { "failed" }),
+            &format!(
+                "sideload {} -> {}",
+                dll.display(),
+                if ok { "loaded" } else { "failed" }
+            ),
         );
         ok
     }
@@ -108,9 +134,16 @@ mod imp {
         }
         if let Ok(cwd) = std::env::current_dir() {
             candidates.push(cwd.join("resources").join("conpty").join(arch_dir()));
-            candidates.push(cwd.join("src-tauri").join("resources").join("conpty").join(arch_dir()));
+            candidates.push(
+                cwd.join("src-tauri")
+                    .join("resources")
+                    .join("conpty")
+                    .join(arch_dir()),
+            );
         }
-        candidates.into_iter().find(|d| d.join("conpty.dll").is_file())
+        candidates
+            .into_iter()
+            .find(|d| d.join("conpty.dll").is_file())
     }
 }
 
@@ -147,14 +180,25 @@ mod tests {
             .join("resources")
             .join("conpty")
             .join(super::arch_dir());
-        assert!(dir.join("conpty.dll").is_file(), "bundled conpty.dll missing");
-        assert!(dir.join("OpenConsole.exe").is_file(), "bundled OpenConsole.exe missing");
+        assert!(
+            dir.join("conpty.dll").is_file(),
+            "bundled conpty.dll missing"
+        );
+        assert!(
+            dir.join("OpenConsole.exe").is_file(),
+            "bundled OpenConsole.exe missing"
+        );
         // Full end-to-end resolution: LoadLibraryW fails if the module or any
         // of its imports cannot be linked.
-        let wide: Vec<u16> =
-            OsStr::new(&dir.join("conpty.dll")).encode_wide().chain(std::iter::once(0)).collect();
+        let wide: Vec<u16> = OsStr::new(&dir.join("conpty.dll"))
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let handle =
             unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide.as_ptr()) };
-        assert!((handle as isize) != 0, "LoadLibraryW failed for the bundled conpty.dll");
+        assert!(
+            (handle as isize) != 0,
+            "LoadLibraryW failed for the bundled conpty.dll"
+        );
     }
 }

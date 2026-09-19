@@ -1,6 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
+    "resources": [
+      "resources/bin/**/*",
+      "resources/conpty/**/*",
+      "resources/terminal-palettes-LICENSE.txt"
+    ],
     "windows": {
       "nsis": {
         "installerHooks": "windows/installer-hooks.nsh"

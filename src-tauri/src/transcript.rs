@@ -23,7 +23,9 @@ pub fn save_terminal_transcript(id: &str, transcript: &TerminalTranscript) {
         return;
     }
     let file = transcripts_dir().join(format!("{id}.json"));
-    let Ok(body) = serde_json::to_string(transcript) else { return };
+    let Ok(body) = serde_json::to_string(transcript) else {
+        return;
+    };
     let _ = atomic_write(&file, &body);
 }
 
@@ -35,8 +37,15 @@ pub fn read_terminal_transcript(id: &str) -> Option<TerminalTranscript> {
     let saved: serde_json::Value = serde_json::from_str(&body).ok()?;
     let cwd = saved.get("cwd")?.as_str()?.to_string();
     let output = saved.get("output")?.as_str()?.to_string();
-    let exit_code = saved.get("exitCode").and_then(|v| v.as_i64()).map(|n| n as i32);
-    Some(TerminalTranscript { cwd, output, exit_code })
+    let exit_code = saved
+        .get("exitCode")
+        .and_then(|v| v.as_i64())
+        .map(|n| n as i32);
+    Some(TerminalTranscript {
+        cwd,
+        output,
+        exit_code,
+    })
 }
 
 #[cfg(test)]

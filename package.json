@@ -6,11 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:que": "QUE_DATA_DIR=\"$HOME/.que-dev\" QUE_SKIP_EXTERNAL_HOOKS=1 tauri dev --config src-tauri/tauri.dev.conf.json",
+    "dev:que": "QUE_DATA_DIR=\"$HOME/.que-dev\" tauri dev --config src-tauri/tauri.dev.conf.json",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "QUE_DATA_DIR=\"$HOME/.que-dev\" QUE_SKIP_EXTERNAL_HOOKS=1 tauri dev --config src-tauri/tauri.dev.conf.json"
+    "tauri:dev": "QUE_DATA_DIR=\"$HOME/.que-dev\" tauri dev --config src-tauri/tauri.dev.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

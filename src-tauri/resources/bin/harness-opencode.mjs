@@ -32,12 +32,13 @@ export const QueState = async ({ client }) => {
       const token = process.env.QUE_HARNESS_CHANNEL;
       const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.que', 'external-signals');
       const dir = process.env.QUE_HARNESS_SIGNAL_DIR || extDir;
-      if (token) {
-        fs.writeFileSync(
+      if (token && process.platform !== 'win32') {
+        try { fs.writeFileSync(
           process.env.QUE_HARNESS_TTY || '/dev/tty',
           `\x1b]777;que;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`,
-        );
-      } else if (dir) {
+        ); } catch { /* File delivery is independent of OSC delivery. */ }
+      }
+      if (process.env.QUE_HARNESS_SIGNAL_DIR || !token) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         const file = path.join(dir, `${signal.at}-${randomUUID()}.json`);
         fs.writeFileSync(`${file}.tmp`, JSON.stringify(signal), { mode: 0o600 });

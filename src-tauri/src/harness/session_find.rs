@@ -5,7 +5,9 @@ pub fn safe_name_id(id: &str) -> bool {
     !id.is_empty()
         && !id.contains('/')
         && !id.contains('\\')
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
 pub fn find_first(roots: &[PathBuf], name: &str) -> Option<PathBuf> {
@@ -31,7 +33,12 @@ fn find_named(roots: &[PathBuf], name: &str, kind: Option<char>, quit: bool) -> 
     walk_named(&roots, name, kind, quit)
 }
 
-fn unix_find(roots: &[PathBuf], name: &str, kind: Option<char>, quit: bool) -> Option<Vec<PathBuf>> {
+fn unix_find(
+    roots: &[PathBuf],
+    name: &str,
+    kind: Option<char>,
+    quit: bool,
+) -> Option<Vec<PathBuf>> {
     if !cfg!(unix) {
         return None;
     }
@@ -70,13 +77,18 @@ fn walk_named(roots: &[PathBuf], name: &str, kind: Option<char>, quit: bool) -> 
 }
 
 fn walk(dir: &Path, name: &str, kind: Option<char>, quit: bool, found: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         if quit && !found.is_empty() {
             return;
         }
         let path = entry.path();
-        let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default();
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
         let kind_ok = match kind {
             Some('d') => path.is_dir(),
             Some('f') => path.is_file(),
@@ -95,7 +107,10 @@ fn walk(dir: &Path, name: &str, kind: Option<char>, quit: bool, found: &mut Vec<
 }
 
 fn name_matches(file_name: &str, pattern: &str) -> bool {
-    if let Some(inner) = pattern.strip_prefix('*').and_then(|rest| rest.strip_suffix('*')) {
+    if let Some(inner) = pattern
+        .strip_prefix('*')
+        .and_then(|rest| rest.strip_suffix('*'))
+    {
         return file_name.contains(inner);
     }
     if let Some(suffix) = pattern.strip_prefix('*') {
@@ -116,7 +131,10 @@ mod tests {
         let target = nested.join("rollout-019fb25e-7179-7a41-b520-abde1d5e68fb.jsonl");
         std::fs::write(&target, "").unwrap();
         std::fs::write(nested.join("other.jsonl"), "").unwrap();
-        let found = find_first(&[root.clone()], "*019fb25e-7179-7a41-b520-abde1d5e68fb.jsonl");
+        let found = find_first(
+            &[root.clone()],
+            "*019fb25e-7179-7a41-b520-abde1d5e68fb.jsonl",
+        );
         let _ = std::fs::remove_dir_all(&root);
         assert_eq!(found.as_deref(), Some(target.as_path()));
     }

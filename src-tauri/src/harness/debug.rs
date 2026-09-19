@@ -1,10 +1,10 @@
 use super::signals::ProbeState;
 use crate::paths::signal_dir;
 use crate::terminal::{PtyProbe, TerminalHub};
+use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use parking_lot::Mutex;
 
 const MAX_EVENTS: usize = 80;
 
@@ -98,7 +98,12 @@ pub fn snapshot(
     let state = probes.lock().get(terminal_id).cloned();
     let probe = state.as_ref().map(ProbeView::from_state);
     let pty = terminals.probe(terminal_id);
-    let clues = clues(state.as_ref().and_then(|s| s.kind.as_deref()), probe.as_ref(), pty.as_ref(), &events);
+    let clues = clues(
+        state.as_ref().and_then(|s| s.kind.as_deref()),
+        probe.as_ref(),
+        pty.as_ref(),
+        &events,
+    );
     let trace = std::fs::read_to_string(directory.join("hook-trace.jsonl"))
         .ok()
         .map(|raw| {
@@ -127,7 +132,12 @@ pub fn snapshot(
     }
 }
 
-fn clues(kind: Option<&str>, probe: Option<&ProbeView>, pty: Option<&PtyProbe>, events: &[HarnessDebugEvent]) -> Vec<String> {
+fn clues(
+    kind: Option<&str>,
+    probe: Option<&ProbeView>,
+    pty: Option<&PtyProbe>,
+    events: &[HarnessDebugEvent],
+) -> Vec<String> {
     let mut clues = Vec::new();
     let Some(pty) = pty else {
         clues.push("PTY 记录不存在：卡片引用的终端已不在内存里".into());
@@ -143,10 +153,15 @@ fn clues(kind: Option<&str>, probe: Option<&ProbeView>, pty: Option<&PtyProbe>, 
         clues.push("读到了字节但没发出事件：UTF-8 拆包一直 hold，或事件没 emit".into());
     }
     if pty.listeners == 0 && pty.bytes_in > 0 {
-        clues.push("有输出但 SSE 听众是 0：前端没连上 /api/terminal/:id/events，或连上后又断了".into());
+        clues.push(
+            "有输出但 SSE 听众是 0：前端没连上 /api/terminal/:id/events，或连上后又断了".into(),
+        );
     }
     if pty.send_fail > 0 {
-        clues.push(format!("有 {} 次听众发送失败：SSE 消费者掉了", pty.send_fail));
+        clues.push(format!(
+            "有 {} 次听众发送失败：SSE 消费者掉了",
+            pty.send_fail
+        ));
     }
     if pty.on_output_panic > 0 {
         if pty.reader_alive {
@@ -156,7 +171,10 @@ fn clues(kind: Option<&str>, probe: Option<&ProbeView>, pty: Option<&PtyProbe>, 
         }
     }
     if pty.last_write_ms >= 200 {
-        clues.push(format!("最近一次写入 PTY 堵了 {}ms：子进程没在读 stdin（常见于 Cursor hook 死锁）", pty.last_write_ms));
+        clues.push(format!(
+            "最近一次写入 PTY 堵了 {}ms：子进程没在读 stdin（常见于 Cursor hook 死锁）",
+            pty.last_write_ms
+        ));
     }
     if pty.write_err > 0 {
         clues.push("PTY write 失败过".into());
@@ -179,8 +197,16 @@ fn clues(kind: Option<&str>, probe: Option<&ProbeView>, pty: Option<&PtyProbe>, 
         clues.push(format!("lastError: {error}"));
     }
     if let Some(probe) = probe {
-        if probe.hook_seen && events.iter().any(|e| e.event == "beforeSubmitPrompt" || e.event == "UserPromptSubmit")
-            && !events.iter().any(|e| matches!(e.event.as_str(), "stop" | "Stop" | "afterAgentResponse" | "sessionEnd"))
+        if probe.hook_seen
+            && events
+                .iter()
+                .any(|e| e.event == "beforeSubmitPrompt" || e.event == "UserPromptSubmit")
+            && !events.iter().any(|e| {
+                matches!(
+                    e.event.as_str(),
+                    "stop" | "Stop" | "afterAgentResponse" | "sessionEnd"
+                )
+            })
         {
             clues.push("hooks 看到了提交，但没有 stop/afterAgentResponse：CLI 在提交后卡住，不是卡片状态机".into());
         }
@@ -190,7 +216,10 @@ fn clues(kind: Option<&str>, probe: Option<&ProbeView>, pty: Option<&PtyProbe>, 
         harness.debug_clues(probe, Some(pty), events, &mut clues);
     }
     if clues.is_empty() {
-        clues.push("后端在送数据。若画面仍缺，看 debug 里的 xterm 字段：sse 计数是否远小于 eventsEmitted".into());
+        clues.push(
+            "后端在送数据。若画面仍缺，看 debug 里的 xterm 字段：sse 计数是否远小于 eventsEmitted"
+                .into(),
+        );
     }
     clues
 }

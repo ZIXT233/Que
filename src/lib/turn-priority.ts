@@ -1,5 +1,5 @@
 import { URGENT_CALL_TAG, URGENT_CALL_NAME, isReservedUrgentName, hasUrgentCall } from "./urgent-call.ts";
-import type { QueueCard, CardQueue } from "./card-queue.ts";
+import { externalQueueCards, type QueueCard, type CardQueue } from "./card-queue.ts";
 export interface TurnTag { name: string; weight: number; description: string }
 export const DEFAULT_TURN_TAGS: TurnTag[] = [
   { name: "🧩 Easy", weight: 30, description: "The request only needs a simple confirmation, choice, short reply, or low-cost judgment; it does not require recalling and understanding substantial project context." },
@@ -36,12 +36,25 @@ export function scoreCard(card: QueueCard, tags: TurnTag[], now = Date.now()) {
   const weight = card.priorityWeight ?? 0;
   return { weight, waiting, tags: matched, total: weight + waiting + matched.reduce((sum, tag) => sum + tag.weight, 0) };
 }
-export function sortedQueue(state: CardQueue, now = Date.now()): QueueCard[] {
+export function sortedQueue(state: CardQueue, now = Date.now(), includeExternal = false): QueueCard[] {
   const cards = state.order.flatMap((id) => {
     const card = state.cards.find((item) => item.id === id);
     return card && (card.session || card.harness) && !card.detached && card.archivedAt === undefined
       && card.remindAt === undefined && card.phase !== "working" ? [card] : [];
   });
+  if (includeExternal) {
+    // Merge the read-only overlay without persisting it or changing the relative
+    // order of owned cards (which may have been manually moved).
+    const newestFirst = state.insertionPosition === "top";
+    const notices = externalQueueCards(state.external).sort((a, b) =>
+      (newestFirst ? -1 : 1) * (a.readyAt! - b.readyAt!) || a.id.localeCompare(b.id));
+    for (const notice of notices) {
+      const index = cards.findIndex(card => newestFirst
+        ? (card.readyAt ?? card.createdAt) < notice.readyAt!
+        : (card.readyAt ?? card.createdAt) > notice.readyAt!);
+      cards.splice(index < 0 ? cards.length : index, 0, notice);
+    }
+  }
   if (state.sortMode !== "score") return cards.sort((a,b) => Number(hasUrgentCall(b)) - Number(hasUrgentCall(a)));
   const tags = state.turnTagDefinitions ?? DEFAULT_TURN_TAGS;
   return cards.sort((a,b) => Number(hasUrgentCall(b)) - Number(hasUrgentCall(a))

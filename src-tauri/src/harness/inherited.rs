@@ -10,15 +10,50 @@ use crate::ssh::{shell_quote, ssh_exec};
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 
-pub async fn inherited_config(kind: &str, workspace: &QueueWorkspace, node: &str) -> AppResult<Map<String, Value>> {
+pub async fn inherited_config(
+    kind: &str,
+    workspace: &QueueWorkspace,
+    node: &str,
+) -> AppResult<Map<String, Value>> {
     let text = if workspace.kind == "ssh" {
-        let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
-        let script = if kind == "opencode" {
+        let host = workspace
+            .ssh_host
+            .as_deref()
+            .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
+        let script = if kind == "opencode-cli" {
+            r#"const fs=require('node:fs'),p=require('node:path');const root=process.env.XDG_CONFIG_HOME||p.join(process.env.HOME||process.env.USERPROFILE,'.config');const f=p.join(root,'opencode','cli.json');let cfg={};try{cfg=JSON.parse(fs.readFileSync(f,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}Object.assign(cfg,JSON.parse(process.env.OPENCODE_CLI_CONFIG_CONTENT||'{}'));process.stdout.write(JSON.stringify(cfg));"#
+        } else if kind == "opencode" {
             r#"process.stdout.write(process.env.OPENCODE_CONFIG_CONTENT||"{}");"#
         } else {
             r#"const fs=require("node:fs"),p=require("node:path");const f=process.env.GEMINI_CLI_SYSTEM_DEFAULTS_PATH||(process.platform==="darwin"?"/Library/Application Support/GeminiCli/system-defaults.json":"/etc/gemini-cli/system-defaults.json");try{process.stdout.write(fs.readFileSync(f,"utf8"));}catch(e){if(e.code!=="ENOENT")throw e;process.stdout.write("{}");}"#
         };
-        String::from_utf8_lossy(&ssh_exec(host, &[shell_quote(node), "-e".into(), shell_quote(script)].join(" ")).await?).into_owned()
+        String::from_utf8_lossy(
+            &ssh_exec(
+                host,
+                &[shell_quote(node), "-e".into(), shell_quote(script)].join(" "),
+            )
+            .await?,
+        )
+        .into_owned()
+    } else if kind == "opencode-cli" {
+        let root = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                crate::paths::user_home()
+                    .unwrap_or_default()
+                    .join(".config")
+            });
+        let mut config: Map<String, Value> =
+            match std::fs::read_to_string(root.join("opencode/cli.json")) {
+                Ok(text) => serde_json::from_str(&text)?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Map::new(),
+                Err(error) => return Err(error.into()),
+            };
+        let overlay: Map<String, Value> = serde_json::from_str(
+            &std::env::var("OPENCODE_CLI_CONFIG_CONTENT").unwrap_or_else(|_| "{}".into()),
+        )?;
+        config.extend(overlay);
+        serde_json::to_string(&config)?
     } else if kind == "opencode" {
         std::env::var("OPENCODE_CONFIG_CONTENT").unwrap_or_else(|_| "{}".into())
     } else {
@@ -57,6 +92,10 @@ trait IfEmpty {
 
 impl IfEmpty for &str {
     fn if_empty(self, fallback: &str) -> String {
-        if self.is_empty() { fallback.to_string() } else { self.to_string() }
+        if self.is_empty() {
+            fallback.to_string()
+        } else {
+            self.to_string()
+        }
     }
 }

@@ -6,7 +6,8 @@ use tauri::{
 
 fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let result = window.unminimize()
+        let result = window
+            .unminimize()
             .and_then(|_| window.show())
             .and_then(|_| window.set_focus());
         if let Err(error) = result {
@@ -16,10 +17,24 @@ fn show_main(app: &AppHandle) {
 }
 
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "que.tray.open", "打开 Que / Open Que", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "que.tray.quit", "退出 Que / Quit Que", true, None::<&str>)?;
+    let open = MenuItem::with_id(
+        app,
+        "que.tray.open",
+        "打开 Que / Open Que",
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        "que.tray.quit",
+        "退出 Que / Quit Que",
+        true,
+        None::<&str>,
+    )?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
-    let icon = app.default_window_icon().cloned()
+    let icon = app
+        .default_window_icon()
+        .cloned()
         .ok_or_else(|| std::io::Error::other("Que tray icon is missing"))?;
 
     // Register before enabling close-to-tray: never leave a hidden application
@@ -30,11 +45,14 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
-            if matches!(event, TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            }) {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
                 show_main(tray.app_handle());
             }
         })

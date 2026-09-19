@@ -9,7 +9,9 @@
 //! The `use` bindings below let a kind file reach the harness module's shared pieces
 //! with `super::…`, so the files read exactly as they did when they sat one level up.
 
-use crate::harness::{debug, inherited, install, label_text, registry, session_find, session_label, signals};
+use crate::harness::{
+    debug, inherited, install, label_text, registry, session_find, session_label, signals,
+};
 
 pub(super) mod antigravity;
 pub(super) mod claude;

@@ -122,7 +122,9 @@ impl KittyNotifyProbe {
         let mut done = true;
         let mut app = None;
         for field in meta.split(':').filter(|field| !field.is_empty()) {
-            let Some((key, value)) = field.split_once('=') else { continue };
+            let Some((key, value)) = field.split_once('=') else {
+                continue;
+            };
             match key {
                 "i" => id = value.to_string(),
                 "p" => part = value,
@@ -134,9 +136,15 @@ impl KittyNotifyProbe {
         }
         let text = decode_payload(payload, encoded).unwrap_or_default();
         if part == "body" {
-            self.bodies.entry(id.clone()).and_modify(|body| body.push_str(&text)).or_insert(text);
+            self.bodies
+                .entry(id.clone())
+                .and_modify(|body| body.push_str(&text))
+                .or_insert(text);
         } else if part == "title" || part.is_empty() {
-            self.titles.entry(id.clone()).and_modify(|title| title.push_str(&text)).or_insert(text);
+            self.titles
+                .entry(id.clone())
+                .and_modify(|title| title.push_str(&text))
+                .or_insert(text);
         }
         if let Some(app) = app {
             self.apps.insert(id.clone(), app);
@@ -147,10 +155,17 @@ impl KittyNotifyProbe {
         let title = self.titles.remove(&id);
         let body = self.bodies.remove(&id);
         let app = self.apps.remove(&id);
-        if title.as_ref().is_none_or(|value| value.is_empty()) && body.as_ref().is_none_or(|value| value.is_empty()) {
+        if title.as_ref().is_none_or(|value| value.is_empty())
+            && body.as_ref().is_none_or(|value| value.is_empty())
+        {
             return None;
         }
-        Some(TerminalNotify { id, title, body, app })
+        Some(TerminalNotify {
+            id,
+            title,
+            body,
+            app,
+        })
     }
 }
 
@@ -166,7 +181,13 @@ pub fn observe_notify(current: ProbeState, notify: &TerminalNotify, at: i64) -> 
         .body
         .as_deref()
         .or(notify.title.as_deref())
-        .map(|value| value.chars().filter(|c| !c.is_control()).take(160).collect::<String>())
+        .map(|value| {
+            value
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(160)
+                .collect::<String>()
+        })
         .filter(|value| !value.trim().is_empty());
     if let Some(preview) = preview {
         next.reply_preview = Some(preview);
@@ -261,8 +282,14 @@ mod tests {
         let mut probe = KittyNotifyProbe::new();
         let title = b64("Cursor");
         let body = b64("Cursor is waiting for you");
-        assert!(probe.push(&format!("\x1b]99;i=cursor:d=0:e=1:f={title}:p=title;{title}\u{7}")).is_none());
-        let notify = probe.push(&format!("\x1b]99;i=cursor:e=1:p=body;{body}\u{7}")).unwrap();
+        assert!(probe
+            .push(&format!(
+                "\x1b]99;i=cursor:d=0:e=1:f={title}:p=title;{title}\u{7}"
+            ))
+            .is_none());
+        let notify = probe
+            .push(&format!("\x1b]99;i=cursor:e=1:p=body;{body}\u{7}"))
+            .unwrap();
         assert_eq!(notify.app.as_deref(), Some("Cursor"));
         assert_eq!(notify.title.as_deref(), Some("Cursor"));
         assert_eq!(notify.body.as_deref(), Some("Cursor is waiting for you"));
@@ -273,8 +300,15 @@ mod tests {
         let mut probe = KittyNotifyProbe::new();
         let body = b64("Cursor is waiting for you");
         assert!(probe.push(&"█".repeat(80)).is_none());
-        assert!(probe.push(&format!("\x1b]99;i=cursor:d=0:e=1:p=title;{}\u{7}", b64("Cursor"))).is_none());
-        let notify = probe.push(&format!("\x1b]99;i=cursor:e=1:p=body;{body}\u{7}")).unwrap();
+        assert!(probe
+            .push(&format!(
+                "\x1b]99;i=cursor:d=0:e=1:p=title;{}\u{7}",
+                b64("Cursor")
+            ))
+            .is_none());
+        let notify = probe
+            .push(&format!("\x1b]99;i=cursor:e=1:p=body;{body}\u{7}"))
+            .unwrap();
         assert_eq!(notify.body.as_deref(), Some("Cursor is waiting for you"));
     }
 
@@ -289,17 +323,27 @@ mod tests {
 
     #[test]
     fn observe_notify_does_not_mark_hooks() {
-        let current = ProbeState { state: "working".into(), ..ProbeState::default() };
-        let next = observe_notify(current, &TerminalNotify {
-            id: "cursor".into(),
-            title: Some("Cursor".into()),
-            body: Some("Cursor needs your input".into()),
-            app: Some("Cursor".into()),
-        }, 10);
+        let current = ProbeState {
+            state: "working".into(),
+            ..ProbeState::default()
+        };
+        let next = observe_notify(
+            current,
+            &TerminalNotify {
+                id: "cursor".into(),
+                title: Some("Cursor".into()),
+                body: Some("Cursor needs your input".into()),
+                app: Some("Cursor".into()),
+            },
+            10,
+        );
         assert_eq!(next.state, "attention");
         assert!(!next.hook_seen);
         assert_eq!(next.source.as_deref(), Some("notify-osc"));
-        assert_eq!(next.reply_preview.as_deref(), Some("Cursor needs your input"));
+        assert_eq!(
+            next.reply_preview.as_deref(),
+            Some("Cursor needs your input")
+        );
     }
 
     #[test]
@@ -314,7 +358,9 @@ mod tests {
     #[test]
     fn parses_osc777_notify() {
         let mut probe = KittyNotifyProbe::new();
-        let notify = probe.push("\x1b]777;notify;Cursor;Cursor needs your input\u{7}").unwrap();
+        let notify = probe
+            .push("\x1b]777;notify;Cursor;Cursor needs your input\u{7}")
+            .unwrap();
         assert_eq!(notify.id, "osc777");
         assert_eq!(notify.title.as_deref(), Some("Cursor"));
         assert_eq!(notify.body.as_deref(), Some("Cursor needs your input"));
@@ -336,15 +382,22 @@ mod tests {
             reply_preview: Some("hook preview".into()),
             ..ProbeState::default()
         };
-        let next = observe_notify(current, &TerminalNotify {
-            id: "cursor".into(),
-            title: Some("Cursor".into()),
-            body: Some("Cursor is waiting for you".into()),
-            app: None,
-        }, 20);
+        let next = observe_notify(
+            current,
+            &TerminalNotify {
+                id: "cursor".into(),
+                title: Some("Cursor".into()),
+                body: Some("Cursor is waiting for you".into()),
+                app: None,
+            },
+            20,
+        );
         assert_eq!(next.state, "attention");
         assert!(next.hook_seen);
         assert_eq!(next.source.as_deref(), Some("hook"));
-        assert_eq!(next.reply_preview.as_deref(), Some("Cursor is waiting for you"));
+        assert_eq!(
+            next.reply_preview.as_deref(),
+            Some("Cursor is waiting for you")
+        );
     }
 }

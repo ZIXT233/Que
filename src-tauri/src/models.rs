@@ -2,7 +2,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 fn i64_from_json(value: &Value) -> Option<i64> {
-    value.as_i64().or_else(|| value.as_u64().map(|n| n as i64)).or_else(|| value.as_f64().map(|n| n as i64))
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().map(|n| n as i64))
+        .or_else(|| value.as_f64().map(|n| n as i64))
 }
 
 fn deserialize_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
@@ -56,7 +59,11 @@ pub struct QueueWorkspace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_host: Option<String>,
     pub runtime_cwd: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_opt_i64")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_i64"
+    )]
     pub default_conversation_weight: Option<i64>,
 }
 
@@ -183,7 +190,11 @@ pub struct QueueCard {
     pub created_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready_at: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_opt_i64")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_opt_i64"
+    )]
     pub priority_weight: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_since: Option<i64>,
@@ -377,14 +388,18 @@ mod tests {
         }"#;
         let queue: CardQueue = serde_json::from_str(raw).unwrap();
         assert_eq!(queue.cards[0].priority_weight, Some(0));
-        assert_eq!(queue.workspaces.unwrap()[0].default_conversation_weight, Some(0));
+        assert_eq!(
+            queue.workspaces.unwrap()[0].default_conversation_weight,
+            Some(0)
+        );
     }
 
     #[test]
     fn powershell_defaults_on_windows_only() {
         let missing: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(missing.powershell_enabled, cfg!(windows));
-        let explicit: AppSettings = serde_json::from_str(r#"{"powershell_enabled":false}"#).unwrap();
+        let explicit: AppSettings =
+            serde_json::from_str(r#"{"powershell_enabled":false}"#).unwrap();
         assert!(!explicit.powershell_enabled);
         assert_eq!(AppSettings::default().powershell_enabled, cfg!(windows));
         assert!(!missing.developer_probes);
@@ -401,18 +416,26 @@ mod tests {
         assert!(!missing.is_external_ingress_enabled("antigravity"));
         assert!(!missing.is_external_ingress_enabled("gemini"));
 
-        let disabled: AppSettings = serde_json::from_str(r#"{"external_ingress":{"codex":false}}"#).unwrap();
+        let disabled: AppSettings =
+            serde_json::from_str(r#"{"external_ingress":{"codex":false}}"#).unwrap();
         assert!(!disabled.is_external_ingress_enabled("codex"));
         assert!(!disabled.is_external_ingress_enabled("cursor"));
 
         // With the gate on, per-harness keys apply: absent means enabled.
-        let on: AppSettings = serde_json::from_str(r#"{"external_notices_enabled":true,"external_ingress":{"codex":false}}"#).unwrap();
+        let on: AppSettings = serde_json::from_str(
+            r#"{"external_notices_enabled":true,"external_ingress":{"codex":false}}"#,
+        )
+        .unwrap();
         assert!(!on.is_external_ingress_enabled("codex"));
         assert!(on.is_external_ingress_enabled("cursor"));
         // The gate overrides even an explicit per-harness true.
-        let gated: AppSettings = serde_json::from_str(r#"{"external_notices_enabled":false,"external_ingress":{"codex":true}}"#).unwrap();
+        let gated: AppSettings = serde_json::from_str(
+            r#"{"external_notices_enabled":false,"external_ingress":{"codex":true}}"#,
+        )
+        .unwrap();
         assert!(!gated.is_external_ingress_enabled("codex"));
-        let camel: AppSettings = serde_json::from_str(r#"{"externalNoticesEnabled":true}"#).unwrap();
+        let camel: AppSettings =
+            serde_json::from_str(r#"{"externalNoticesEnabled":true}"#).unwrap();
         assert!(camel.is_external_ingress_enabled("codex"));
     }
 }

@@ -7,21 +7,19 @@ pub async fn focus_external_window(
     project: Option<String>,
     cwd: Option<String>,
 ) -> Result<bool, String> {
-    let target = project
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            cwd.as_deref().and_then(|p| {
-                let trimmed = p.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    std::path::Path::new(trimmed)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .map(|s| s.to_string())
-                }
-            })
-        });
+    let target = project.filter(|s| !s.trim().is_empty()).or_else(|| {
+        cwd.as_deref().and_then(|p| {
+            let trimmed = p.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                std::path::Path::new(trimmed)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.to_string())
+            }
+        })
+    });
 
     let target_ref = target.as_deref().filter(|s| !s.trim().is_empty());
 
@@ -81,14 +79,20 @@ mod macos_cocoa {
             let msg_act: MsgSendActivate = std::mem::transmute(msg_ptr);
 
             let ws = msg0(cls_ws, sel_shared);
-            if ws.is_null() { return false; }
+            if ws.is_null() {
+                return false;
+            }
             let apps = msg0(ws, sel_running);
-            if apps.is_null() { return false; }
+            if apps.is_null() {
+                return false;
+            }
             let count = msg0(apps, sel_count) as usize;
 
             for i in 0..count {
                 let app = msg1(apps, sel_obj_at, i);
-                if app.is_null() { continue; }
+                if app.is_null() {
+                    continue;
+                }
                 let bid_ns = msg0(app, sel_bid);
                 let name_ns = msg0(app, sel_name);
 
@@ -125,7 +129,10 @@ mod macos_cocoa {
                     let activated = msg_act(app, sel_activate, 3);
                     if !activated {
                         if let Some(ref bid) = matched_bid {
-                            let _ = std::process::Command::new("open").arg("-b").arg(bid).status();
+                            let _ = std::process::Command::new("open")
+                                .arg("-b")
+                                .arg(bid)
+                                .status();
                         }
                     }
                     return true;
@@ -139,25 +146,34 @@ mod macos_cocoa {
 #[cfg(target_os = "macos")]
 fn focus_window_macos(kind: &str, target: Option<&str>) -> Result<bool, String> {
     let (bundle_ids, app_names): (Vec<&str>, Vec<&str>) = match kind {
-        "antigravity" => (
-            vec!["com.google.antigravity"],
-            vec!["Antigravity"],
-        ),
-        "cursor" => (
-            vec!["com.todesktop.230313mzl4w4u92"],
-            vec!["Cursor"],
-        ),
+        "antigravity" => (vec!["com.google.antigravity"], vec!["Antigravity"]),
+        "cursor" => (vec!["com.todesktop.230313mzl4w4u92"], vec!["Cursor"]),
         "codebuddy" => (
             vec!["com.tencent.codebuddycn", "com.tencent.codebuddy"],
             vec!["CodeBuddy CN", "CodeBuddy"],
         ),
         "codex" => (
-            vec!["com.openai.codex", "com.todesktop.230313mzl4w4u92", "com.microsoft.VSCode"],
+            vec![
+                "com.openai.codex",
+                "com.todesktop.230313mzl4w4u92",
+                "com.microsoft.VSCode",
+            ],
             vec!["ChatGPT", "Cursor", "Code", "Terminal", "iTerm2"],
         ),
         "claude" => (
-            vec!["com.googlecode.iterm2", "com.apple.Terminal", "com.todesktop.230313mzl4w4u92"],
-            vec!["iTerm2", "Terminal", "Ghostty", "Alacritty", "Cursor", "Code"],
+            vec![
+                "com.googlecode.iterm2",
+                "com.apple.Terminal",
+                "com.todesktop.230313mzl4w4u92",
+            ],
+            vec![
+                "iTerm2",
+                "Terminal",
+                "Ghostty",
+                "Alacritty",
+                "Cursor",
+                "Code",
+            ],
         ),
         _ => (
             vec![
@@ -167,7 +183,15 @@ fn focus_window_macos(kind: &str, target: Option<&str>) -> Result<bool, String> 
                 "com.openai.codex",
                 "com.microsoft.VSCode",
             ],
-            vec!["Antigravity", "Cursor", "CodeBuddy CN", "ChatGPT", "Code", "Terminal", "iTerm2"],
+            vec![
+                "Antigravity",
+                "Cursor",
+                "CodeBuddy CN",
+                "ChatGPT",
+                "Code",
+                "Terminal",
+                "iTerm2",
+            ],
         ),
     };
 
@@ -240,7 +264,12 @@ fn focus_window_macos(kind: &str, target: Option<&str>) -> Result<bool, String> 
         if let Ok(output) = Command::new("osascript").arg("-e").arg(&script).output() {
             let result = String::from_utf8_lossy(&output.stdout);
             if result.trim() == "ok" {
-                crate::debuglog::info("focus", &format!("unminimized & raised window via AppleScript app={app} target={target_str}"));
+                crate::debuglog::info(
+                    "focus",
+                    &format!(
+                        "unminimized & raised window via AppleScript app={app} target={target_str}"
+                    ),
+                );
                 let _ = macos_cocoa::activate_running_app(&bundle_ids, &app_names);
                 return Ok(true);
             }
@@ -249,7 +278,10 @@ fn focus_window_macos(kind: &str, target: Option<&str>) -> Result<bool, String> 
 
     // 2. Direct Cocoa activation with activateWithOptions: 3
     if macos_cocoa::activate_running_app(&bundle_ids, &app_names) {
-        crate::debuglog::info("focus", &format!("activated running app via Cocoa: kind={kind} target={target_str}"));
+        crate::debuglog::info(
+            "focus",
+            &format!("activated running app via Cocoa: kind={kind} target={target_str}"),
+        );
         return Ok(true);
     }
 
@@ -262,9 +294,24 @@ fn focus_window_windows(kind: &str, target: Option<&str>) -> Result<bool, String
         "antigravity" => vec!["Antigravity", "antigravity"],
         "cursor" => vec!["cursor", "Cursor"],
         "codebuddy" => vec!["CodeBuddy", "codebuddy"],
-        "codex" => vec!["ChatGPT", "cursor", "Code", "WindowsTerminal", "cmd", "powershell"],
+        "codex" => vec![
+            "ChatGPT",
+            "cursor",
+            "Code",
+            "WindowsTerminal",
+            "cmd",
+            "powershell",
+        ],
         "claude" => vec!["WindowsTerminal", "cmd", "powershell", "cursor", "Code"],
-        _ => vec!["Antigravity", "antigravity", "cursor", "CodeBuddy", "ChatGPT", "Code", "WindowsTerminal"],
+        _ => vec![
+            "Antigravity",
+            "antigravity",
+            "cursor",
+            "CodeBuddy",
+            "ChatGPT",
+            "Code",
+            "WindowsTerminal",
+        ],
     };
 
     let procs_joined = proc_candidates
@@ -310,7 +357,10 @@ fn focus_window_linux(kind: &str, target: Option<&str>) -> Result<bool, String> 
                 return Ok(true);
             }
         }
-        if let Ok(status) = Command::new("xdotool").args(["search", "--name", t, "windowactivate"]).status() {
+        if let Ok(status) = Command::new("xdotool")
+            .args(["search", "--name", t, "windowactivate"])
+            .status()
+        {
             if status.success() {
                 return Ok(true);
             }
@@ -330,7 +380,10 @@ fn focus_window_linux(kind: &str, target: Option<&str>) -> Result<bool, String> 
                 return Ok(true);
             }
         }
-        if let Ok(status) = Command::new("xdotool").args(["search", "--class", app, "windowactivate"]).status() {
+        if let Ok(status) = Command::new("xdotool")
+            .args(["search", "--class", app, "windowactivate"])
+            .status()
+        {
             if status.success() {
                 return Ok(true);
             }

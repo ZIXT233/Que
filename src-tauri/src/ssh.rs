@@ -17,14 +17,26 @@ pub async fn is_connected(host: &str) -> bool {
 
 /// Establish (or reuse) the connection for a host, so later commands and
 /// terminals do not have to authenticate again.
-pub async fn connect_host(host: &str, password: Option<String>, trusted_prompt: Option<String>) -> AppResult<()> {
-    crate::remote::session_with(host, password, trusted_prompt).await.map(|_| ())
+pub async fn connect_host(
+    host: &str,
+    password: Option<String>,
+    trusted_prompt: Option<String>,
+) -> AppResult<()> {
+    crate::remote::session_with(host, password, trusted_prompt)
+        .await
+        .map(|_| ())
 }
 
 /// Validate a host that is not saved yet (the editor's "test" action).
-pub async fn test_target(target: RemoteHost, password: Option<String>, trusted_prompt: Option<String>) -> AppResult<()> {
+pub async fn test_target(
+    target: RemoteHost,
+    password: Option<String>,
+    trusted_prompt: Option<String>,
+) -> AppResult<()> {
     let target = crate::remote::Target::from_host(&target);
-    crate::remote::connect_target(&target, password, trusted_prompt).await.map(|_| ())
+    crate::remote::connect_target(&target, password, trusted_prompt)
+        .await
+        .map(|_| ())
 }
 
 /// POSIX single-quote a value for a remote shell.
@@ -39,7 +51,13 @@ pub fn shell_quote(value: &str) -> String {
 /// explicitly.
 pub fn ssh_login_command(command: &str) -> String {
     let run = format!("exec /bin/sh -c {}", shell_quote(command));
-    format!("/bin/sh -c {}", shell_quote(&format!("exec \"${{SHELL:-/bin/sh}}\" -ilc {}", shell_quote(&run))))
+    format!(
+        "/bin/sh -c {}",
+        shell_quote(&format!(
+            "exec \"${{SHELL:-/bin/sh}}\" -ilc {}",
+            shell_quote(&run)
+        ))
+    )
 }
 
 /// The one-shot "is this CLI on the host's PATH" probe a remote launch runs before
@@ -72,7 +90,13 @@ pub async fn ssh_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
 }
 
 pub async fn ssh_exec_stdin(host: &str, command: &str, stdin: &[u8]) -> AppResult<Vec<u8>> {
-    crate::debuglog::debug("ssh", &format!("exec host={host} cmd={:?}", crate::debuglog::clip(command, 500)));
+    crate::debuglog::debug(
+        "ssh",
+        &format!(
+            "exec host={host} cmd={:?}",
+            crate::debuglog::clip(command, 500)
+        ),
+    );
     let output = crate::remote::exec(host, command, stdin).await?;
     crate::debuglog::debug("ssh", &format!("exec ok stdout_len={}", output.len()));
     Ok(output)
@@ -84,9 +108,16 @@ pub async fn ssh_exec_stdin(host: &str, command: &str, stdin: &[u8]) -> AppResul
 /// lets us drop everything up to the real output.
 pub async fn ssh_login_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
     let marker = format!("__QUE_LOGIN_{}__", uuid::Uuid::new_v4());
-    let wrapped = ssh_login_command(&format!("printf '%s' {}; {}", shell_quote(&marker), command));
+    let wrapped = ssh_login_command(&format!(
+        "printf '%s' {}; {}",
+        shell_quote(&marker),
+        command
+    ));
     let output = ssh_exec(host, &wrapped).await?;
-    let start = output.windows(marker.len()).position(|w| w == marker.as_bytes()).ok_or_else(|| AppError::machine("REMOTE_SHELL_NO_OUTPUT"))?;
+    let start = output
+        .windows(marker.len())
+        .position(|w| w == marker.as_bytes())
+        .ok_or_else(|| AppError::machine("REMOTE_SHELL_NO_OUTPUT"))?;
     Ok(output[start + marker.len()..].to_vec())
 }
 
@@ -95,7 +126,12 @@ pub fn wrap_remote_tmux(terminal_id: &str, cwd: &str, command: &str) -> String {
     wrap_remote_tmux_with_channel(terminal_id, cwd, command, None)
 }
 
-pub fn wrap_remote_tmux_with_channel(terminal_id: &str, cwd: &str, command: &str, channel: Option<&str>) -> String {
+pub fn wrap_remote_tmux_with_channel(
+    terminal_id: &str,
+    cwd: &str,
+    command: &str,
+    channel: Option<&str>,
+) -> String {
     let session_name = format!("que_{}", terminal_id.replace('-', "_"));
     let target = shell_quote(&format!("={session_name}"));
     // set-option resolves a pane target, unlike set-environment's session
@@ -110,9 +146,14 @@ pub fn wrap_remote_tmux_with_channel(terminal_id: &str, cwd: &str, command: &str
     );
     // Existing pane processes retain their original environment on reattach.
     // Hooks read this session-local value to address the new Que reader.
-    let channel_update = channel.map(|value| format!(
-        " \\; set-environment -t {target} QUE_HARNESS_CHANNEL {}", shell_quote(value)
-    )).unwrap_or_default();
+    let channel_update = channel
+        .map(|value| {
+            format!(
+                " \\; set-environment -t {target} QUE_HARNESS_CHANNEL {}",
+                shell_quote(value)
+            )
+        })
+        .unwrap_or_default();
     format!(
         "exec tmux -u new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option -t {option_target} status off \\; set-option -t {option_target} set-titles on \\; set-option -t {option_target} set-titles-string {}{channel_update}",
         shell_quote(&session_name),
@@ -131,16 +172,28 @@ mod tests {
     /// files, which is the whole reason a bare `exec $SHELL` is not enough.
     #[test]
     fn a_remote_login_shell_starts_in_the_workspace() {
-        assert_eq!(remote_login_shell("/srv/app", false), r#"cd '/srv/app' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#);
+        assert_eq!(
+            remote_login_shell("/srv/app", false),
+            r#"cd '/srv/app' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#
+        );
     }
 
     /// A directory with a space or a quote in it must stay one shell word, or the
     /// rest of it becomes a command.
     #[test]
     fn a_remote_directory_stays_one_shell_word() {
-        assert_eq!(shell_quote("/srv/my app/it's here"), r#"'/srv/my app/it'"'"'s here'"#);
-        assert_eq!(remote_login_shell("/srv/my app/it's here", false), r#"cd '/srv/my app/it'"'"'s here' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#);
-        assert_eq!(remote_login_shell("~/notes", false), r#"cd '~/notes' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#);
+        assert_eq!(
+            shell_quote("/srv/my app/it's here"),
+            r#"'/srv/my app/it'"'"'s here'"#
+        );
+        assert_eq!(
+            remote_login_shell("/srv/my app/it's here", false),
+            r#"cd '/srv/my app/it'"'"'s here' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#
+        );
+        assert_eq!(
+            remote_login_shell("~/notes", false),
+            r#"cd '~/notes' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#
+        );
     }
 
     /// `ssh_login_command` is the other half of the pair: harness CLI launches need
