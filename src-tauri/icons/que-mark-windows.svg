@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Que">
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2=".25" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f8f6f3"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2=".18" y2="1">
+      <stop stop-color="#d49a7e"/>
+      <stop offset="1" stop-color="#a95e43"/>
+    </linearGradient>
+  </defs>
+  <!-- Windows shell renders 16–32 px frames frequently. The tile fills the
+       canvas, while the mark keeps the larger macOS-like inset inside it. -->
+  <rect x="54" y="64" width="916" height="900" rx="212" fill="#b9aaa1" opacity=".5"/>
+  <rect x="48" y="40" width="928" height="912" rx="212" fill="url(#surface)" stroke="#ebe6e1" stroke-width="3"/>
+  <path d="M88 278Q88 88 278 88h468q190 0 190 190" fill="none" stroke="#fff" stroke-width="9" opacity=".8"/>
+  <g transform="translate(140 140) scale(31)" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.65">
+    <path d="m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4" transform="translate(0 .15)" stroke="#fff"/>
+    <path d="m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4" stroke="url(#mark)"/>
+  </g>
+</svg>
