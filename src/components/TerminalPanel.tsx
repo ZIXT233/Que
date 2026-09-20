@@ -7,6 +7,7 @@ import { CodexComposerColors, codexComposerTheme } from "@/lib/codex-composer-co
 import { TerminalReplyPolicy, isTerminalProtocolReply } from "@/lib/terminal-replies";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { enhancedTerminalKey, decodeTerminalClipboard } from "@/lib/terminal-enhancements";
 import { isFileDrag, droppedFiles, dropFilesError } from "@/lib/file-drop";
 import { copyText } from "@/lib/clipboard";
@@ -19,6 +20,7 @@ import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attac
 import type { TerminalEvent } from "@/lib/terminal-manager";
 import type { TerminalTab } from "./terminal-tab-state";
 import { TerminalStartupProgress, type TerminalStartupStage } from "./TerminalStartupProgress";
+import { dropTerminalSnapshot, getTerminalSnapshot, saveTerminalSnapshot } from "@/lib/terminal-snapshots";
 
 export type TerminalConnectionStatus = "connecting" | "ready" | "exited" | "error" | "paused";
 interface Props {
@@ -200,6 +202,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     terminalRef.current = terminal;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
+    const serializer = new SerializeAddon();
+    terminal.loadAddon(serializer);
     terminal.open(container);
     refreshAppearance();
     const hideConptyCursor = () => {
@@ -230,7 +234,26 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     searchRef.current = search;
     const searchResults = search.onDidChangeResults(setMatches);
     let replaying = true;
+    const snapshot = getTerminalSnapshot(id);
+    if (snapshot) {
+      offset = snapshot.offset;
+      hasOutputRef.current = true;
+      setStartupStage("ready");
+      setShowProgress(false);
+    }
+    const restoreSnapshot = snapshot
+      ? new Promise<void>((resolve) => terminal.write(snapshot.output, () => { replaying = false; resolve(); }))
+      : Promise.resolve();
     let outputQueue = Promise.resolve();
+    let snapshotTimer: ReturnType<typeof setTimeout> | undefined;
+    const saveSnapshot = () => saveTerminalSnapshot(id, serializer.serialize(), offset);
+    const scheduleSnapshot = () => {
+      if (snapshotTimer) return;
+      snapshotTimer = setTimeout(() => {
+        snapshotTimer = undefined;
+        saveSnapshot();
+      }, 500);
+    };
     const clipboard = terminal.parser.registerOscHandler(52, (payload) => {
       if (replaying || disposed || !document.hasFocus() || !container.contains(document.activeElement)) return true;
       const text = decodeTerminalClipboard(payload);
@@ -459,7 +482,11 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         replaying = event.reset !== undefined;
         if (event.reset) { terminal.reset(); composerColors?.reset(); }
         replyPolicy.observeOutput(event.data);
-        terminal.write(composerColors?.feed(event.data) ?? event.data, () => { replaying = false; resolve(); });
+        terminal.write(composerColors?.feed(event.data) ?? event.data, () => {
+          replaying = false;
+          scheduleSnapshot();
+          resolve();
+        });
       }));
       callbacksRef.current.onOutput?.(event.data);
       offset = event.offset;
@@ -552,8 +579,9 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     };
 
     startRef.current = (async () => {
+      await restoreSnapshot;
       fitAndResize();
-      if (restored || reconnectKey > 0) {
+      if (restored || reconnectKey > 0 || snapshot) {
         // Restoring a tab must never silently launch a replacement shell for local processes,
         // but remote sessions (sshHost) with tmux should re-attach to their existing remote session.
         try {
@@ -615,6 +643,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     window.addEventListener("online", connect);
     return () => {
       disposed = true;
+      clearTimeout(snapshotTimer);
+      if (!tab.closing) saveSnapshot();
       liveControlRef.current = null;
       if (focusReportingRef.current && focusArmedRef.current && !inQueueRef.current) writer.write("\x1b[O");
       clearTimeout(conptyRevealTimer);
@@ -663,6 +693,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
 
   useEffect(() => {
     if (!tab.closing) return;
+    dropTerminalSnapshot(id);
     let cancelled = false;
     if (terminalRef.current) terminalRef.current.options.disableStdin = true;
     void (async () => {

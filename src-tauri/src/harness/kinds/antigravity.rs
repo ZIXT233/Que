@@ -522,14 +522,15 @@ fn native_shell_command(path: &std::path::Path, kind: &str, event: Option<&str>)
     // that invocation shape. AGY also quotes the complete command, so its
     // directory argument must remain unquoted. pushd accepts spaces here;
     // then the executable is a safe relative token.
-    let directory = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let executable = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("que-hook.exe");
+    // This emits a Windows command even when invoked by a cross-platform test
+    // runner, so don't use the host platform's Path separator rules here.
+    let raw_path = path.to_string_lossy();
+    let (directory, executable) = raw_path
+        .rsplit_once(|ch| ch == '\\' || ch == '/')
+        .unwrap_or((".", raw_path.as_ref()));
     format!(
         "pushd {} && {} {}{}",
-        directory.display(),
+        directory,
         executable,
         kind,
         event.map(|event| format!(" {event}")).unwrap_or_default(),
@@ -612,7 +613,8 @@ mod tests {
                 "powershell.exe -EncodedCommand {}",
                 base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
             );
-            let pushd = format!(r"pushd {} && que-hook.exe antigravity Stop", path.parent().unwrap().display());
+            let parent = path.rsplit_once('\\').map(|(parent, _)| parent).unwrap();
+            let pushd = format!(r"pushd {parent} && que-hook.exe antigravity Stop");
             for command in [plain, encoded, pushd] {
                 let config = serde_json::json!({"que-session-state":{"Stop":[{"command":command}]},"user-hook":{"enabled":true}}).to_string();
                 let value = guard(Some(&config), &current).unwrap();

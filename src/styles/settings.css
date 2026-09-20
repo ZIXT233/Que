@@ -800,7 +800,7 @@ html.dark .settings-dialog-surface {
 .settings-dialog-brand > span:last-child { display: grid; gap: 1px; }
 .settings-dialog-brand strong { font-size: 15px; font-weight: 650; letter-spacing: -.25px; }
 .settings-dialog-title { color: var(--text-dim); font-size: 10px; font-weight: 500; white-space: nowrap; }
-.settings-dialog-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid color-mix(in srgb, var(--border) 86%, var(--accent) 14%); border-radius: 9px; background: var(--cq-paper, var(--bg)); color: var(--accent); box-shadow: 0 2px 5px rgba(34, 43, 30, .08); }
+.settings-dialog-mark { display: block; width: 34px; height: 34px; }.settings-dialog-mark img { display: block; width: 100%; height: 100%; }
 
 .settings-scope-tabs {
   display: flex;

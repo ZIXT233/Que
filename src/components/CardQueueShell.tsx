@@ -35,6 +35,7 @@ import { CardTransfers } from "./CardTransfers";
 import { CardInspectionOverlay } from "./CardInspectionOverlay";
 import { CardDeck } from "./CardDeck";
 import { Icon } from "./QueueIcon";
+import { QueLogo, QueMark } from "./QueLogo";
 import { ExternalSessionCard } from "./ExternalNoticeStack";
 import { CardQueueMinimap } from "./CardQueueMinimap";
 import { CardQuickSearch, type CardQuickSearchItem } from "./CardQuickSearch";
@@ -980,7 +981,7 @@ export function CardQueueShell() {
     >
     <div className="cq-layout" inert={!!inspected && !detachedId}>
       {!detachedId && <aside className="cq-sidebar">
-        <div className="cq-sidebar-brand"><Link className="cq-brand" href="/" aria-label={t("queue.Card Queue 主页")}><span className="cq-logo"><Icon name="stack" size={21} /></span>Que</Link><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
+        <div className="cq-sidebar-brand"><Link className="cq-brand" href="/" aria-label={t("queue.Card Queue 主页")}><span className="cq-logo"><QueLogo /></span>Que</Link><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
         <button className="cq-new" onClick={showNew}><Icon name="plus" /> {t("queue.新会话")}</button>
         <button className="cq-mobile-settings" onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" /></button>
 
@@ -1088,7 +1089,7 @@ export function CardQueueShell() {
           extraAction={{ label: t("queue.返回主页面"), onClick: () => void returnToQueue() }}
         />}
         <div className="cq-stage" ref={stageRef} style={stageWidth !== null ? { width: stageWidth } : undefined}>
-          {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{(error ? harnessErrorText(error, t) : "") || "Connecting Que…"}</h2></div> : active && canShowDetached ? <>
+          {!queue ? <div className="cq-empty"><span className="cq-orbit"><QueMark size={34} /></span><h2>{(error ? harnessErrorText(error, t) : "") || "Connecting Que…"}</h2></div> : active && canShowDetached ? <>
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
               : <>
@@ -1096,7 +1097,7 @@ export function CardQueueShell() {
                 </>}
           </> : <div className="cq-empty">
             {detachedId && <div className="cq-detached-window-drag" data-tauri-drag-region aria-hidden="true" />}
-            <span className="cq-orbit"><Icon name="stack" size={34} /></span>
+            <span className="cq-orbit"><QueMark size={34} /></span>
             <h2>{detachedId ? t("queue.正在接入会话") : working.length ? t("queue.把工作交给它们。") : t("queue.创建卡片，让 Agent 开始工作。")}</h2>
             <p>{working.length ? t("queue.需要你的时候，卡片会自动来到这里。") : t("queue.完成后，卡片会经调度队列回到你面前；你只需依次处理顶层卡片。")}</p>
             {!detachedId && <button className="cq-primary" onClick={showNew}><Icon name="plus" size={16} /> {t("queue.新建第一张卡片")}</button>}

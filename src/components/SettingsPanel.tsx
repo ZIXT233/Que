@@ -20,6 +20,7 @@ import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 import { saveAndOpenAppLog } from "@/lib/card-log";
 import { invoke } from "@tauri-apps/api/core";
 import { setDeveloperProbesEnabled } from "@/lib/developer-probes";
+import { QueLogo } from "./QueLogo";
 
 interface Props {
   cwd: string | null;
@@ -277,12 +278,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
       <div className="settings-dialog-surface">
         <div className="settings-dialog-header">
           <div className="settings-dialog-brand">
-            <span className="settings-dialog-mark">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m12 3-9 4.5 9 4.5 9-4.5L12 3Z" />
-                <path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5" />
-              </svg>
-            </span>
+            <span className="settings-dialog-mark"><QueLogo /></span>
             <span><strong>Que</strong><small className="settings-dialog-title">{t("settings.title")}</small></span>
           </div>
           <select aria-label={t("settings.title")} value={section} onChange={(event) => activateSection(event.target.value as SettingsSection)} className="settings-mobile-section-picker">

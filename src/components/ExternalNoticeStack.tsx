@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
 import { externalNoticeTitle, type ExternalNotice, type ExternalTurn } from "@/lib/card-queue";
@@ -121,6 +122,14 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
     }
   }, [notice.id, transcript.length]);
+
+  const handleFocusWindow = async () => {
+    await invoke("focus_external_window", {
+      kind: notice.kind,
+      project: notice.project,
+      cwd: notice.cwd,
+    });
+  };
 
   return (
     <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card cq-external-card"

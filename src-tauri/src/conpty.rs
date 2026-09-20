@@ -156,9 +156,6 @@ mod imp {
 
     /// No-op: unix ptys come from the kernel, nothing to sideload.
     pub fn preload(_resource_dir: Option<&Path>) {}
-    pub fn ensure_loaded() -> bool {
-        true
-    }
     /// Unix ptys are always "modern": every behavior gated on this is allowed.
     pub fn sideloaded() -> bool {
         true
@@ -166,7 +163,7 @@ mod imp {
 }
 
 #[cfg(not(windows))]
-pub use imp::{ensure_loaded, preload, sideloaded};
+pub use imp::{preload, sideloaded};
 
 #[cfg(all(test, windows))]
 mod tests {

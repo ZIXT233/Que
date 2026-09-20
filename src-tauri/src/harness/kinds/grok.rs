@@ -51,7 +51,10 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
             .to_string_lossy()
             .into_owned()
     };
+    #[cfg(windows)]
     let mut command = ctx.host.command(None);
+    #[cfg(not(windows))]
+    let command = ctx.host.command(None);
     #[cfg(windows)]
     if !ctx.host.remote {
         command = install_launcher(&PathBuf::from(&path))?;

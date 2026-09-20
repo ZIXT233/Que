@@ -310,13 +310,15 @@ function useCardSideTerminal({
   ) : null;
 
   const panel = enabled && extras.tabs.length > 0 ? (
-    <>
+    <div
+      ref={resize.panelRef}
+      className="cq-side-terminal-layer"
+      hidden={!open}
+      style={{ "--cq-side-terminal-width": `${resize.width}px` } as CSSProperties}
+    >
       {open && <div {...resize.separatorProps} className={`panel-resize-handle cq-side-terminal-resize${resize.isResizing ? " is-resizing" : ""}`} />}
       <aside
-        ref={resize.panelRef}
         className="cq-card-side-terminal"
-        hidden={!open}
-        style={{ "--cq-side-terminal-width": `${resize.width}px` } as CSSProperties}
         aria-label={t("queue.sideTerminal")}
       >
         <div className="cq-side-terminal-heading">
@@ -338,7 +340,7 @@ function useCardSideTerminal({
           onUnavailable={(id) => extras.dropTab(id)}
         />
       </aside>
-    </>
+    </div>
   ) : null;
 
   return { button, panel, open };
