@@ -72,6 +72,14 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
         }
       }
     },
+    writeBinary(data: string) {
+      if (stopped) return;
+      bufferedInput = null;
+      for (let offset = 0; offset < data.length; offset += 32768) {
+        const chunk = data.slice(offset, offset + 32768);
+        enqueue({ type: "input_binary", data: Array.from(chunk, char => char.charCodeAt(0) & 0xff) });
+      }
+    },
     pasteImages(files: File[], bracketed: boolean) {
       bufferedInput = null;
       enqueue(async () => ({

@@ -738,6 +738,10 @@ impl TerminalHub {
     }
 
     pub fn write(&self, id: &str, data: &str) -> bool {
+        self.write_bytes(id, data.as_bytes())
+    }
+
+    pub fn write_bytes(&self, id: &str, data: &[u8]) -> bool {
         let (channel, probe) = {
             let map = self.lock();
             let Some(record) = map.get(id) else {
@@ -752,7 +756,7 @@ impl TerminalHub {
         // OSC 10/11 color-query experiment: log the payload as the backend
         // received it via POST, before it enters the channel queue, so the
         // bytes can be compared with the frontend's http-post line.
-        if data.contains("\x1b]") {
+        if data.windows(2).any(|bytes| bytes == b"\x1b]") {
             let t = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
@@ -763,19 +767,19 @@ impl TerminalHub {
                 &format!(
                     "hub-write t={t} {}B: {}",
                     data.len(),
-                    crate::remote::hex_prefix(data.as_bytes(), 512)
+                    crate::remote::hex_prefix(data, 512)
                 ),
             );
         }
-        let ok = channel.write(data.as_bytes());
+        let ok = channel.write(data);
         let elapsed = started.elapsed().as_millis() as u64;
         let mut probe = lock(&probe);
         probe.writes += 1;
         probe.last_write_ms = elapsed;
         probe.last_write_bytes = data.len();
-        if data == "\x1b[I" {
+        if data == b"\x1b[I" {
             probe.last_focus = Some("focused".into());
-        } else if data == "\x1b[O" {
+        } else if data == b"\x1b[O" {
             probe.last_focus = Some("unfocused".into());
         }
         if ok {

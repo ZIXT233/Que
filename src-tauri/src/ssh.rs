@@ -126,13 +126,17 @@ pub fn wrap_remote_tmux(terminal_id: &str, cwd: &str, command: &str) -> String {
     wrap_remote_tmux_with_channel(terminal_id, cwd, command, None)
 }
 
+pub fn tmux_session_name(terminal_id: &str) -> String {
+    format!("que_{}", terminal_id.replace('-', "_"))
+}
+
 pub fn wrap_remote_tmux_with_channel(
     terminal_id: &str,
     cwd: &str,
     command: &str,
     channel: Option<&str>,
 ) -> String {
-    let session_name = format!("que_{}", terminal_id.replace('-', "_"));
+    let session_name = tmux_session_name(terminal_id);
     let target = shell_quote(&format!("={session_name}"));
     // set-option resolves a pane target, unlike set-environment's session
     // target. The colon makes this the exact session's active pane; without
@@ -154,8 +158,10 @@ pub fn wrap_remote_tmux_with_channel(
             )
         })
         .unwrap_or_default();
+    // Que handles OSC 52 clipboard writes. Declare that capability explicitly
+    // because tmux 3.4 does not learn it from the outer terminal's DA1 reply.
     format!(
-        "exec tmux -u new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option -t {option_target} status on \\; set -g mouse on \\; set-option -t {option_target} set-titles on \\; set-option -t {option_target} set-titles-string {}{channel_update}",
+        "exec tmux -u -T clipboard new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option -t {option_target} status on \\; set -g mouse on \\; set-option -t {option_target} set-titles on \\; set-option -t {option_target} set-titles-string {}{channel_update}",
         shell_quote(&session_name),
         shell_quote(cwd),
         shell_quote(&inner),

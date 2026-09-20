@@ -5,6 +5,7 @@ import { documentCanvasDark, harnessTerminalTheme, resolveTerminalThemeProfile, 
 import { readTerminalAppearance, terminalFontFamily, terminalFontSize, TERMINAL_APPEARANCE_EVENT, TERMINAL_APPEARANCE_KEY, type TerminalAppearance } from "@/lib/terminal-appearance";
 import { CodexComposerColors, codexComposerTheme } from "@/lib/codex-composer-colors";
 import { TerminalReplyPolicy, isTerminalProtocolReply } from "@/lib/terminal-replies";
+import { trackTerminalMouseEncoding } from "@/lib/terminal-mouse-encoding";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
@@ -210,6 +211,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     const serializer = new SerializeAddon();
     terminal.loadAddon(serializer);
     terminal.open(container);
+    const mouseEncoding = trackTerminalMouseEncoding(terminal);
     refreshAppearance();
     const hideConptyCursor = () => {
       if (!conptyHost || gpu || !conptyCursorHideRef.current) return;
@@ -259,7 +261,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       // Keep the previous checkpoint if xterm is still processing a write.
       if (writing || closingRef.current || renderedOffset === undefined || !snapshotDirty) return;
       saveTerminalSnapshot(id, {
-        output: serializer.serialize(), offset: renderedOffset,
+        output: serializer.serialize() + mouseEncoding.serialize(), offset: renderedOffset,
         cols: terminal.cols, rows: terminal.rows,
       });
       snapshotDirty = false;
@@ -408,6 +410,13 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       oscTrace("xterm-onData", data, { card: cardId, term: id });
       sendInput(data);
     });
+    const onBinary = terminal.onBinary((data) => {
+      if (disposed || !connected || exited || inputFailed || sessionReadOnly || terminal.options.disableStdin) return;
+      // Legacy mouse coordinates are bytes, not UTF-8 text. Preserve their
+      // order relative to any Windows keyboard input awaiting an animation frame.
+      if (inputRaf) { cancelAnimationFrame(inputRaf); flushInput(); }
+      writer.writeBinary(data);
+    });
     const fitAndResize = () => {
       if (disposed || restoringSnapshot || !container.offsetWidth || !container.offsetHeight) return;
       fit.fit();
@@ -502,7 +511,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         // are historical. Live backend output omits reset entirely.
         writing = true;
         replaying = event.reset !== undefined;
-        if (event.reset) { terminal.reset(); composerColors?.reset(); }
+        if (event.reset) { terminal.reset(); mouseEncoding.reset(); composerColors?.reset(); }
         replyPolicy.observeOutput(event.data);
         terminal.write(composerColors?.feed(event.data) ?? event.data, () => {
           renderedOffset = event.offset;
@@ -694,6 +703,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       searchResults.dispose();
       searchRef.current = null;
       onData.dispose();
+      onBinary.dispose();
+      mouseEncoding.dispose();
       onResize.dispose();
       window.removeEventListener("pagehide", pageHide);
       window.removeEventListener("pageshow", pageShow);

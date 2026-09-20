@@ -456,6 +456,73 @@ fn kill_side_terminals(state: &AppState, card: &crate::models::QueueCard) {
     }
 }
 
+fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCard) {
+    let Some(harness) = card.harness.as_ref().filter(|harness| harness.tmux != Some(false)) else {
+        return;
+    };
+    let Some(host) = queue
+        .workspaces
+        .as_ref()
+        .and_then(|workspaces| {
+            workspaces
+                .iter()
+                .find(|workspace| Some(&workspace.id) == card.workspace_id.as_ref())
+        })
+        .filter(|workspace| workspace.kind == "ssh")
+        .and_then(|workspace| workspace.ssh_host.clone())
+    else {
+        return;
+    };
+
+    let mut session_ids = vec![harness.terminal_id.clone()];
+    if let Some(tabs) = &card.side_terminals {
+        session_ids.extend(tabs.iter().map(|tab| {
+            format!(
+                "card_{}_side_{}",
+                card.id.replace('-', "_"),
+                tab.id.replace('-', "_")
+            )
+        }));
+    }
+    let targets: Vec<String> = session_ids
+        .iter()
+        .map(|id| format!("={}", crate::ssh::tmux_session_name(id)))
+        .collect();
+    let command = targets
+        .iter()
+        .map(|target| {
+            format!(
+                "tmux kill-session -t {} 2>/dev/null && printf '%s\\n' {} || true",
+                crate::ssh::shell_quote(target),
+                crate::ssh::shell_quote(target),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let card_id = card.id.clone();
+    tokio::spawn(async move {
+        match crate::ssh::ssh_exec(&host, &command).await {
+            Ok(output) => crate::debuglog::info(
+                "queue",
+                &format!(
+                    "archive tmux cleanup finished card={card_id} host={host:?} killed={:?}",
+                    String::from_utf8_lossy(&output).lines().collect::<Vec<_>>()
+                ),
+            ),
+            Err(error) => crate::debuglog::log_error(
+                &format!("queue: archive tmux cleanup FAILED card={card_id} host={host:?}"),
+                &error,
+            ),
+        }
+    });
+    crate::debuglog::info_card(
+        "queue",
+        &card.id,
+        Some(&harness.terminal_id),
+        "archive tmux cleanup requested",
+    );
+}
+
 fn apply_action(
     queue: &mut CardQueue,
     body: &Value,
@@ -513,6 +580,9 @@ fn apply_action(
             harness.shell_notify = Some(true);
         }
         "harness_close" => {
+            if let Some(card) = queue.cards.iter().find(|c| Some(c.id.as_str()) == id) {
+                try_kill_card_tmux_sessions(queue, card);
+            }
             let card = queue
                 .cards
                 .iter_mut()
@@ -792,18 +862,30 @@ fn apply_action(
         }
         "front" | "back" => move_card(queue, id.unwrap_or_default(), action),
         "archive" => {
-            if let Some(card) = queue.cards.iter().find(|c| Some(c.id.as_str()) == id) {
-                crate::debuglog::info_card(
-                    "queue",
-                    &card.id,
-                    card.harness.as_ref().map(|h| h.terminal_id.as_str()),
-                    "archive",
-                );
-                if let Some(harness) = &card.harness {
-                    state.terminals.stop(&harness.terminal_id);
-                }
-                kill_side_terminals(state, card);
+            let card = queue
+                .cards
+                .iter()
+                .find(|c| Some(c.id.as_str()) == id)
+                .ok_or_else(|| AppError::msg("卡片已不存在"))?;
+            if card.session.is_none() && card.harness.is_none() {
+                return Err(AppError::msg("空白卡片无需归档"));
             }
+            if matches!(card.phase, crate::models::CardPhase::Working)
+                || card.detached.is_some()
+            {
+                return Err(AppError::msg("请先结束工作并收回卡片"));
+            }
+            crate::debuglog::info_card(
+                "queue",
+                &card.id,
+                card.harness.as_ref().map(|h| h.terminal_id.as_str()),
+                "archive",
+            );
+            try_kill_card_tmux_sessions(queue, card);
+            if let Some(harness) = &card.harness {
+                state.terminals.stop(&harness.terminal_id);
+            }
+            kill_side_terminals(state, card);
             archive_card(queue, id.unwrap_or_default())?;
             if let Some(card) = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id) {
                 if let Some(harness) = card.harness.as_mut() {
@@ -1829,6 +1911,33 @@ async fn post_terminal_inner(
                     .into_response());
             }
             if state.terminals.write(id, data) {
+                Ok((StatusCode::OK, Json(json!({ "success": true }))).into_response())
+            } else {
+                Ok((
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "error": "Terminal not found" })),
+                )
+                    .into_response())
+            }
+        }
+        Some("input_binary") => {
+            let data = value.get("data").and_then(Value::as_array);
+            let data = data
+                .filter(|bytes| bytes.len() <= 64 * 1024)
+                .and_then(|bytes| {
+                    bytes
+                        .iter()
+                        .map(|byte| byte.as_u64().and_then(|n| u8::try_from(n).ok()))
+                        .collect::<Option<Vec<u8>>>()
+                });
+            let Some(data) = data else {
+                return Ok((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": "Invalid binary terminal input" })),
+                )
+                    .into_response());
+            };
+            if state.terminals.write_bytes(id, &data) {
                 Ok((StatusCode::OK, Json(json!({ "success": true }))).into_response())
             } else {
                 Ok((
