@@ -155,7 +155,7 @@ pub fn wrap_remote_tmux_with_channel(
         })
         .unwrap_or_default();
     format!(
-        "exec tmux -u new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option -t {option_target} status off \\; set-option -t {option_target} set-titles on \\; set-option -t {option_target} set-titles-string {}{channel_update}",
+        "exec tmux -u new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option -t {option_target} status on \\; set -g mouse on \\; set-option -t {option_target} set-titles on \\; set-option -t {option_target} set-titles-string {}{channel_update}",
         shell_quote(&session_name),
         shell_quote(cwd),
         shell_quote(&inner),
