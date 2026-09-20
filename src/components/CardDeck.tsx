@@ -1,7 +1,7 @@
 "use client";
 import { useI18n } from "@/hooks/useI18n";
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { hasUrgentCall } from "@/lib/urgent-call";
 import type { QueueCard } from "@/lib/card-queue";
 import { isDeckCardOffscreenLeft, deckStep, peekDeckIndexAtPoint, projectDeckCard } from "@/lib/card-deck";
@@ -35,6 +35,11 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   const rebased = viewport.orderKey !== orderKey || viewport.resetKey !== resetKey
     || Math.round(viewport.position) !== focusedIndex;
   const position = rebased ? focusedIndex : viewport.position;
+  const settled = Math.abs(position - Math.round(position)) < .001;
+  const liveCards = useRef(new Set<string>());
+  const wantedCards = useRef(new Set<string>());
+  const pendingLoads = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const [, bumpLive] = useState(0);
   if (rebased) setViewport({ orderKey, resetKey, position, direction: 0 });
   const frame = useRef<number | null>(null);
   const step = deckStep(width);
@@ -275,6 +280,26 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
 
   useEffect(() => () => { if (frame.current !== null) cancelAnimationFrame(frame.current); }, []);
 
+  // While the deck moves, card content loads off the gesture's critical path:
+  // silhouettes slide first and real cards pop in when ready. A card that has
+  // scrolled out of the near window before its turn skips the render entirely.
+  useEffect(() => {
+    if (settled || suspended) return;
+    for (const id of wantedCards.current) {
+      if (liveCards.current.has(id) || pendingLoads.current.has(id)) continue;
+      pendingLoads.current.set(id, setTimeout(() => {
+        pendingLoads.current.delete(id);
+        if (!wantedCards.current.has(id) || liveCards.current.has(id)) return;
+        liveCards.current.add(id);
+        startTransition(() => bumpLive((n) => n + 1));
+      }, 0));
+    }
+  });
+  useEffect(() => () => {
+    for (const timer of pendingLoads.current.values()) clearTimeout(timer);
+    pendingLoads.current.clear();
+  }, []);
+
   const syncPosition = () => {
     if (frame.current !== null) return;
     frame.current = requestAnimationFrame(() => {
@@ -283,14 +308,21 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       const nextIndex = Math.max(0, Math.min(cards.length - 1, Math.round(position)));
       const indexChanged = nextIndex !== reportedIndex.current;
       reportedIndex.current = nextIndex;
-      setViewport((previous) => ({ orderKey, resetKey, position,
-        direction: previous.orderKey === orderKey && previous.resetKey === resetKey
-          ? Math.abs(position - previous.position) > .0001 ? Math.sign(position - previous.position) : previous.direction
-          : 0,
-      }));
+      setViewport((previous) => {
+        if (previous.orderKey === orderKey && previous.resetKey === resetKey
+          && Math.abs(position - previous.position) <= .0001) return previous;
+        return { orderKey, resetKey, position,
+          direction: previous.orderKey === orderKey && previous.resetKey === resetKey
+            ? Math.sign(position - previous.position) : 0 };
+      });
       if (indexChanged) onIndexRef.current(nextIndex);
     });
   };
+
+  const wanted = new Set<string>();
+  for (const { card, index } of stableCards)
+    if (Math.abs(index - selected) <= 1) wanted.add(card.id);
+  wantedCards.current = wanted;
 
   // Native horizontal gestures browse cards; vertical mapping is limited to navigation surfaces.
   return <div className="cq-deck-scroller" inert={suspended} aria-hidden={suspended} ref={scrollerRef} onScroll={syncPosition} aria-label={t("queue.左右滑动浏览卡片，停下后自动吸附")}>
@@ -303,10 +335,15 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
           if (isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5) return null;
           const isFront = index === selected;
           const isNeighbor = Math.abs(index - selected) === 1;
-          return <div key={card.id} className="cq-deck-layer" data-preview={distance >= 2} data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="attention" data-deck-index={index} data-deck-position={position.toFixed(4)} aria-hidden={!isFront}
+          // Mounting a conversation tree mid-gesture stalls the slide: while
+          // the deck moves, mounts only land through the async queue above.
+          const live = liveCards.current.has(card.id)
+            || (settled && (isFront || isNeighbor));
+          if (live) liveCards.current.add(card.id);
+          return <div key={card.id} className="cq-deck-layer" data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="attention" data-deck-index={index} aria-hidden={!isFront}
             style={{ transform: `translate3d(${x}px, 0, 0) scale(${scale})`, zIndex: cards.length - index, pointerEvents: "auto" }}>
             <div className="cq-deck-layer-body" inert={!isFront}>
-              {distance < 2 ? <DeckContent card={card} isFront={isFront} renderCard={renderCard} /> : <div className="cq-back-card" />}
+              {live ? <DeckContent card={card} isFront={isFront} renderCard={renderCard} /> : <div className="cq-back-card" />}
             </div>
             {isNeighbor ? <button type="button" className="cq-deck-peek-hit" tabIndex={-1} aria-label={index < selected ? t("queue.上一张卡片") : t("queue.下一张卡片")} /> : null}
           </div>;

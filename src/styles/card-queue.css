@@ -236,7 +236,9 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 /* Stack previews extend outside the full-width foreground card. */
 .cq-deck-scroller{right:calc(-1 * var(--cq-deck-bleed-right,160px));padding-right:var(--cq-deck-bleed-right,160px)}
 
-/* Frost only the preview surface, keeping card edges and shadows crisp. */
+/* Dim only the preview surface, keeping card edges and shadows crisp. A
+   translucent tint is used instead of backdrop-filter: blurring a moving
+   layer resamples its backdrop every frame and stalls the slide. */
 .cq-deck-layer::after{
   content:"";
   position:absolute;
@@ -244,9 +246,7 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
   z-index:5;
   border-radius:22px;
   pointer-events:none;
-  background:rgb(255 255 255 / 18%);
-  -webkit-backdrop-filter:blur(2px) saturate(.88);
-  backdrop-filter:blur(2px) saturate(.88);
+  background:rgb(255 255 255 / 32%);
   opacity:0;
   transition:opacity 120ms ease;
 }
@@ -1209,8 +1209,6 @@ html.dark .cq-inline-tools { --bg-hover: #30362e; --bg-selected: #394036; --text
 .cq-detached .cq-explorer-heading button:hover,.cq-detached .cq-explorer-footer button:hover,.cq-detached .cq-explorer-footer a:hover { background: var(--bg-hover); }
 .cq-drawer-backdrop { position: fixed; inset: 0; z-index: 200; background: #0006; }
 
-/* Empty stack silhouettes have no content to frost. Avoid extra backdrop passes. */
-.cq-deck-layer[data-preview="true"]::after{backdrop-filter:none;-webkit-backdrop-filter:none}
 @media(prefers-reduced-motion:reduce){
   .cq-deck-layer::after{transition:none}
   .cq-queue-minimap button>span{transition:none}
@@ -1451,7 +1449,7 @@ html.dark .cq-score-operator {
 }
 
 html.dark .cq-deck-layer::after {
-  background: rgb(0 0 0 / 18%);
+  background: rgb(0 0 0 / 30%);
 }
 
 html.dark .cq-large-card[data-working-view="true"] .cq-card-header {
