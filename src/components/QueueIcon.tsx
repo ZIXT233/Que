@@ -1,6 +1,6 @@
 "use client";
 
-export type QueueIconName = "plus" | "stack" | "out" | "maximize" | "down" | "close" | "settings" | "history" | "archive" | "arrow" | "undo" | "bell" | "bell-off" | "bell-filled" | "tools" | "clock" | "copy" | "check";
+export type QueueIconName = "plus" | "stack" | "out" | "maximize" | "down" | "close" | "settings" | "history" | "archive" | "arrow" | "undo" | "bell" | "bell-off" | "bell-filled" | "eye-off" | "tools" | "clock" | "copy" | "check";
 
 const ICON_PATHS: Record<Exclude<QueueIconName, "bell-filled">, string> = {
   plus: "M12 5v14M5 12h14", stack: "m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4",
@@ -11,6 +11,7 @@ const ICON_PATHS: Record<Exclude<QueueIconName, "bell-filled">, string> = {
   archive: "M3 3h18v5H3zM5 8v13h14V8M10 12h4", arrow: "M19 12H5m6-6-6 6 6 6",
   bell: "M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4",
   "bell-off": "M4 4l16 16M18 8a6 6 0 0 0-9.9-4.5M6.5 6.5C6.3 7 6 7.5 6 8c0 7-3 7-3 9h12M18 17h3c0-2-3-2-3-9M10 21h4",
+  "eye-off": "m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 4.2A10.8 10.8 0 0 1 12 4c5 0 8.5 4.5 9.5 8-0.4 1.4-1.3 3-2.7 4.3M6.2 6.2C4.3 7.7 3 10 2.5 12c1 3.5 4.5 8 9.5 8 1.5 0 2.8-.4 4-1.1M9.1 9.1A4 4 0 0 0 14.9 15",
   undo: "m9 14-5-5 5-5M4 9h10a6 6 0 0 1 0 12h-1",
   tools: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z",
   clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3.5 2",

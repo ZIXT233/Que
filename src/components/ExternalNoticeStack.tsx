@@ -4,13 +4,15 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
-import { externalNoticeTitle, type ExternalNotice, type ExternalTurn } from "@/lib/card-queue";
+import { externalNoticeTitle, toExternalCard, type ExternalNotice, type ExternalTurn } from "@/lib/card-queue";
+import { scoreCard } from "@/lib/turn-priority";
 import { harnessName, isPiMark, providerIconId } from "@/lib/harness/catalog";
 import { Icon } from "./QueueIcon";
 import { ScoreChipTooltip } from "./ScoreChipTooltip";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { PriorityBadge } from "./PriorityBadge";
+import { ScoreFormulaPopover } from "./ScoreFormulaPopover";
 
 const REMIND_OPTIONS = [
   { minutes: 15, labelKey: "queue.15分钟" },
@@ -50,29 +52,21 @@ function ExternalHarnessWatermark({ kind }: { kind: string }) {
 
 function ExternalHarnessHeaderBadge({ kind, title }: { kind: string; title: string }) {
   const iconId = providerIconId(kind);
-  if (kind === "shell") {
-    return (
-      <div className="cq-external-header-badge" data-harness={kind} title={title} aria-label={title}>
-        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+  return (
+    <span className="cq-external-header-badge" data-harness={kind} title={title} aria-label={title}>
+      {kind === "shell" ? (
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="4" width="18" height="16" rx="3" />
           <path d="m7 9 3 3-3 3m6 0h4" />
         </svg>
-      </div>
-    );
-  }
-  if (isPiMark(kind)) {
-    return (
-      <div className="cq-external-header-badge" data-harness={kind} title={title} aria-label={title}>
-        <span className="cq-external-header-badge-pi">π</span>
-      </div>
-    );
-  }
-  return (
-    <div className="cq-external-header-badge" data-harness={kind} title={title} aria-label={title}>
-      <svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor">
-        <use href={`/provider-icons.svg#${iconId}`} />
-      </svg>
-    </div>
+      ) : isPiMark(kind) ? (
+        <span className="cq-external-header-badge-pi" aria-hidden="true">π</span>
+      ) : (
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+          <use href={`/provider-icons.svg#${iconId}`} />
+        </svg>
+      )}
+    </span>
   );
 }
 
@@ -83,7 +77,7 @@ function ExternalHarnessHeaderBadge({ kind, title }: { kind: string; title: stri
  * actions; the body is the only thing it owns, because there is no terminal behind it
  * and the session's own record is all there is to read.
  */
-export function ExternalSessionCard({ notice, isFront, host, folder, directory, onDismiss, onSaveWeight, onSnooze }: {
+export function ExternalSessionCard({ notice, isFront, folder, directory, onDismiss, onSaveWeight, onSnooze }: {
   notice: ExternalNotice;
   isFront: boolean;
   /** Host and CLI, already labelled by the shell exactly as a real card's chip is. */
@@ -103,6 +97,10 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
   // A permission gate is the ask; a finished turn is already answered.
   const blocked = Boolean(notice.tool || notice.notification);
   const title = externalNoticeTitle(notice) ?? t("external.title");
+  // External notices deliberately have no inferred tags, but share the queue's
+  // weight + waiting-time score and therefore its ordering semantics.
+  const score = scoreCard(toExternalCard(notice), []);
+  const waitMinutes = score.waiting === 99 ? "99+" : score.waiting;
   // The session's own record when it can be read; the hook's single exchange otherwise.
   // Messages carry no labels: which side said what is the alignment's job.
   const transcript: ExternalTurn[] = notice.turns?.length
@@ -136,18 +134,21 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
       data-phase={isWorking ? "working" : "attention"} data-external-harness={notice.kind} data-card-id={`external:${notice.id}`}>
       <div className="cq-card-header">
         <div className="cq-card-identity">
-          <div className="cq-card-meta">
-            <div className="cq-card-state" title={t("external.hint", { name: harness })}>
-              <i className={isWorking ? "cq-dot" : "cq-ready-dot"} />{harness}
-              <span>· {t(isWorking ? "queue.正在工作" : (blocked ? "external.permission" : "external.finished"))}</span>
+          <div className="cq-card-heading">
+            <h2 title={title}>{title}</h2>
+            <div className="cq-card-meta">
+              {!isWorking && <ScoreFormulaPopover label={<><span aria-hidden="true">🧮</span> {t("queue.Score")} {score.total}</>}>
+                <span className="cq-score-operator">=</span>
+                <PriorityBadge weight={notice.priorityWeight ?? 0} enabled={isFront} onSave={onSaveWeight} />
+                <span className="cq-score-term"><span className="cq-score-operator">+</span><ScoreChipTooltip text={t("queue.等待分钟", { minutes: waitMinutes })}><span className="cq-score-chip cq-score-wait"><span aria-hidden="true">⏳</span> {t("queue.Wait")} <b>{score.waiting}</b></span></ScoreChipTooltip></span>
+              </ScoreFormulaPopover>}
             </div>
-            {!isWorking && <PriorityBadge weight={notice.priorityWeight ?? 0} enabled={isFront} onSave={onSaveWeight} />}
           </div>
           <div className="cq-card-title-row">
             <div className="cq-title-primary">
-              <h2>{title}</h2>
-              <span className="cq-title-environment cq-title-host" aria-label={host}>
-                <WorkspaceMachineIcon name="local" size={15} /><b>{host}</b>
+              <span className="cq-title-environment cq-external-harness-identity">
+                <ExternalHarnessHeaderBadge kind={notice.kind} title={harness} />
+                <b>{harness}</b>
               </span>
               {folder && <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{folder}</span><small>{directory || folder}</small></div>}>
                 <span className="cq-title-environment cq-title-workspace" aria-label={folder}>
@@ -155,9 +156,12 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
                 </span>
               </ScoreChipTooltip>}
             </div>
+            <div className="cq-card-state cq-external-header-state" title={t("external.hint", { name: harness })}>
+              <i className={isWorking ? "cq-dot" : "cq-ready-dot"} />
+              <span>{t(isWorking ? "queue.正在工作" : (blocked ? "external.permission" : "external.finished"))}</span>
+            </div>
           </div>
         </div>
-        <ExternalHarnessHeaderBadge kind={notice.kind} title={harness} />
         <div className="cq-card-actions">
           {!isWorking && <div className="cq-remind-menu">
             <button type="button" className="cq-action-defer" aria-label={t("queue.稍后提醒")} aria-haspopup="menu"><Icon name="clock" /><span className="cq-action-tooltip" role="tooltip">{t("queue.稍后提醒")}</span></button>
@@ -167,7 +171,7 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
             </div>
           </div>}
           <button type="button" className="cq-action-archive" aria-label={t("external.dismiss")} onClick={onDismiss}>
-            <Icon name="bell-off" /><span className="cq-action-tooltip" role="tooltip">{t("external.dismiss")}</span>
+            <Icon name="eye-off" /><span className="cq-action-tooltip" role="tooltip">{t("external.dismiss")}</span>
           </button>
         </div>
       </div>

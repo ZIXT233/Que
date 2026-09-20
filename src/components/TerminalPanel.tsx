@@ -69,6 +69,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
   callbacksRef.current = { onClosed, onCloseError, onOutput, onUnavailable };
   const focusReportingRef = useRef(focusReporting);
   const focusArmedRef = useRef(false);
+  const closingRef = useRef(tab.closing);
+  closingRef.current = tab.closing;
   const inQueueRef = useRef(inQueue);
   focusReportingRef.current = focusReporting;
   inQueueRef.current = inQueue;
@@ -160,7 +162,10 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       const chat = Number.parseFloat(getComputedStyle(container).getPropertyValue("--chat-content-font-size"));
       return terminalFontSize(chat);
     };
+    const snapshot = getTerminalSnapshot(id);
+    let restoringSnapshot = Boolean(snapshot);
     const terminal = new Terminal({
+      ...(snapshot ? { cols: snapshot.cols, rows: snapshot.rows } : {}),
       cursorBlink: !conptyHost,
       allowProposedApi: true,
       fontFamily: liveFont(),
@@ -186,8 +191,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       if (size !== terminal.options.fontSize || font !== terminal.options.fontFamily) {
         terminal.options.fontSize = size;
         terminal.options.fontFamily = font;
-        fit.fit();
-        void document.fonts.load(`${size}px ${font}`).then(() => { if (!disposed) { fit.fit(); terminal.refresh(0, terminal.rows - 1); } });
+        if (!restoringSnapshot) fit.fit();
+        void document.fonts.load(`${size}px ${font}`).then(() => { if (!disposed && !restoringSnapshot) { fit.fit(); terminal.refresh(0, terminal.rows - 1); } });
       }
     };
     const appearanceChanged = (event: Event) => {
@@ -234,25 +239,39 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     searchRef.current = search;
     const searchResults = search.onDidChangeResults(setMatches);
     let replaying = true;
-    const snapshot = getTerminalSnapshot(id);
     if (snapshot) {
       offset = snapshot.offset;
       hasOutputRef.current = true;
       setStartupStage("ready");
       setShowProgress(false);
     }
+    let renderedOffset = snapshot?.offset;
+    let writing = Boolean(snapshot);
     const restoreSnapshot = snapshot
-      ? new Promise<void>((resolve) => terminal.write(snapshot.output, () => { replaying = false; resolve(); }))
+      ? new Promise<void>((resolve) => terminal.write(snapshot.output, () => { restoringSnapshot = false; writing = false; replaying = false; resolve(); }))
       : Promise.resolve();
     let outputQueue = Promise.resolve();
     let snapshotTimer: ReturnType<typeof setTimeout> | undefined;
-    const saveSnapshot = () => saveTerminalSnapshot(id, serializer.serialize(), offset);
+    let checkpointDue = !snapshot;
+    let snapshotDirty = false;
+    const saveSnapshot = () => {
+      // Never pair a partially parsed screen with a cursor past its contents.
+      // Keep the previous checkpoint if xterm is still processing a write.
+      if (writing || closingRef.current || renderedOffset === undefined || !snapshotDirty) return;
+      saveTerminalSnapshot(id, {
+        output: serializer.serialize(), offset: renderedOffset,
+        cols: terminal.cols, rows: terminal.rows,
+      });
+      snapshotDirty = false;
+      checkpointDue = false;
+    };
     const scheduleSnapshot = () => {
-      if (snapshotTimer) return;
+      if (disposed || closingRef.current || snapshotTimer) return;
       snapshotTimer = setTimeout(() => {
         snapshotTimer = undefined;
+        checkpointDue = true;
         saveSnapshot();
-      }, 500);
+      }, 5000);
     };
     const clipboard = terminal.parser.registerOscHandler(52, (payload) => {
       if (replaying || disposed || !document.hasFocus() || !container.contains(document.activeElement)) return true;
@@ -390,10 +409,12 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       sendInput(data);
     });
     const fitAndResize = () => {
-      if (!container.offsetWidth || !container.offsetHeight) return;
+      if (disposed || restoringSnapshot || !container.offsetWidth || !container.offsetHeight) return;
       fit.fit();
     };
     const onResize = terminal.onResize(({ cols, rows }) => {
+      snapshotDirty = true;
+      scheduleSnapshot();
       if (connected && !exited && !inputFailed && !sessionReadOnly) writer.resize(cols, rows);
     });
     const resizeObserver = new ResizeObserver(fitAndResize);
@@ -479,11 +500,16 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         if (disposed) { resolve(); return; }
         // Both reset=true (full backlog) and reset=false (incremental catch-up)
         // are historical. Live backend output omits reset entirely.
+        writing = true;
         replaying = event.reset !== undefined;
         if (event.reset) { terminal.reset(); composerColors?.reset(); }
         replyPolicy.observeOutput(event.data);
         terminal.write(composerColors?.feed(event.data) ?? event.data, () => {
+          renderedOffset = event.offset;
+          writing = false;
           replaying = false;
+          snapshotDirty = true;
+          if (!disposed && checkpointDue) saveSnapshot();
           scheduleSnapshot();
           resolve();
         });
@@ -493,7 +519,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       publishProbe("ready");
     };
     const connect = () => {
-      if (disposed || exited || !live || !navigator.onLine) return;
+      if (disposed || restoringSnapshot || exited || !live || !navigator.onLine) return;
       events?.close();
       // Always hand the server the offset we actually hold. Omitting it when
       // `offset === undefined` is correct (nothing read yet, full replay is what
@@ -580,6 +606,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
 
     startRef.current = (async () => {
       await restoreSnapshot;
+      if (disposed) return;
       fitAndResize();
       if (restored || reconnectKey > 0 || snapshot) {
         // Restoring a tab must never silently launch a replacement shell for local processes,
@@ -644,7 +671,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     return () => {
       disposed = true;
       clearTimeout(snapshotTimer);
-      if (!tab.closing) saveSnapshot();
+      if (closingRef.current) dropTerminalSnapshot(id);
+      else saveSnapshot();
       liveControlRef.current = null;
       if (focusReportingRef.current && focusArmedRef.current && !inQueueRef.current) writer.write("\x1b[O");
       clearTimeout(conptyRevealTimer);
