@@ -157,6 +157,12 @@ pub struct ExternalNotice {
     pub notification: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+    /// Manual weight for score ordering while this external notice is live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority_weight: Option<i64>,
+    /// First timestamp of the current attention wait; unchanged by repeated hooks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_since: Option<i64>,
     /// When the session entered attention; drives ordering and the age label.
     pub at: i64,
 }

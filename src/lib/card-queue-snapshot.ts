@@ -1,4 +1,5 @@
 import type { CardQueue } from "./card-queue.ts";
+import { externalQueueCards } from "./card-queue.ts";
 import type { SessionInfo } from "./types.ts";
 
 /** Keep the previous object when a poll only rebuilt the same JSON. */
@@ -83,6 +84,12 @@ export function nextQueueScoreChange(queue: CardQueue, now: number): number | nu
   for (const card of queue.cards) {
     if (card.readyAt === undefined || card.phase !== "attention" || card.detached || card.archivedAt !== undefined) continue;
     const start = card.waitingSince ?? card.readyAt;
+    const minutes = Math.max(0, Math.floor((now - start) / 60_000));
+    if (minutes < 99) next = Math.min(next, start + (minutes + 1) * 60_000);
+  }
+  for (const card of externalQueueCards(queue.external)) {
+    const start = card.waitingSince ?? card.readyAt;
+    if (start === undefined) continue;
     const minutes = Math.max(0, Math.floor((now - start) / 60_000));
     if (minutes < 99) next = Math.min(next, start + (minutes + 1) * 60_000);
   }

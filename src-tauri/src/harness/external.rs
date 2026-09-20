@@ -87,6 +87,8 @@ struct Tracked {
     /// The user closed this notice by hand. Suppressed until the session reports a
     /// newer attention event, which is a genuinely new ask rather than the same one.
     dismissed_at: Option<i64>,
+    /// Keep this attention notice off the deck until the user-selected reminder time.
+    snoozed_until: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -134,11 +136,17 @@ impl ExternalRuntime {
     /// queue snapshot on read; `queue.json` never learns about them.
     pub fn notices(&self) -> Vec<ExternalNotice> {
         let settings = self.settings.as_ref().and_then(|s| s.read().ok());
-        let mut list: Vec<ExternalNotice> = self
-            .notices
-            .lock()
+        let now = now_ms();
+        let mut notices = self.notices.lock();
+        for tracked in notices.values_mut() {
+            if tracked.snoozed_until.is_some_and(|until| until <= now) {
+                tracked.snoozed_until = None;
+            }
+        }
+        let mut list: Vec<ExternalNotice> = notices
             .values()
             .filter(|tracked| tracked.dismissed_at.is_none())
+            .filter(|tracked| tracked.snoozed_until.is_none())
             .filter(|tracked| {
                 settings
                     .as_ref()
@@ -167,6 +175,23 @@ impl ExternalRuntime {
             }
             _ => false,
         }
+    }
+
+    pub fn set_priority_weight(&self, id: &str, weight: i64) -> bool {
+        let mut map = self.notices.lock();
+        let Some(tracked) = map.get_mut(id) else { return false; };
+        tracked.notice.priority_weight = Some(weight);
+        true
+    }
+
+    pub fn snooze(&self, id: &str, until: i64) -> bool {
+        let mut map = self.notices.lock();
+        let Some(tracked) = map.get_mut(id) else { return false; };
+        if tracked.notice.state != "attention" || tracked.dismissed_at.is_some() {
+            return false;
+        }
+        tracked.snoozed_until = Some(until);
+        true
     }
 }
 
@@ -287,6 +312,12 @@ fn apply_with_settings(
     // The hook reports the workspace the session is running in, which is also what
     // names the card; the chat store only fills in what the hook left out.
     let cwd = signal.workspace_root.clone().or(facts.cwd);
+    let priority_weight = map.get(&key).and_then(|tracked| tracked.notice.priority_weight);
+    let waiting_since = map
+        .get(&key)
+        .filter(|tracked| tracked.notice.state == "attention")
+        .and_then(|tracked| tracked.notice.waiting_since.or(Some(tracked.notice.at)))
+        .or(Some(signal.at));
     let notice = ExternalNotice {
         id: key.clone(),
         kind,
@@ -311,6 +342,8 @@ fn apply_with_settings(
         turns: facts.turns,
         notification: signal.notification.clone(),
         tool: signal.tool.clone(),
+        priority_weight,
+        waiting_since,
         at: signal.at,
     };
     // A newer event clears the dismissal, so `changed` must account for the notice
@@ -324,6 +357,7 @@ fn apply_with_settings(
             notice,
             seen_at: now,
             dismissed_at: None,
+            snoozed_until: None,
         },
     );
     changed
@@ -398,6 +432,8 @@ fn set_working(
             preview: None,
             notification: None,
             tool: None,
+            priority_weight: None,
+            waiting_since: None,
             at: signal.at,
         });
     notice.kind = kind.to_string();
@@ -408,6 +444,7 @@ fn set_working(
     notice.tool = None;
     notice.notification = None;
     notice.preview = None;
+    notice.waiting_since = None;
     let changed = map.get(key).is_none_or(|tracked| tracked.notice != notice);
     map.insert(
         key.to_string(),
@@ -415,6 +452,7 @@ fn set_working(
             notice,
             seen_at: now,
             dismissed_at: None,
+            snoozed_until: None,
         },
     );
     changed

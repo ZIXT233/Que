@@ -84,7 +84,7 @@ export const enLocale: LocalePlugin = {
 
     "external.title": "External session",
     "external.tool": "Waiting on {tool}",
-    "external.dismiss": "Dismiss external session",
+    "external.dismiss": "Dismiss notification",
     "external.hint": "Reported by {name}; sessions outside Que cannot be continued here",
     "external.permission": "Waiting for your permission",
     "external.finished": "External session notice, automatically removed from queue once handled",

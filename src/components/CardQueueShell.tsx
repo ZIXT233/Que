@@ -844,12 +844,18 @@ export function CardQueueShell() {
         host={cardHostLabel(visibleCard)}
         folder={displayProject(visibleCard)}
         directory={notice.cwd ?? ""}
-        onDismiss={() => {
-          if (inspecting === visibleCard.id) {
+        onSaveWeight={weight => run("external_priority_weight", { id: notice.id, weight })}
+        onSnooze={async minutes => {
+          const result = await run("snooze_external", { id: notice.id, minutes });
+          if (result) {
+            showQueueToast(t("queue.已设置稍后提醒", { title: titleOf(visibleCard) }));
             setInspecting(null);
-          } else {
-            void run("dismiss_external", { id: notice.id });
           }
+          return result;
+        }}
+        onDismiss={() => {
+          if (inspecting === visibleCard.id) setInspecting(null);
+          void run("dismiss_external", { id: notice.id });
         }} />;
     }
     const cardScore = scoreCard(visibleCard, tags);

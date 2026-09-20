@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
 import { externalNoticeTitle, type ExternalNotice, type ExternalTurn } from "@/lib/card-queue";
@@ -10,6 +9,15 @@ import { Icon } from "./QueueIcon";
 import { ScoreChipTooltip } from "./ScoreChipTooltip";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
 import { MarkdownMessage } from "./MarkdownMessage";
+import { PriorityBadge } from "./PriorityBadge";
+
+const REMIND_OPTIONS = [
+  { minutes: 15, labelKey: "queue.15分钟" },
+  { minutes: 60, labelKey: "queue.1小时" },
+  { minutes: 180, labelKey: "queue.3小时" },
+  { minutes: 480, labelKey: "queue.8小时" },
+  { minutes: 1440, labelKey: "queue.24小时" },
+] as const;
 
 function ExternalHarnessWatermark({ kind }: { kind: string }) {
   const iconId = providerIconId(kind);
@@ -74,7 +82,7 @@ function ExternalHarnessHeaderBadge({ kind, title }: { kind: string; title: stri
  * actions; the body is the only thing it owns, because there is no terminal behind it
  * and the session's own record is all there is to read.
  */
-export function ExternalSessionCard({ notice, isFront, host, folder, directory, onDismiss }: {
+export function ExternalSessionCard({ notice, isFront, host, folder, directory, onDismiss, onSaveWeight, onSnooze }: {
   notice: ExternalNotice;
   isFront: boolean;
   /** Host and CLI, already labelled by the shell exactly as a real card's chip is. */
@@ -83,6 +91,8 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
   folder: string;
   directory: string;
   onDismiss: () => void;
+  onSaveWeight: (weight: number) => Promise<unknown>;
+  onSnooze: (minutes: number) => Promise<unknown>;
 }) {
   const { t } = useI18n();
   const harness = harnessName(notice.kind);
@@ -112,18 +122,6 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
     }
   }, [notice.id, transcript.length]);
 
-  const handleFocusWindow = useCallback(async () => {
-    try {
-      await invoke("focus_external_window", {
-        kind: notice.kind,
-        project: notice.project || folder || "",
-        cwd: notice.cwd || directory || "",
-      });
-    } catch (e) {
-      console.warn("[que] focus_external_window failed:", e);
-    }
-  }, [notice.kind, notice.project, notice.cwd, folder, directory]);
-
   return (
     <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card cq-external-card"
       data-phase={isWorking ? "working" : "attention"} data-external-harness={notice.kind} data-card-id={`external:${notice.id}`}>
@@ -134,6 +132,7 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
               <i className={isWorking ? "cq-dot" : "cq-ready-dot"} />{harness}
               <span>· {t(isWorking ? "queue.正在工作" : (blocked ? "external.permission" : "external.finished"))}</span>
             </div>
+            {!isWorking && <PriorityBadge weight={notice.priorityWeight ?? 0} enabled={isFront} onSave={onSaveWeight} />}
           </div>
           <div className="cq-card-title-row">
             <div className="cq-title-primary">
@@ -142,31 +141,24 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
                 <WorkspaceMachineIcon name="local" size={15} /><b>{host}</b>
               </span>
               {folder && <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{folder}</span><small>{directory || folder}</small></div>}>
-                <button
-                  type="button"
-                  className="cq-title-environment cq-title-workspace cq-title-workspace-btn"
-                  aria-label={`${folder} · ${t("external.openInEditor", { name: harness })}`}
-                  onClick={() => { void handleFocusWindow(); }}
-                >
+                <span className="cq-title-environment cq-title-workspace" aria-label={folder}>
                   <WorkspaceMachineIcon name="folder" size={15} /><b>{folder}</b>
-                </button>
+                </span>
               </ScoreChipTooltip>}
             </div>
           </div>
         </div>
         <ExternalHarnessHeaderBadge kind={notice.kind} title={harness} />
         <div className="cq-card-actions">
-          <button
-            type="button"
-            className="cq-action-popout"
-            aria-label={t("external.openInEditor", { name: harness })}
-            title={t("external.openInEditor", { name: harness })}
-            onClick={() => { void handleFocusWindow(); }}
-          >
-            <Icon name="out" /><span className="cq-action-tooltip" role="tooltip">{t("external.openInEditor", { name: harness })}</span>
-          </button>
-          <button type="button" className="cq-action-archive" aria-label={t(isWorking ? "queue.关闭" : "external.dismiss")} onClick={onDismiss}>
-            <Icon name="close" /><span className="cq-action-tooltip" role="tooltip">{t(isWorking ? "queue.关闭" : "external.dismiss")}</span>
+          {!isWorking && <div className="cq-remind-menu">
+            <button type="button" className="cq-action-defer" aria-label={t("queue.稍后提醒")} aria-haspopup="menu"><Icon name="clock" /><span className="cq-action-tooltip" role="tooltip">{t("queue.稍后提醒")}</span></button>
+            <div className="cq-remind-popover" role="menu" aria-label={t("queue.稍后提醒")}>
+              <div className="cq-remind-popover-title" aria-hidden="true">{t("queue.稍后提醒")}</div>
+              {REMIND_OPTIONS.map((option) => <button key={option.minutes} role="menuitem" onClick={(event) => { void onSnooze(option.minutes); event.currentTarget.blur(); }}><span>{t(option.labelKey)}</span></button>)}
+            </div>
+          </div>}
+          <button type="button" className="cq-action-archive" aria-label={t("external.dismiss")} onClick={onDismiss}>
+            <Icon name="bell-off" /><span className="cq-action-tooltip" role="tooltip">{t("external.dismiss")}</span>
           </button>
         </div>
       </div>

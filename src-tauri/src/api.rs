@@ -141,6 +141,21 @@ async fn post_queue(
     if action == "dismiss_external" {
         let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default();
         state.external.dismiss(id);
+    } else if action == "external_priority_weight" {
+        let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let weight = numeric_weight(body.get("weight").unwrap_or(&json!(0)));
+        if !state.external.set_priority_weight(id, weight) {
+            return Err(AppError::msg("外部通知不存在"));
+        }
+    } else if action == "snooze_external" {
+        let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let minutes = body.get("minutes").and_then(|v| v.as_i64()).unwrap_or(0);
+        if minutes <= 0 || minutes > 24 * 60 {
+            return Err(AppError::msg("无效的提醒间隔"));
+        }
+        if !state.external.snooze(id, now_ms() + minutes * 60_000) {
+            return Err(AppError::msg("外部通知无法进入稍后提醒"));
+        }
     } else if matches!(
         action.as_str(),
         "harness_start" | "harness_reopen" | "harness_restart" | "harness_resume"
@@ -201,12 +216,12 @@ async fn post_queue(
     }
     // dismiss_external already did its work above and has no queue-side action; every
     // other action goes through apply_action. Both share this one read+response path.
-    let dismissing = action == "dismiss_external";
+    let external_action = matches!(action.as_str(), "dismiss_external" | "external_priority_weight" | "snooze_external");
     let queue = state
         .queue
         .with_queue(false, |queue| {
             refresh_queue(queue, &state);
-            if dismissing {
+            if external_action {
                 return Ok(queue.clone());
             }
             apply_action(queue, &body, &action, &state)?;

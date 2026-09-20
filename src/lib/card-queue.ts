@@ -69,6 +69,8 @@ export interface ExternalNotice {
   preview?: string;
   notification?: string;
   tool?: string;
+  priorityWeight?: number;
+  waitingSince?: number;
   at: number;
 }
 
@@ -81,7 +83,8 @@ export function toExternalCard(notice: ExternalNotice): QueueCard {
     createdAt: notice.at,
     readyAt: notice.at,
     // The scheduler never sees these, but sorting must stay stable if it ever does.
-    waitingSince: notice.at,
+    waitingSince: notice.waitingSince ?? notice.at,
+    priorityWeight: notice.priorityWeight,
     externalNotice: notice,
   };
 }

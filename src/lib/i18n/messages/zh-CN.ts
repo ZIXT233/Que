@@ -84,7 +84,7 @@ export const zhCNLocale: LocalePlugin = {
 
     "external.title": "外部会话",
     "external.tool": "等待 {tool} 授权",
-    "external.dismiss": "关闭外部会话卡片",
+    "external.dismiss": "忽略此通知",
     "external.hint": "来自 {name}；Que 之外的会话无法在这里继续对话",
     "external.permission": "等待你确认权限",
     "external.finished": "外部会话的通知，处理后自动移出队列",
