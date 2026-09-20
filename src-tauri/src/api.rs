@@ -457,9 +457,14 @@ fn kill_side_terminals(state: &AppState, card: &crate::models::QueueCard) {
 }
 
 fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCard) {
-    let Some(harness) = card.harness.as_ref().filter(|harness| harness.tmux != Some(false)) else {
+    let use_tmux = card
+        .harness
+        .as_ref()
+        .and_then(|harness| harness.tmux)
+        .unwrap_or(true);
+    if !use_tmux {
         return;
-    };
+    }
     let Some(host) = queue
         .workspaces
         .as_ref()
@@ -476,15 +481,18 @@ fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCar
 
     // Harness tmux sessions are keyed by card id. The terminal id is only the
     // live SSH channel identity and does not name the persistent tmux session.
-    let mut session_ids = vec![crate::ssh::card_tmux_session_id(&card.id)];
+    let mut session_ids = Vec::new();
+    if card.harness.is_some() {
+        session_ids.push(crate::ssh::card_tmux_session_id(&card.id));
+    }
     if let Some(tabs) = &card.side_terminals {
-        session_ids.extend(tabs.iter().map(|tab| {
-            format!(
-                "card_{}_side_{}",
-                card.id.replace('-', "_"),
-                tab.id.replace('-', "_")
-            )
-        }));
+        session_ids.extend(
+            tabs.iter()
+                .map(|tab| crate::ssh::card_side_tmux_session_id(&card.id, &tab.id)),
+        );
+    }
+    if session_ids.is_empty() {
+        return;
     }
     let targets: Vec<String> = session_ids
         .iter()
@@ -520,7 +528,7 @@ fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCar
     crate::debuglog::info_card(
         "queue",
         &card.id,
-        Some(&harness.terminal_id),
+        card.harness.as_ref().map(|harness| harness.terminal_id.as_str()),
         "archive tmux cleanup requested",
     );
 }
@@ -1046,12 +1054,10 @@ fn apply_action(
                 let tid = terminal_id.to_string();
                 let cid = id.unwrap_or("").to_string();
                 tokio::spawn(async move {
-                    let s1 = format!(
-                        "que_card_{}_side_{}",
-                        cid.replace('-', "_"),
-                        tid.replace('-', "_")
+                    let s1 = crate::ssh::tmux_session_name(
+                        &crate::ssh::card_side_tmux_session_id(&cid, &tid),
                     );
-                    let s2 = format!("que_{}", tid.replace('-', "_"));
+                    let s2 = crate::ssh::tmux_session_name(&tid);
                     let cmd = format!("tmux kill-session -t {} 2>/dev/null || tmux kill-session -t {} 2>/dev/null || true", crate::ssh::shell_quote(&s1), crate::ssh::shell_quote(&s2));
                     let _ = crate::ssh::ssh_exec(&host, &cmd).await;
                 });

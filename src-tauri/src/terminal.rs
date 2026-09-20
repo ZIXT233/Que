@@ -697,11 +697,7 @@ impl TerminalHub {
         let inner = crate::ssh::remote_login_shell(&cwd, crate::terminal_theme::app_dark());
         let command = if use_tmux {
             let session_id = if let Some(cid) = card_id.filter(|s| !s.is_empty()) {
-                format!(
-                    "card_{}_side_{}",
-                    cid.replace('-', "_"),
-                    term_id.replace('-', "_")
-                )
+                crate::ssh::card_side_tmux_session_id(&cid, &term_id)
             } else {
                 term_id.clone()
             };

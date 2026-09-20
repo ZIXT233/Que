@@ -134,6 +134,14 @@ pub fn card_tmux_session_id(card_id: &str) -> String {
     format!("card_{}", card_id.replace('-', "_"))
 }
 
+pub fn card_side_tmux_session_id(card_id: &str, terminal_id: &str) -> String {
+    format!(
+        "{}_side_{}",
+        card_tmux_session_id(card_id),
+        terminal_id.replace('-', "_")
+    )
+}
+
 pub fn wrap_remote_tmux_with_channel(
     terminal_id: &str,
     cwd: &str,
