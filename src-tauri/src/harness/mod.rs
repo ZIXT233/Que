@@ -518,7 +518,7 @@ impl HarnessRuntime {
                         },
                         command
                     );
-                    let term_id = format!("card_{card_id}");
+                    let term_id = crate::ssh::card_tmux_session_id(card_id);
                     let wrapped = crate::ssh::wrap_remote_tmux_with_channel(
                         &term_id,
                         &workspace.cwd,

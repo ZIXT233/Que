@@ -474,7 +474,9 @@ fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCar
         return;
     };
 
-    let mut session_ids = vec![harness.terminal_id.clone()];
+    // Harness tmux sessions are keyed by card id. The terminal id is only the
+    // live SSH channel identity and does not name the persistent tmux session.
+    let mut session_ids = vec![crate::ssh::card_tmux_session_id(&card.id)];
     if let Some(tabs) = &card.side_terminals {
         session_ids.extend(tabs.iter().map(|tab| {
             format!(

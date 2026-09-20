@@ -147,7 +147,7 @@ pub async fn prepare_shell(
             .map(|s| shell_quote(&s))
             .collect::<Vec<_>>()
             .join(" ");
-        let term_id = format!("card_{card_id}");
+        let term_id = crate::ssh::card_tmux_session_id(card_id);
         let remote_cmd = if use_tmux {
             let inner_exec = format!(
                 "{}exec {}",
