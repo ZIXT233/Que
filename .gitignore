@@ -42,3 +42,4 @@ src-tauri/target
 /.cargo-check.log
 /.cargo-test.log
 /.cargo-full.log
+/.cli-ls.txt
