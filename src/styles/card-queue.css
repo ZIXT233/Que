@@ -1293,16 +1293,21 @@ html.dark .cq-card-branches .cq-branch-trigger {
 
 html.dark .cq-workspace-picker,
 html.dark .cq-workspaces > button,
+html.dark .cq-workspace-open,
 html.dark .cq-picker-search input {
   color: var(--cq-ink);
 }
 
 html.dark .cq-workspaces > button.is-selected,
+html.dark .cq-workspace-row.is-selected,
 html.dark .cq-location-choice button[aria-pressed="true"] {
   border-color: #697462;
   background: #333a31;
   color: #d8e2cf;
 }
+
+html.dark .cq-workspace-edit:hover { background: #333a31; color: var(--cq-accent); }
+html.dark .cq-workspace-remove:hover { background: #3a3230; color: #c07a68; }
 
 html.dark .cq-workspace-picker footer,
 html.dark .cq-workspace-picker footer kbd,
