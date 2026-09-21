@@ -72,6 +72,7 @@ export const zhCNLocale: LocalePlugin = {
     "harness.tmuxKeepAlive": "使用 tmux 会话保活（远程断线或关闭应用时不中断）",
     "harness.checking": "检查并启动…",
     "harness.shellDescription": "纯终端，不响应 Agent 事件",
+    "harness.openShell": "Shell 终端",
     "harness.background": "放入工作区等待",
     "harness.backgroundHint": "移入工作区，命令结束后返回卡片队列并通知",
     "harness.commandDone": "命令已完成",

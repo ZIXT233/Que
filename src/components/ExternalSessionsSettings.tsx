@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
 import { ConfigSwitch } from "./SettingsUi";
-import { externalHarnesses, isPiMark, providerIconId, type FormSupportStatus } from "@/lib/harness/catalog";
+import { externalHarnesses, providerIconId, type FormSupportStatus } from "@/lib/harness/catalog";
 
 function FormCapsule({
   formLabel,
@@ -136,14 +136,7 @@ export function ExternalSessionsSettings() {
               <div className="external-harness-card-header">
                 <div className="external-harness-brand">
                   <span className="external-harness-icon-wrap">
-                    {isPiMark(harness.id) ? (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)" }}>
-                        <polyline points="4 17 10 11 4 5" />
-                        <line x1="12" y1="19" x2="20" y2="19" />
-                      </svg>
-                    ) : (
-                      <ProviderIcon id={providerIconId(harness.iconId)} size={20} />
-                    )}
+                    <ProviderIcon id={providerIconId(harness.iconId)} size={20} />
                   </span>
                   <div className="external-harness-info">
                     <span className="external-harness-name">{harness.name}</span>

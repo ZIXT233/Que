@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createShellProbe } from "@/lib/harness/shell-probe";
-import { harnessPicker, harnessName, providerIconId, isPiMark, terminalOptions } from "@/lib/harness/catalog";
+import { harnessPicker, harnessName, providerIconId, terminalOptions } from "@/lib/harness/catalog";
 import { harnessErrorText } from "@/lib/harness/errors";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
@@ -194,8 +194,19 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
         harnessName={harnessName(startingKind)}
       />
     </div> : mode === "cli" ? <div className="cq-harness-empty"><div className="cq-harness-picker">
-      <h3>{t("harness.choose")}</h3>
-      <p>{t("harness.chooseHint")}</p>
+      <div className="cq-harness-picker-head">
+        <div>
+          <h3>{t("harness.choose")}</h3>
+          <p>{t("harness.chooseHint")}</p>
+        </div>
+        <button type="button" className="cq-harness-option cq-harness-shell-entry" disabled={busy} onClick={() => {
+          setStartingKind("shell");
+          void act("harness_start", { kind: "shell", tmux: Boolean(sshHost) && useTmux }).finally(() => setStartingKind(null));
+        }}>
+          <span className="cq-harness-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg></span>
+          <span><strong>{t("harness.openShell")}</strong><small>{t("harness.shellDescription")}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
+        </button>
+      </div>
       {Boolean(sshHost) && (
         <div style={{ margin: "8px 0 12px", display: "flex", alignItems: "center" }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "12.5px", cursor: "pointer", opacity: 0.9, userSelect: "none" }}>
@@ -214,8 +225,8 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
         setStartingKind(item.id);
         void act("harness_start", { kind: item.id, tmux: Boolean(sshHost) && useTmux }).finally(() => setStartingKind(null));
       }}>
-        <span className="cq-harness-option-icon" aria-hidden="true">{item.id === "shell" ? <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg> : isPiMark(item.id) ? <span className="cq-harness-pi-mark">π</span> : <ProviderIcon id={providerIconId(item.id)} size={28} />}</span>
-        <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.id === "shell" ? t("harness.shellDescription") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
+        <span className="cq-harness-option-icon" aria-hidden="true"><ProviderIcon id={providerIconId(item.id)} size={28} /></span>
+        <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
       </button>)}
       </div>
     </div></div> : children}

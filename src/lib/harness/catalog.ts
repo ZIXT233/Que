@@ -37,12 +37,13 @@ export const harnessCatalog: HarnessCatalogEntry[] = [
   { id: "claude", name: "Claude Code", description: "Anthropic · CLI", vendor: "Anthropic", iconId: "anthropic", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
   { id: "cursor", name: "Cursor Agent", description: "Cursor · CLI", vendor: "Cursor", iconId: "cursor", forms: { cli: "supported", desktop: "supported" } },
   { id: "opencode", name: "OpenCode", description: "OpenCode · CLI", vendor: "OpenCode", iconId: "opencode", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
-  { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI", vendor: "Google", iconId: "google", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
+  { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI", vendor: "Google", iconId: "antigravity", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
   { id: "pi", name: "Pi", description: "Pi · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported" } },
-  { id: "omp", name: "Oh My Pi", description: "OMP · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported" } },
+  { id: "omp", name: "Oh My Pi", description: "OMP · CLI", vendor: "Pi", iconId: "omp", forms: { cli: "supported" } },
   { id: "codebuddy", name: "CodeBuddy", description: "Tencent · CLI", vendor: "Tencent", iconId: "codebuddy", forms: { cli: "supported", desktop: "unsupported" } },
   { id: "grok", name: "Grok Build", description: "xAI · CLI", vendor: "xAI", iconId: "grok", forms: { cli: "supported" }, themeProfile: "grok" },
-  { id: "shell", name: "Shell", description: "纯终端，不响应 Agent 事件", focusReporting: false },
+  { id: "devin", name: "Devin", description: "Cognition · CLI", vendor: "Cognition", iconId: "devin", forms: { cli: "supported" } },
+  { id: "shell", name: "Shell", description: "纯终端，不响应 Agent 事件", focusReporting: false, hidden: true },
 ];
 
 const harnessMeta = (id: HarnessId | string) => harnessCatalog.find(item => item.id === id);
@@ -56,7 +57,7 @@ export const harnessName = (id: HarnessId | string) => harnessMeta(id)?.name ?? 
  * and shares its settings key, so the two share one card — as on the backend, where
  * `omp` resolves to Pi's `ingress_key`.
  */
-const EXTERNAL_ORDER: HarnessId[] = ["codex", "claude", "cursor", "opencode", "antigravity", "pi", "codebuddy", "grok"];
+const EXTERNAL_ORDER: HarnessId[] = ["codex", "claude", "cursor", "opencode", "antigravity", "pi", "codebuddy", "grok", "devin"];
 export interface ExternalHarnessEntry {
   id: HarnessId;
   name: string;
@@ -69,11 +70,8 @@ export const externalHarnesses: ExternalHarnessEntry[] = EXTERNAL_ORDER.map(id =
   return { id, name: id === "pi" ? "Pi / OMP" : meta.name, vendor: meta.vendor!, iconId: meta.iconId!, forms: meta.forms! };
 });
 
-const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "anthropic", gemini: "google", antigravity: "google" };
+const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "claudecode", gemini: "google" };
 export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? harnessMeta(id)?.iconId ?? id;
-
-/** Pi and its fork share the π glyph; they have no provider-icon symbol. */
-export const isPiMark = (id: HarnessId | string) => id === "pi" || id === "omp";
 
 /** Terminal options for one harness, with the component defaults filled in. */
 export const terminalOptions = (id: HarnessId | string) => {

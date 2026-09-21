@@ -6,7 +6,8 @@ import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
 import { externalNoticeTitle, toExternalCard, type ExternalNotice, type ExternalTurn } from "@/lib/card-queue";
 import { scoreCard } from "@/lib/turn-priority";
-import { harnessName, isPiMark, providerIconId } from "@/lib/harness/catalog";
+import { harnessName, providerIconId } from "@/lib/harness/catalog";
+import { SpritePaintDefs } from "./ProviderIcon";
 import { Icon } from "./QueueIcon";
 import { ScoreChipTooltip } from "./ScoreChipTooltip";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
@@ -34,16 +35,10 @@ function ExternalHarnessWatermark({ kind }: { kind: string }) {
       </div>
     );
   }
-  if (isPiMark(kind)) {
-    return (
-      <div className="cq-external-watermark" data-harness={kind} aria-hidden="true">
-        <span className="cq-external-watermark-pi">π</span>
-      </div>
-    );
-  }
   return (
     <div className="cq-external-watermark" data-harness={kind} aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="currentColor">
+        <SpritePaintDefs id={iconId} />
         <use href={`/provider-icons.svg#${iconId}`} />
       </svg>
     </div>
@@ -59,10 +54,9 @@ function ExternalHarnessHeaderBadge({ kind, title }: { kind: string; title: stri
           <rect x="3" y="4" width="18" height="16" rx="3" />
           <path d="m7 9 3 3-3 3m6 0h4" />
         </svg>
-      ) : isPiMark(kind) ? (
-        <span className="cq-external-header-badge-pi" aria-hidden="true">π</span>
       ) : (
         <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true">
+          <SpritePaintDefs id={iconId} />
           <use href={`/provider-icons.svg#${iconId}`} />
         </svg>
       )}

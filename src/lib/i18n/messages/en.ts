@@ -72,6 +72,7 @@ export const enLocale: LocalePlugin = {
     "harness.tmuxKeepAlive": "Use tmux session keep-alive (persist across disconnects / app close)",
     "harness.checking": "Checking and starting…",
     "harness.shellDescription": "Plain terminal; does not respond to agent events",
+    "harness.openShell": "Shell terminal",
     "harness.background": "Move to work area and wait",
     "harness.backgroundHint": "Move to the work area; return and notify when the command finishes",
     "harness.commandDone": "Command completed",
