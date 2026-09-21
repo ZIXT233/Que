@@ -167,6 +167,16 @@ pub fn resolve_local_command(
         vec![String::new()]
     };
     for dir in dirs {
+        // A PATH entry behind a user-created junction refuses traversal when
+        // the process inherits the redirection-trust mitigation (MSI "launch
+        // now", sshd). Resolve the link targets — pure metadata reads the
+        // mitigation does not gate — and probe the physical path instead.
+        #[cfg(windows)]
+        let dir = if dir.is_dir() {
+            dir
+        } else {
+            resolve_reparse_chain(&dir)
+        };
         for ext in &extensions {
             let candidate = dir.join(format!("{command}{ext}"));
             if candidate.is_file() {
@@ -175,6 +185,48 @@ pub fn resolve_local_command(
         }
     }
     None
+}
+
+/// Substitute every reparse point in `path` with its link target, one component
+/// at a time so ancestors are already physical before each lookup. Repeat until
+/// stable: a target may itself contain links (Codex's `bin` junction lands on a
+/// `current` junction). Unreadable or nonexistent parts are left as-is; the
+/// caller's `is_file` still decides.
+#[cfg(windows)]
+fn resolve_reparse_chain(path: &Path) -> PathBuf {
+    use std::os::windows::fs::MetadataExt;
+    const REPARSE_POINT: u32 = 0x400;
+    let mut current = path.to_path_buf();
+    for _ in 0..8 {
+        let mut resolved = PathBuf::new();
+        let mut changed = false;
+        for component in current.components() {
+            resolved.push(component.as_os_str());
+            let Ok(meta) = std::fs::symlink_metadata(&resolved) else {
+                continue;
+            };
+            if meta.file_attributes() & REPARSE_POINT == 0 {
+                continue;
+            }
+            let Ok(target) = std::fs::read_link(&resolved) else {
+                continue;
+            };
+            resolved = if target.is_absolute() {
+                target
+            } else {
+                resolved
+                    .parent()
+                    .map(|base| base.join(&target))
+                    .unwrap_or(target)
+            };
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+        current = resolved;
+    }
+    current
 }
 
 #[cfg(test)]

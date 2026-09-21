@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { access, stat } from "node:fs/promises";
+import { access, stat, readlink } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, join, isAbsolute } from "node:path";
+import { delimiter, join, isAbsolute, dirname } from "node:path";
 import { homedir } from "node:os";
 const exec = promisify(execFile);
 const START = "__QUE_ENV_START__", END = "__QUE_ENV_END__";
@@ -38,8 +38,39 @@ export async function resolveLocalCommand(command: string, env: NodeJS.ProcessEn
   dirs.push(join(homedir(), ".local", "bin"), join(homedir(), ".opencode", "bin"));
   if (win && read("APPDATA")) dirs.push(join(read("APPDATA")!, "npm"));
   const extensions = win ? (read("PATHEXT") || ".EXE;.CMD;.BAT;.COM").split(";") : [""];
-  for (const dir of dirs) for (const ext of extensions) {
-    const candidate = join(dir, command + ext);
-    try { if (!(await stat(candidate)).isFile()) continue; await access(candidate, win ? constants.F_OK : constants.X_OK); return candidate; } catch {}
+  for (const dir of dirs) {
+    // A PATH entry behind a user-created junction refuses traversal when the
+    // process inherits the redirection-trust mitigation (MSI "launch now",
+    // sshd). Resolve link targets — metadata reads the mitigation does not
+    // gate — and probe the physical path instead.
+    let probed = dir;
+    if (win) { try { await stat(probed); } catch { probed = await resolveReparseChain(dir); } }
+    for (const ext of extensions) {
+      const candidate = join(probed, command + ext);
+      try { if (!(await stat(candidate)).isFile()) continue; await access(candidate, win ? constants.F_OK : constants.X_OK); return candidate; } catch {}
+    }
   }
+}
+
+async function resolveReparseChain(path: string): Promise<string> {
+  // Substitute each reparse point component with its link target; a target may
+  // itself contain links (Codex's `bin` junction lands on a `current`
+  // junction), so repeat until stable. readlink never traverses the link.
+  let current = path;
+  for (let hop = 0; hop < 8; hop++) {
+    const parts = current.split(/[\\/]+/).filter(Boolean);
+    let resolved = /^[a-zA-Z]:$/.test(parts[0] ?? "") ? parts.shift()! + "\\" : "\\";
+    let changed = false;
+    for (const part of parts) {
+      resolved = join(resolved, part);
+      try {
+        const target = await readlink(resolved);
+        resolved = isAbsolute(target) ? target : join(dirname(resolved), target);
+        changed = true;
+      } catch {}
+    }
+    if (!changed) return current;
+    current = resolved;
+  }
+  return current;
 }
