@@ -1,4 +1,5 @@
 import type { TerminalTab } from "@/components/terminal-tab-state";
+import { discardTerminalSession } from "./terminal-pool";
 
 const registry = new Map<string, string[]>();
 
@@ -67,12 +68,14 @@ export function clearEnsuringSideTerminal(cardId: string, tabId?: string) {
 export function dropCardSideTerminal(cardId: string, tab: CardSideTerminalRef) {
   clearEnsuringSideTerminal(cardId, tab.id);
   void persistCardSideTerminal(cardId, tab, "remove");
+  discardTerminalSession(tab.id);
   void fetch(`/api/terminal/${encodeURIComponent(tab.id)}`, { method: "DELETE", keepalive: true }).catch(() => {});
 }
 
 export function disposeCardSideTerminals(cardId: string, tabIds?: string[]) {
   const ids = new Set([...(tabIds ?? []), ...(registry.get(cardId) ?? [])]);
   for (const id of ids) {
+    discardTerminalSession(id);
     void fetch(`/api/terminal/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true }).catch(() => {
       /* The card is already gone; a failed delete must not keep it around. */
     });

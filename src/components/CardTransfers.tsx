@@ -4,7 +4,7 @@ import { Component, createRef, type ReactNode } from "react";
 import { shouldQuietRearQueueArrival, type AttentionMode } from "@/lib/attention-mode";
 import { queueArrivalSide } from "@/lib/queue-arrival";
 
-type Zone = "working" | "attention";
+type Zone = "sidebar" | "deck" | "inspection";
 type Props = {
   order: string[];
   locations: Record<string, Zone>;
@@ -29,7 +29,7 @@ export class CardTransfers extends Component<Props> {
   }
 
   private quietAttentionFlight(id: string, zone: Zone) {
-    if (zone !== "attention") return false;
+    if (zone !== "deck") return false;
     const side = queueArrivalSide(this.props.order, this.props.focusedId, id);
     if (!side) return false;
     return shouldQuietRearQueueArrival(this.props.attentionMode ?? "daily", side, document.visibilityState);
@@ -48,7 +48,7 @@ export class CardTransfers extends Component<Props> {
     const layout: Snapshot["layout"] = [];
     if (reordered) {
       for (const id of previous.order) {
-        const source = surfaces.get(`attention:${id}`);
+        const source = surfaces.get(`deck:${id}`);
         if (source?.classList.contains("cq-deck-layer")) layout.push({ id, transform: getComputedStyle(source).transform });
       }
       this.stopLayout();
@@ -56,6 +56,9 @@ export class CardTransfers extends Component<Props> {
     const snapshots: Flight[] = [];
     for (const [id, zone] of Object.entries(this.props.locations)) {
       if (!previous.locations[id] || previous.locations[id] === zone) continue;
+      // Inspection keeps the real card on screen: leaving morphs it onto the
+      // destination itself; keep-in-view takeovers cover the same stage area.
+      if (previous.locations[id] === "inspection" || (zone === "inspection" && previous.locations[id] === "deck")) continue;
       if (this.quietAttentionFlight(id, zone)) continue;
       this.flights.get(id)?.();
       const source = surfaces.get(`${previous.locations[id]}:${id}`);
@@ -64,8 +67,8 @@ export class CardTransfers extends Component<Props> {
       if (!rect.width || !rect.height || rect.bottom <= 0 || rect.top >= window.innerHeight) continue;
       // Carry the card silhouette and heading, not a potentially huge chat DOM.
       const image = document.createElement("div");
-      image.className = zone === "working" ? "cq-large-card" : "cq-small-card";
-      const heading = source.querySelector(zone === "working" ? ".cq-card-header" : "strong");
+      const heading = source.querySelector(".cq-card-header") ?? source.querySelector("strong");
+      image.className = heading?.classList.contains("cq-card-header") ? "cq-large-card" : "cq-small-card";
       if (heading) image.append(heading.cloneNode(true));
       image.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
       snapshots.push({ id, zone, rect, image });
@@ -75,7 +78,7 @@ export class CardTransfers extends Component<Props> {
 
   componentDidUpdate(_previous: Props, _state: unknown, snapshot: Snapshot) {
     for (const { id, transform } of snapshot.layout) {
-      const target = this.surface(id, "attention");
+      const target = this.surface(id, "deck");
       if (!target || getComputedStyle(target).transform === transform) continue;
       const animation = target.animate([{ transform }, { transform: target.style.transform }], { duration: 320, easing: "cubic-bezier(.22,.8,.25,1)" });
       this.layoutAnimations.add(animation);
@@ -85,7 +88,7 @@ export class CardTransfers extends Component<Props> {
       const target = this.surface(id, zone);
       // A completion deep in the queue lands on the visible stack edge.
       const stage = this.root.current?.querySelector<HTMLElement>(".cq-stage");
-      const destination = target?.getBoundingClientRect() ?? (zone === "attention" ? stage?.getBoundingClientRect() : undefined);
+      const destination = target?.getBoundingClientRect() ?? (zone === "deck" ? stage?.getBoundingClientRect() : undefined);
       if (!destination || !destination.width || !destination.height) continue;
       const panel = document.createElement("div");
       panel.className = "cq-transfer-flight";
@@ -95,7 +98,7 @@ export class CardTransfers extends Component<Props> {
       Object.assign(image.style, { position: "absolute", inset: "0", margin: "0", width: "100%", height: "100%", transform: "none", animation: "none", visibility: "visible" });
       panel.append(image);
       this.root.current?.append(panel);
-      const shrinking = zone === "working";
+      const shrinking = zone === "sidebar";
       const duration = shrinking ? 720 : 420;
       const dx = destination.left - rect.left;
       const dy = destination.top - rect.top;

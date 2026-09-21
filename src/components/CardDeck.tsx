@@ -13,12 +13,13 @@ const DeckContent = memo(function DeckContent({ card, isFront, renderCard }: {
   renderCard: (card: QueueCard, isFront: boolean) => ReactNode;
 }) { return renderCard(card, isFront); });
 
-export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndexChange, renderCard, suspended = false }: {
+export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndexChange, renderCard, suspended = false, withheldCardId = null }: {
   cards: QueueCard[];
   resetKey: number;
   focusedIndex: number;
   navigationRef: RefObject<((direction: number) => void) | null>;
   suspended?: boolean;
+  withheldCardId?: string | null;
   onIndexChange: (index: number) => void;
   renderCard: (card: QueueCard, isFront: boolean) => ReactNode;
 }) {
@@ -337,10 +338,10 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
           const isNeighbor = Math.abs(index - selected) === 1;
           // Mounting a conversation tree mid-gesture stalls the slide: while
           // the deck moves, mounts only land through the async queue above.
-          const live = liveCards.current.has(card.id)
-            || (settled && (isFront || isNeighbor));
+          const live = card.id !== withheldCardId && (liveCards.current.has(card.id)
+            || (settled && (isFront || isNeighbor)));
           if (live) liveCards.current.add(card.id);
-          return <div key={card.id} className="cq-deck-layer" data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="attention" data-deck-index={index} aria-hidden={!isFront}
+          return <div key={card.id} className="cq-deck-layer" data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="deck" data-deck-index={index} aria-hidden={!isFront}
             style={{ transform: `translate3d(${x}px, 0, 0) scale(${scale})`, zIndex: cards.length - index, pointerEvents: "auto" }}>
             <div className="cq-deck-layer-body" inert={!isFront}>
               {live ? <DeckContent card={card} isFront={isFront} renderCard={renderCard} /> : <div className="cq-back-card" />}

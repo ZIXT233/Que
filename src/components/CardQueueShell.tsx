@@ -130,6 +130,7 @@ export function CardQueueShell() {
   const attentionOption = ATTENTION_MODES.find((option) => option.id === attentionMode) ?? ATTENTION_MODES[0];
   useViewportHeight();
   const [inspecting, setInspecting] = useState<string | null>(null);
+  const [inspectionLeaving, setInspectionLeaving] = useState<{ id: string; to: "deck" | "sidebar" } | null>(null);
   // Keep-in-view mode: a card that just joined the Working list stays on screen here.
   const [watching, setWatching] = useState<string | null>(null);
   const watchingRef = useRef<string | null>(null);
@@ -317,14 +318,21 @@ export function CardQueueShell() {
     return queued;
   }, [queue, scoreTick, pendingDetach]);
   const deckIndex = resolveQueueFocus(ready, focus?.id ?? null, focus?.index ?? 0);
+  const leaveInspection = useCallback((cardId: string) => {
+    // A working card morphs back onto its Working button; anything else has
+    // no surface to morph onto and closes instantly.
+    const card = cards.find((item) => item.id === cardId);
+    if (card && card.phase === "working" && !card.detached && !pendingDetach.has(card.id)) setInspectionLeaving({ id: card.id, to: "sidebar" });
+    else setInspecting(null);
+  }, [cards, pendingDetach]);
   const selectQueueCard = useCallback((index: number) => {
     const card = ready[index];
     if (!card) return;
     if (!inspecting && index === deckIndex) return;
-    setInspecting(null);
+    if (inspecting) leaveInspection(inspecting);
     setFocus({ id: card.id, index });
     setDeckReset((key) => key + 1);
-  }, [ready, inspecting, deckIndex]);
+  }, [ready, inspecting, deckIndex, leaveInspection]);
   const cardSearchItems: CardQuickSearchItem[] = [
     ...working.map((card) => ({ card, location: "working" as const })),
     ...externalWorking.map((notice) => ({ card: toExternalCard(notice), location: "working" as const })),
@@ -450,18 +458,36 @@ export function CardQueueShell() {
           }
           // Keep-in-view mode keeps the card on screen while it joins the Working
           // list; the phase -> working effect skips clearing inspecting for it.
-          if (watchingRef.current !== card.id) setInspecting(current => current === card.id ? null : current);
-        } else if (previous === "working" && !card.detached && card.harness.kind !== "shell") {
-          void terminalRequest(`/api/terminal/${encodeURIComponent(card.harness.terminalId)}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: "input", data: "\x1b[I" }),
-          }).catch(() => {});
+          if (watchingRef.current !== card.id && inspecting === card.id) setInspectionLeaving({ id: card.id, to: "sidebar" });
+        } else if (previous === "working" && !card.detached) {
+          if (card.harness.kind !== "shell") {
+            void terminalRequest(`/api/terminal/${encodeURIComponent(card.harness.terminalId)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ type: "input", data: "\x1b[I" }),
+            }).catch(() => {});
+          }
+          // Back in the queue while its working view is open: focus where it
+          // landed, then let the overlay morph the real card onto that deck
+          // layer instead of dropping one view and mounting another.
+          if (inspecting === card.id && !activeCardRef.current.detached) {
+            const index = ready.findIndex((item) => item.id === card.id);
+            if (index >= 0) {
+              setFocus({ id: card.id, index });
+              setInspectionLeaving({ id: card.id, to: "deck" });
+            } else setInspecting(null);
+            setDeckReset((key) => key + 1);
+          }
         }
       }
     }
     priorHarnessPhases.current = new Map(queue.cards.map(card => [card.id, card.phase]));
   }, [queue]);
+  // The leave morph is tied to the card it started on; switching or clearing
+  // the inspection drops any stale request.
+  useEffect(() => {
+    if (inspectionLeaving && (!inspected || inspectionLeaving.id !== inspecting)) setInspectionLeaving(null);
+  }, [inspecting, inspected, inspectionLeaving]);
 
   // Stage sizing: prefer a 10:9 (height:width) card — width follows the
   // flex-determined stage height when the content area is wide enough to keep
@@ -519,19 +545,19 @@ export function CardQueueShell() {
   const finishCard = useCallback((cardId: string) => {
     // An accepted action may finish after the user has opened a different card.
     if (activeCardRef.current.detached || activeCardRef.current.id !== cardId) return;
-    setInspecting(null);
+    leaveInspection(cardId);
     setFocus(null);
     setDeckReset((key) => key + 1);
-  }, []);
+  }, [leaveInspection]);
   const advanceToNextCard = useCallback((cardId: string) => {
     const currentIndex = ready.findIndex((card) => card.id === cardId);
     const next = currentIndex >= 0 && ready.length > 1
       ? ready[(currentIndex + 1) % ready.length]
       : undefined;
-    setInspecting(null);
+    leaveInspection(cardId);
     setFocus(next ? { id: next.id, index: ready.indexOf(next) } : null);
     setDeckReset((key) => key + 1);
-  }, [ready]);
+  }, [ready, leaveInspection]);
 
   const canShowDetached = !detachedId || (claimOwner && active?.detached?.owner === claimOwner);
   useEffect(() => {
@@ -800,11 +826,11 @@ export function CardQueueShell() {
         deckNavigationRef.current?.(direction);
         return;
       }
-      if (event.key === "Escape") { setInspecting(null); setFile(null); }
+      if (event.key === "Escape") { if (inspecting) leaveInspection(inspecting); setFile(null); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [settings, creating, history, detachedId, inspecting, addingWorkspace, file, archiveConfirm, urgentCard, ready]);
+  }, [settings, creating, history, detachedId, inspecting, addingWorkspace, file, archiveConfirm, urgentCard, ready, leaveInspection]);
 
   const openHistory = async () => {
     setHistory([]);
@@ -904,7 +930,7 @@ export function CardQueueShell() {
     return (
     <CardSideTerminal key={visibleCard.id} cardId={visibleCard.id} cwd={visibleCard.cwd} remoteShell={remoteShellOf(workspace)} active={isFront} enabled={!layout} saved={visibleCard.sideTerminals} savedOpen={visibleCard.sideTerminalOpen}>
       {({ button: sideButton, panel: sidePanel }) => (
-    <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card" data-transfer-id={visibleCard.id} data-transfer-zone="attention" data-card-id={visibleCard.id} data-phase={visibleCard.phase} data-working-view={visibleCard.phase === "working"} data-urgent-call={hasUrgentCall(visibleCard)}>
+    <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card" data-transfer-id={visibleCard.id} data-transfer-zone="deck" data-card-id={visibleCard.id} data-phase={visibleCard.phase} data-working-view={visibleCard.phase === "working"} data-urgent-call={hasUrgentCall(visibleCard)}>
               <div className="cq-card-header">{detachedId && <div className="cq-detached-drag" data-tauri-drag-region aria-hidden="true" />}{layout?.leftToggle}<div className="cq-card-identity"><div className="cq-card-heading"><h2 title={titleOf(visibleCard)}>{titleOf(visibleCard)}</h2>{showHeaderMeta && <div className="cq-card-meta">{visibleCard.phase !== "attention" && <div className="cq-card-state"><i className={visibleCard.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{visibleCard.phase === "draft" ? t("queue.新的思路") : t("queue.WORKING")}</div>}{hasUrgentCall(visibleCard) && <span className="cq-urgent-label" title={t("queue.urgentPriority")}>🚨 Urgent Call</span>}{visibleCard.remindAt !== undefined && <span className="cq-remind-label" title={t("queue.稍后提醒")}>⏰ {t("queue.稍后提醒")} · {formatRemainder((visibleCard.remindAt ?? 0) - remindNow)}</span>}{!(visibleCard.session || visibleCard.harness) && <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />}<div className="cq-meta-harness" /></div>}{showScore && <ScoreFormulaPopover label={<><span aria-hidden="true">🧮</span> {t("queue.Score")} {hasUrgentCall(visibleCard) ? "∞" : cardScore.total}</>}>
                 <span className="cq-score-operator">=</span>
                 <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />
@@ -969,13 +995,13 @@ export function CardQueueShell() {
         setArchiveConfirm(null);
         if (!detachedId) {
           const index = ready.findIndex((card) => card.id === urgentCard.id);
-          if (index >= 0) { setInspecting(null); setFocus({ id: urgentCard.id, index }); setDeckReset((key) => key + 1); }
+          if (index >= 0) { if (inspecting) leaveInspection(inspecting); setFocus({ id: urgentCard.id, index }); setDeckReset((key) => key + 1); }
           else setInspecting(urgentCard.id);
         }
       }} />}
     <CardTransfers
       order={ready.map((card) => card.id)}
-      locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" && inspecting !== card.id ? "working" : "attention"]))}
+      locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" ? (inspecting === card.id ? "inspection" : "sidebar") : "deck"]))}
       attentionMode={attentionMode}
       focusedId={focus?.id ?? active?.id}
     >
@@ -988,7 +1014,7 @@ export function CardQueueShell() {
         <button className="cq-notifications cq-mobile-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button>
         <div className="cq-section-label"><span>{t("queue.WORKING")}</span><span>{(working.length + externalWorking.length).toString().padStart(2, "0")}</span></div>
         <div className="cq-working-list">
-          {working.map((card, index) => <button key={card.id} data-transfer-id={card.id} data-transfer-zone="working" className={`cq-small-card ${inspecting === card.id ? "is-selected" : ""}`} disabled={!card.session && !card.harness} onClick={() => setInspecting(card.id)}>
+          {working.map((card, index) => <button key={card.id} data-transfer-id={card.id} data-transfer-zone="sidebar" className={`cq-small-card ${inspecting === card.id ? "is-selected" : ""}`} disabled={!card.session && !card.harness} onClick={() => setInspecting(card.id)}>
             <span className="cq-small-meta"><span className="cq-dot" />{displayProject(card)}<span className="cq-index">{String(index + 1).padStart(2, "0")}</span></span>
             <strong>{titleOf(card)}</strong><span className="cq-working-bottom"><span className="cq-bars"><i /><i /><i /><i /></span>{t("queue.正在工作")}<span>↗</span></span>
           </button>)}
@@ -1093,7 +1119,7 @@ export function CardQueueShell() {
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
               : <>
-                  <CardDeck cards={ready} navigationRef={deckNavigationRef} focusedIndex={deckIndex} resetKey={deckReset} suspended={!!inspected} onIndexChange={(index) => { if (ready[index]) setFocus({id: ready[index].id, index}); }} renderCard={renderCard} />
+                  <CardDeck cards={ready} navigationRef={deckNavigationRef} focusedIndex={deckIndex} resetKey={deckReset} suspended={!!inspected} withheldCardId={inspectionLeaving?.id ?? null} onIndexChange={(index) => { if (ready[index]) setFocus({id: ready[index].id, index}); }} renderCard={renderCard} />
                 </>}
           </> : <div className="cq-empty">
             {detachedId && <div className="cq-detached-window-drag" data-tauri-drag-region aria-hidden="true" />}
@@ -1127,7 +1153,9 @@ export function CardQueueShell() {
       </main>
       </div>
     </div>
-    {inspected && !detachedId && <CardInspectionOverlay anchor={stageRef} onClose={() => setInspecting(null)}>{renderCard(inspected)}</CardInspectionOverlay>}
+    {inspected && !detachedId && <CardInspectionOverlay anchor={stageRef} transferId={inspected.id} leaving={inspectionLeaving?.id === inspected.id ? inspectionLeaving.to : null}
+      onClose={() => leaveInspection(inspected.id)}
+      onSettled={() => { setInspectionLeaving(null); setInspecting(null); }}>{renderCard(inspected)}</CardInspectionOverlay>}
     </CardTransfers>
     {creating && <WorkspacePicker workspaces={workspaces} remoteHosts={remoteHosts} busy={busy} onClose={() => setCreating(false)} onAddWorkspace={(machine) => { setCreating(false); setError(""); setWorkspaceThenCreate(true); setWorkspaceFormEntry(machine); setAddingWorkspace(true); }} onManageHosts={() => { setCreating(false); setSettingsSection("remote-hosts"); setSettings(true); }} onUpdate={async (workspaceId, value) => {
       setBusy(true); const result = await run("workspace_update", { workspaceId, ...value }); setBusy(false); return !!result;
