@@ -13,14 +13,43 @@ pub(super) fn install_native_hook(
         &crate::paths::external_signal_dir().to_string_lossy(),
     )?;
     if std::fs::read(&file).ok().as_deref() != Some(body.as_slice()) {
+        sweep_stale_hooks(dir, name);
         let temporary = dir.join(format!("{name}-{}.tmp", uuid::Uuid::new_v4()));
         std::fs::write(&temporary, body)?;
         if let Err(error) = std::fs::rename(&temporary, &file) {
+            // Replacing a running hook image is denied, but moving it aside is
+            // not — a live Codex session's MCP child pins the exe for days.
+            if matches!(error.raw_os_error(), Some(5) | Some(32)) {
+                let aside = dir.join(format!("{name}-{}.old", uuid::Uuid::new_v4()));
+                if std::fs::rename(&file, &aside).is_ok()
+                    && std::fs::rename(&temporary, &file).is_ok()
+                {
+                    return Ok(file);
+                }
+            }
             let _ = std::fs::remove_file(temporary);
             return Err(error.into());
         }
     }
     Ok(file)
+}
+
+/// Leftover `.old`/`.tmp` hook images a dead process no longer pins; ones still
+/// mapped refuse deletion and are retried by the next install.
+#[cfg(windows)]
+fn sweep_stale_hooks(dir: &std::path::Path, name: &str) {
+    let prefix = format!("{name}-");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(text) = entry.file_name().to_str().map(|s| s.to_owned()) else {
+            continue;
+        };
+        if text.starts_with(&prefix) && (text.ends_with(".old") || text.ends_with(".tmp")) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 pub struct WindowsLaunch {
