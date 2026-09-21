@@ -103,6 +103,7 @@ export function meaningOf(signal: HookSignal): Meaning {
     case "StopFailure":
     case "StopCancelled":
     case "sessionEnd":
+    case "SessionEnd":
     case "AfterAgent":
     case "afterAgentResponse":
       return signal.fullyIdle === false ? "working" : "turnEnd";

@@ -68,7 +68,7 @@ const activePath = path.join(__dirname, 'active.json');
 // lets the worker tear the process down before replyPreview is written. Reply
 // after the signal (beforeSubmitPrompt still returns continue:true).
 if (commandMode && (kind === 'gemini' || kind === 'grok')) process.stdout.write('{}\n');
-const knownHarnesses = new Set(['cursor', 'codex', 'antigravity', 'gemini', 'grok', 'claude', 'opencode', 'codebuddy', 'pi', 'omp']);
+const knownHarnesses = new Set(['cursor', 'codex', 'antigravity', 'gemini', 'grok', 'claude', 'opencode', 'codebuddy', 'pi', 'omp', 'devin']);
 if (commandMode && !envDirectory && !token && !legacyActiveDirectory() && (!kind || !knownHarnesses.has(kind))) {
   process.exit(0);
 }
@@ -134,7 +134,8 @@ function pruneExternal(directory) {
 }
 
 function workspaceRootOf(payload) {
-  const roots = payload.workspace_roots ?? payload.workspaceRoots ?? payload.workspace_root ?? payload.cwd;
+  // Devin payloads carry no cwd; the hook process gets DEVIN_PROJECT_DIR instead.
+  const roots = payload.workspace_roots ?? payload.workspaceRoots ?? payload.workspace_root ?? payload.cwd ?? process.env.DEVIN_PROJECT_DIR;
   const value = Array.isArray(roots) ? roots[0] : roots;
   return typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 512) || undefined : undefined;
 }

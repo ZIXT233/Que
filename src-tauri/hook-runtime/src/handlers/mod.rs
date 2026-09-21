@@ -3,6 +3,7 @@ pub mod claude;
 pub mod codebuddy;
 pub mod codex;
 pub mod cursor;
+pub mod devin;
 pub mod gemini;
 pub mod grok;
 use serde_json::{json, Value};
@@ -10,6 +11,7 @@ pub fn validate(kind: &str) -> Result<(), &'static str> {
     if matches!(
         kind,
         "grok" | "cursor" | "claude" | "codebuddy" | "antigravity" | "gemini" | "codex"
+        | "devin"
     ) {
         Ok(())
     } else {
@@ -19,6 +21,7 @@ pub fn validate(kind: &str) -> Result<(), &'static str> {
 pub fn skip(kind: &str, ambient: bool) -> bool {
     (kind != "grok" && std::env::var_os("GROK_HOOK_EVENT").is_some())
         || (kind == "claude" && claude::skip(ambient))
+        || (kind == "devin" && ambient && crate::common::internal())
 }
 pub fn reply(kind: &str, event: Option<&str>) -> Value {
     if kind == "cursor" {
@@ -45,6 +48,7 @@ pub fn accepts(kind: &str, event: &str) -> bool {
         "antigravity" => antigravity::EVENTS,
         "gemini" => gemini::EVENTS,
         "codex" => codex::EVENTS,
+        "devin" => devin::EVENTS,
         _ => return false,
     };
     events.contains(&event)

@@ -31,6 +31,7 @@ pub static ALL: &[&dyn Harness] = &[
     &super::kinds::codebuddy::CODEBUDDY,
     &super::kinds::codex::CODEX,
     &super::kinds::cursor::CURSOR,
+    &super::kinds::devin::DEVIN,
     &super::kinds::antigravity::ANTIGRAVITY,
     &super::kinds::antigravity::GEMINI,
     &super::kinds::grok::GROK,

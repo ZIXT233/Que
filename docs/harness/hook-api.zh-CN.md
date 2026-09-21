@@ -2,7 +2,7 @@
 
 [English](hook-api.md) | **简体中文**
 
-Que 通过各 CLI Harness 本就提供的生命周期钩子来了解它在做什么。这里是共享契约：Harness 上报什么、上报如何抵达 Que、Que 从中推导出什么。`bin/harness-hook.cjs` 指向的就是本文件。
+Que 通过各 CLI Harness 本就提供的生命周期钩子来了解它在做什么。这里是共享契约：Harness 上报什么、上报如何抵达 Que、Que 从中推导出什么。`src-tauri/resources/bin/harness-hook.cjs` 指向的就是本文件。
 
 实现主体是 `src-tauri/src/harness/signals.rs`；`src-tauri/protocol-ref/harness/` 有一份 TypeScript 镜像作为参考。下文描述的行为以两侧保持一致为前提。
 
@@ -12,9 +12,9 @@ Que 通过各 CLI Harness 本就提供的生命周期钩子来了解它在做什
 
 | 入口 | 服务对象 | 投递方式 |
 | --- | --- | --- |
-| `bin/harness-hook.cjs` | `cursor`、`codex`、`antigravity`、`gemini`、`grok`、`claude`、`codebuddy` | 命令式 hook，stdin JSON |
-| `bin/harness-opencode.mjs` | `opencode` | 插件回调 |
-| `bin/harness-pi.mjs` | `pi`、`omp` | 扩展回调 |
+| `src-tauri/resources/bin/harness-hook.cjs` | `cursor`、`codex`、`antigravity`、`gemini`、`grok`、`claude`、`codebuddy`、`devin` | 命令式 hook，stdin JSON |
+| `src-tauri/resources/bin/harness-opencode.mjs` | `opencode` | 插件回调 |
+| `src-tauri/resources/bin/harness-pi.mjs` | `pi`、`omp` | 扩展回调 |
 
 ### 1.1 环境变量
 
@@ -29,7 +29,7 @@ Que 通过各 CLI Harness 本就提供的生命周期钩子来了解它在做什
 | `QUE_HARNESS_DEBUG` | 启动器 | 置 `1` 时往 sink 写 `hook-trace.jsonl` 与 `last-stop-diagnostic.json`。 |
 | `QUE_EXTERNAL_SIGNAL_DIR` | 用户 | 覆盖外部 sink 的位置。 |
 
-当 `QUE_HARNESS_SIGNAL_DIR`、`QUE_HARNESS_CHANNEL`、legacy `active.json` 都不存在，且 `QUE_HARNESS_KIND` 不是已知 Harness 时，ingress 静默退出。已知 kind：`cursor`、`codex`、`antigravity`、`gemini`、`grok`、`claude`、`opencode`、`codebuddy`、`pi`、`omp`。
+当 `QUE_HARNESS_SIGNAL_DIR`、`QUE_HARNESS_CHANNEL`、legacy `active.json` 都不存在，且 `QUE_HARNESS_KIND` 不是已知 Harness 时，ingress 静默退出。已知 kind：`cursor`、`codex`、`antigravity`、`gemini`、`grok`、`claude`、`opencode`、`codebuddy`、`pi`、`omp`、`devin`。
 
 ### 1.2 载荷
 
@@ -174,6 +174,7 @@ Antigravity 与 Cursor 在**用户是否被询问**这点上发出的是同一�
 | `grok` | `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`Stop`、`StopFailure`、`StopCancelled`、`Notification` | `Notification` | — |
 | `opencode` | 插件：`session.*`、`permission.asked`、`question.asked`、`permission.replied`、`session.idle` | `permission.asked`、`question.asked` | — |
 | `pi`、`omp` | 扩展：`session_start`、`before_agent_start`、`agent_start`、`agent_end` / `agent_settled`、`ui_prompt_start`、`ui_prompt_end` | `ui_prompt_start` | — |
+| `devin` | `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PermissionRequest`、`PostToolUse`、`Stop`、`SessionEnd`、`PostCompaction` | — | `PermissionRequest` |
 | `shell` | 无——改为探测 PTY 字节流 | 命令执行结束 | — |
 
 所有 kind 都会丢弃子 Agent 事件（带 `agentId`）。
@@ -209,5 +210,5 @@ Rust 侧会把每个接入的信号按终端记录，附带 `source`：`hook` / 
 | 会话存取守卫与回退 | `src-tauri/src/harness/session_label.rs` |
 | 入口：prepare / realign / 外部部署 | `src-tauri/src/harness/hooks.rs` |
 | 前端注册表（选择器、外部开关、quirk） | `src/lib/harness/catalog.ts` |
-| Ingress | `bin/harness-hook.cjs`、`bin/harness-opencode.mjs`、`bin/harness-pi.mjs` |
+| Ingress | `src-tauri/resources/bin/harness-hook.cjs`、`src-tauri/resources/bin/harness-opencode.mjs`、`src-tauri/resources/bin/harness-pi.mjs` |
 | TypeScript 镜像 | `src-tauri/protocol-ref/harness/` |

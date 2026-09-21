@@ -18,6 +18,7 @@ pub(super) mod claude;
 pub(super) mod codebuddy;
 pub(super) mod codex;
 pub(super) mod cursor;
+pub(super) mod devin;
 pub(super) mod grok;
 pub(super) mod opencode;
 pub(super) mod pi;

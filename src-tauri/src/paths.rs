@@ -151,9 +151,6 @@ pub fn resolve_bin_dir(resource_dir: Option<PathBuf>) -> PathBuf {
         }
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if cwd.join("bin").join("harness-hook.cjs").exists() {
-        return cwd.join("bin");
-    }
     if cwd
         .join("src-tauri")
         .join("resources")

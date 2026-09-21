@@ -191,8 +191,8 @@ pub(crate) fn default_meaning(signal: &HookSignal, guesses_attention: bool) -> M
             Meaning::Working
         }
         // A turn that ended — unless the harness reports that it only paused.
-        "stop" | "Stop" | "StopFailure" | "StopCancelled" | "sessionEnd" | "AfterAgent"
-        | "afterAgentResponse" => {
+        "stop" | "Stop" | "StopFailure" | "StopCancelled" | "sessionEnd" | "SessionEnd"
+        | "AfterAgent" | "afterAgentResponse" => {
             if signal.fully_idle == Some(false) {
                 Meaning::Working
             } else {

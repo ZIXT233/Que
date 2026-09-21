@@ -183,14 +183,21 @@ pub fn deliver(
             .or_else(|| payload.get("workspace_root"))
             .or_else(|| payload.get("workspaceRoot"))
             .or_else(|| payload.get("cwd"));
-        if let Some(root) = roots.and_then(|v| {
-            if v.is_array() {
-                v[0].as_str()
-            } else {
-                v.as_str()
-            }
-        }) {
-            signal["workspaceRoot"] = json!(clean(root, 512, false));
+        // Devin payloads carry no cwd; the hook process gets DEVIN_PROJECT_DIR.
+        let root = roots
+            .and_then(|v| {
+                if v.is_array() {
+                    v[0].as_str()
+                } else {
+                    v.as_str()
+                }
+            })
+            .map(str::to_owned)
+            .or_else(|| {
+                nonempty_env("DEVIN_PROJECT_DIR").map(|v| v.to_string_lossy().into_owned())
+            });
+        if let Some(root) = root {
+            signal["workspaceRoot"] = json!(clean(&root, 512, false));
         }
     }
     fs::create_dir_all(&directory)?;

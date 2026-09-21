@@ -11,6 +11,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "que-session-state" => ("grok", None, false),
         "que-cursor-hook" => ("cursor", args.first().map(String::as_str), false),
         "external-hook" => ("claude", None, true),
+        "devin-hook" => ("devin", None, true),
         _ => (
             args.first()
                 .map(String::as_str)

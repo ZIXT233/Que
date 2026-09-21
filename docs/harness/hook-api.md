@@ -4,7 +4,7 @@
 
 Que learns what a CLI harness is doing from the lifecycle hooks those CLIs already
 offer. This is the shared contract: what a harness reports, how the report reaches
-Que, and what Que derives from it. `bin/harness-hook.cjs` points here.
+Que, and what Que derives from it. `src-tauri/resources/bin/harness-hook.cjs` points here.
 
 The authoritative implementation is `src-tauri/src/harness/signals.rs`;
 `src-tauri/protocol-ref/harness/` carries a TypeScript mirror kept as a reference.
@@ -18,9 +18,9 @@ exception is Cursor, which requires a JSON verdict on stdout (see §2.3).
 
 | Entry point | Used by | Delivered as |
 | --- | --- | --- |
-| `bin/harness-hook.cjs` | `cursor`, `codex`, `antigravity`, `gemini`, `grok`, `claude`, `codebuddy` | command hook, stdin JSON |
-| `bin/harness-opencode.mjs` | `opencode` | plugin callback |
-| `bin/harness-pi.mjs` | `pi`, `omp` | extension callback |
+| `src-tauri/resources/bin/harness-hook.cjs` | `cursor`, `codex`, `antigravity`, `gemini`, `grok`, `claude`, `codebuddy`, `devin` | command hook, stdin JSON |
+| `src-tauri/resources/bin/harness-opencode.mjs` | `opencode` | plugin callback |
+| `src-tauri/resources/bin/harness-pi.mjs` | `pi`, `omp` | extension callback |
 
 ### 1.1 Environment
 
@@ -38,7 +38,7 @@ exception is Cursor, which requires a JSON verdict on stdout (see §2.3).
 The ingress exits silently when none of `QUE_HARNESS_SIGNAL_DIR`, `QUE_HARNESS_CHANNEL`,
 a legacy `active.json`, or a known `QUE_HARNESS_KIND` is present. Known kinds:
 `cursor`, `codex`, `antigravity`, `gemini`, `grok`, `claude`, `opencode`, `codebuddy`,
-`pi`, `omp`.
+`pi`, `omp`, `devin`.
 
 ### 1.2 Payload
 
@@ -230,6 +230,7 @@ guess entirely is the next step if that trade ever needs to move.
 | `grok` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `StopFailure`, `StopCancelled`, `Notification` | `Notification` | — |
 | `opencode` | plugin: `session.*`, `permission.asked`, `question.asked`, `permission.replied`, `session.idle` | `permission.asked`, `question.asked` | — |
 | `pi`, `omp` | extension: `session_start`, `before_agent_start`, `agent_start`, `agent_end` / `agent_settled`, `ui_prompt_start`, `ui_prompt_end` | `ui_prompt_start` | — |
+| `devin` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `Stop`, `SessionEnd`, `PostCompaction` | — | `PermissionRequest` |
 | `shell` | none — the PTY byte stream is probed instead | command finished | — |
 
 Subagent events (`agentId` present) are dropped for every kind.
@@ -272,5 +273,5 @@ one row in `ALL` (plus a frontend entry in `src/lib/harness/catalog.ts`).
 | Session-access guards and fallbacks | `src-tauri/src/harness/session_label.rs` |
 | Entry points: prepare / realign / external deploy | `src-tauri/src/harness/hooks.rs` |
 | Frontend registry (picker, external toggles, quirks) | `src/lib/harness/catalog.ts` |
-| Ingress | `bin/harness-hook.cjs`, `bin/harness-opencode.mjs`, `bin/harness-pi.mjs` |
+| Ingress | `src-tauri/resources/bin/harness-hook.cjs`, `src-tauri/resources/bin/harness-opencode.mjs`, `src-tauri/resources/bin/harness-pi.mjs` |
 | TypeScript mirror | `src-tauri/protocol-ref/harness/` |

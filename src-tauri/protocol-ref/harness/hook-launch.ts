@@ -99,6 +99,16 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"]) {
       args.push("-c", `hooks.${event}=[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=${hookTimeout}}]}]`);
     }
+  } else if (kind === "devin") {
+    // No plugin directory; `--config` swaps the user config file for this session,
+    // so the merged copy carries the user's own settings plus Que's hooks.
+    const config = await inheritedConfig("devin", workspace, node);
+    const hooks = { ...(config.hooks as Record<string, unknown> ?? {}) };
+    for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd", "PostCompaction"]) {
+      hooks[event] = [...(Array.isArray(hooks[event]) ? hooks[event] as unknown[] : []), { hooks: [{ type: "command", command, timeout: hookTimeout }] }];
+    }
+    files["devin-config.json"] = JSON.stringify({ ...config, hooks });
+    args.push("--config", workspace.kind === "ssh" ? `${root}/devin-config.json` : join(root, "devin-config.json"));
   } else {
     const cursor = kind === "cursor";
     files[`${cursor ? ".cursor-plugin" : ".claude-plugin"}/plugin.json`] = JSON.stringify({ name: "que-session-state", version: "1.0.0", description: "Report this Que terminal's lifecycle" });
