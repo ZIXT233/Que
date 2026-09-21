@@ -1,4 +1,4 @@
-// Installed Grok -> production native launcher -> real Que notices/card state.
+// Installed Grok -> production Node hook registration -> real Que notices/card state.
 // Local model fixture, isolated profile, no GUI or account/model charges.
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -52,7 +52,10 @@ try {
   const configPath=path.join(grokHome,'hooks/que-session-state.json');
   const installed=JSON.parse(await fs.readFile(configPath,'utf8'));
   const handlers=Object.values(installed.hooks).flatMap(groups=>groups.flatMap(g=>g.hooks));
-  assert.equal(handlers.length,9);assert(handlers.every(h=>h.type==='command'&&h.command==='que-session-state.exe'&&h.timeout===2));
+  // Production registers windows_hook_command: bare "node hook.cjs" tokens, or an
+  // encoded PowerShell script when the profile path needs quoting (as here).
+  const decoded=c=>{const m=/-EncodedCommand\s+(\S+)/.exec(c);return m?Buffer.from(m[1],'base64').toString('utf16le'):c;};
+  assert.equal(handlers.length,9);assert(handlers.every(h=>h.type==='command'&&h.timeout===2&&/node/i.test(decoded(h.command))&&/hook\.cjs/.test(decoded(h.command))));
   const cliEnv={...env,HOME:ready.home,USERPROFILE:ready.home,GROK_HOME:grokHome,CLAUDE_CONFIG_DIR:path.join(ready.home,'.claude')};
   const run = async (name, extraEnv={}) => {
     const start=Date.now(), log=path.join(root,`${name}.log`);
@@ -81,7 +84,7 @@ try {
   }
   assert(notices[0].preview?.includes('QUE_E2E_OK'),JSON.stringify(notices));
   // Same installed CLI now exercised through Que's normal card/PTY launch path.
-  const manifest={cases:[{name:'Grok native internal two turns',kind:'grok',mode:'internal',hookCounts:{SessionStart:1,UserPromptSubmit:2,Stop:2},steps:[
+  const manifest={cases:[{name:'Grok internal two turns',kind:'grok',mode:'internal',hookCounts:{SessionStart:1,UserPromptSubmit:2,Stop:2},steps:[
     {hook:'SessionStart',timeoutMs:45000},
     {send:'Reply QUE_E2E_OK only.\r'}, {hook:'UserPromptSubmit',state:'working',timeoutMs:10000}, {hook:'Stop',state:'attention',screen:'QUE_E2E_OK',timeoutMs:15000},
     {send:'Again reply QUE_E2E_OK only.\r'}, {hook:'UserPromptSubmit',state:'working',timeoutMs:10000}, {hook:'Stop',state:'attention',screen:'QUE_E2E_OK',timeoutMs:15000}
@@ -91,7 +94,7 @@ try {
   const [code]=await once(runner,'exit');assert.equal(code,0,'Internal PTY/queue integration failed');
   notices=(await api('/api/card-queue')).external.filter(n=>n.kind==='grok');
   assert(notices.every(n=>path.resolve(n.cwd)===root),'Internal session leaked to external notices');
-  console.log('PASS: production Grok native registration, external notice, internal two turns, compatibility enabled');
+  console.log('PASS: production Grok Node registration, external notice, internal two turns, compatibility enabled');
 } catch(error) {console.error(error);process.exitCode=1;}
 finally {
   backend?.stdin.end();if(backendExit)await backendExit;

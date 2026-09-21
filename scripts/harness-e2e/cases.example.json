@@ -3,13 +3,21 @@
     {
       "name": "Codex internal two turns", "kind": "codex", "mode": "internal",
       "steps": [
-        { "hook": "SessionStart", "timeoutMs": 30000 },
-        { "send": "Reply with QUE_E2E_OK only. Do not use tools.\r" },
-        { "hook": "UserPromptSubmit", "timeoutMs": 3000 },
-        { "hook": "Stop", "state": "attention", "screen": "QUE_E2E_OK", "timeoutMs": 60000 },
-        { "send": "Reply with QUE_E2E_SECOND only. Do not use tools.\r" },
-        { "hook": "UserPromptSubmit", "timeoutMs": 3000 },
-        { "hook": "Stop", "state": "attention", "screen": "QUE_E2E_SECOND", "timeoutMs": 60000 }
+        { "screen": "trust the contents|Ask Codex to do anything", "timeoutMs": 45000 },
+        { "send": "\r" },
+        { "waitMs": 5000 },
+        { "send": "\r" },
+        { "waitMs": 3000 },
+        { "send": "Reply with QUE_E2E_OK only. Do not use tools." },
+        { "waitMs": 800 },
+        { "send": "\r" },
+        { "hook": "UserPromptSubmit", "timeoutMs": 25000 },
+        { "hook": "Stop", "state": "attention", "screen": "QUE_E2E_OK", "timeoutMs": 90000 },
+        { "send": "Reply with QUE_E2E_SECOND only. Do not use tools." },
+        { "waitMs": 800 },
+        { "send": "\r" },
+        { "hook": "UserPromptSubmit", "timeoutMs": 25000 },
+        { "hook": "Stop", "state": "attention", "screen": "QUE_E2E_SECOND", "timeoutMs": 90000 }
       ]
     },
     {

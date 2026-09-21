@@ -49,10 +49,6 @@ fn resume_args(session_id: &str) -> AppResult<Vec<String>> {
 
 async fn antigravity_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
-    #[cfg(windows)]
-    if !ctx.host.remote {
-        crate::harness::windows::install_native_hook(&ctx.host.root, "que-hook")?;
-    }
     let mut bundle = serde_json::Map::new();
     for &event in events {
         let hook = serde_json::json!({ "type": "command", "command": ctx.host.command(Some(event)), "timeout": ctx.host.timeout });
@@ -94,10 +90,6 @@ async fn antigravity_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppR
 
 async fn gemini_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
-    #[cfg(windows)]
-    if !ctx.host.remote {
-        crate::harness::windows::install_native_hook(&ctx.host.root, "que-hook")?;
-    }
     // Whatever the user already had stays: this file is the CLI's own defaults file.
     let mut config = inherited_config("gemini", ctx.workspace, &ctx.host.node).await?;
     let mut hooks = config
@@ -152,7 +144,7 @@ pub static ANTIGRAVITY: Antigravity = Antigravity;
 impl Harness for Antigravity {
     fn hook_command(&self, host: &Host, event: Option<&str>) -> String {
         if host.windows {
-            return native_shell_command(&host.root.join("que-hook.exe"), "antigravity", event);
+            return shell_hook_command(&host.root, event);
         }
         host.generic_hook_command(event)
     }
@@ -177,14 +169,6 @@ impl Harness for Antigravity {
     /// What an Antigravity session Que never launched needs: its own ingress, and Que's
     /// bundle under the key it owns in the shared `~/.gemini` config.
     fn global(&self, ctx: &GlobalCtx) {
-        #[cfg(windows)]
-        if let Err(error) = crate::harness::windows::install_native_hook(
-            &ctx.plugins.join("antigravity"),
-            "que-hook",
-        ) {
-            crate::debuglog::log_error("install native Antigravity hook", &error);
-            return;
-        }
         let _ = ctx.install_ingress("antigravity");
         let hook_path = ctx.hook_path("antigravity");
         let command_for = |event: &str| global_hook_command(ctx, &hook_path, event);
@@ -296,14 +280,13 @@ pub static GEMINI: Gemini = Gemini;
 
 impl Harness for Gemini {
     fn hook_command(&self, host: &Host, event: Option<&str>) -> String {
-        // Gemini's Windows hook runner already starts PowerShell/pwsh.
+        // Gemini's Windows hook runner already starts PowerShell/pwsh, so the
+        // call operator can quote the interpreter and the script separately.
         if host.windows {
             return format!(
-                "& '{}' gemini{}",
-                host.root
-                    .join("que-hook.exe")
-                    .to_string_lossy()
-                    .replace('\'', "''"),
+                "& '{}' '{}'{}",
+                host.node.replace('\'', "''"),
+                host.hook_path.replace('\'', "''"),
                 event.map(|e| format!(" '{e}'")).unwrap_or_default()
             );
         }
@@ -505,7 +488,7 @@ fn owned_ingress_command(command: &str) -> bool {
     });
     let text = decoded.as_deref().unwrap_or(command).replace('\\', "/");
     let native_pushd = regex::Regex::new(
-        r#"(?i)\bpushd\s+[^&]+/harness-plugins/antigravity\s+&&\s+que-hook\.exe\s+antigravity\s+(?:PreInvocation|PostInvocation|PreToolUse|PostToolUse|Stop)\b"#,
+        r#"(?i)\bpushd\s+[^&]+/harness-plugins/antigravity\s+&&\s+(?:que-hook\.exe\s+antigravity|node(?:\.exe)?\s+hook\.cjs)\s+(?:PreInvocation|PostInvocation|PreToolUse|PostToolUse|Stop)\b"#,
     )
     .unwrap()
     .is_match(&text);
@@ -516,34 +499,24 @@ fn owned_ingress_command(command: &str) -> bool {
         .unwrap().is_match(&text)
 }
 
-fn native_shell_command(path: &std::path::Path, kind: &str, event: Option<&str>) -> String {
+fn shell_hook_command(dir: &std::path::Path, event: Option<&str>) -> String {
     // AGY runs command hooks through `cmd /d /s /c <command>`. An executable
     // quoted at the beginning is parsed by cmd as a literal command name under
     // that invocation shape. AGY also quotes the complete command, so its
-    // directory argument must remain unquoted. pushd accepts spaces here;
-    // then the executable is a safe relative token.
+    // directory argument must remain unquoted. pushd accepts spaces here; the
+    // ingress then stays a bare `node hook.cjs` resolved against cwd and PATH.
     // This emits a Windows command even when invoked by a cross-platform test
     // runner, so don't use the host platform's Path separator rules here.
-    let raw_path = path.to_string_lossy();
-    let (directory, executable) = raw_path
-        .rsplit_once(|ch| ch == '\\' || ch == '/')
-        .unwrap_or((".", raw_path.as_ref()));
     format!(
-        "pushd {} && {} {}{}",
-        directory,
-        executable,
-        kind,
+        "pushd {} && node hook.cjs{}",
+        dir.to_string_lossy(),
         event.map(|event| format!(" {event}")).unwrap_or_default(),
     )
 }
 
 fn global_hook_command(ctx: &GlobalCtx, hook_path: &str, event: &str) -> String {
     if cfg!(windows) {
-        native_shell_command(
-            &ctx.plugins.join("antigravity/que-hook.exe"),
-            "antigravity",
-            Some(event),
-        )
+        shell_hook_command(&ctx.plugins.join("antigravity"), Some(event))
     } else {
         format!(
             "{} {} {}",
@@ -585,17 +558,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_windows_command_avoids_a_leading_quoted_executable() {
-        let command = native_shell_command(
-            std::path::Path::new(
-                r"C:\Users\John Smith\.que\harness-plugins\antigravity\que-hook.exe",
-            ),
-            "antigravity",
+    fn windows_command_avoids_a_leading_quoted_executable() {
+        let command = shell_hook_command(
+            std::path::Path::new(r"C:\Users\John Smith\.que\harness-plugins\antigravity"),
             Some("PreInvocation"),
         );
         assert_eq!(
             command,
-            r"pushd C:\Users\John Smith\.que\harness-plugins\antigravity && que-hook.exe antigravity PreInvocation"
+            r"pushd C:\Users\John Smith\.que\harness-plugins\antigravity && node hook.cjs PreInvocation"
         );
     }
 
@@ -615,7 +585,8 @@ mod tests {
             );
             let parent = path.rsplit_once('\\').map(|(parent, _)| parent).unwrap();
             let pushd = format!(r"pushd {parent} && que-hook.exe antigravity Stop");
-            for command in [plain, encoded, pushd] {
+            let pushd_node = format!(r"pushd {parent} && node hook.cjs Stop");
+            for command in [plain, encoded, pushd, pushd_node] {
                 let config = serde_json::json!({"que-session-state":{"Stop":[{"command":command}]},"user-hook":{"enabled":true}}).to_string();
                 let value = guard(Some(&config), &current).unwrap();
                 assert_eq!(value["user-hook"]["enabled"], true);

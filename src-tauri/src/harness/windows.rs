@@ -1,53 +1,39 @@
 use regex::Regex;
 
+/// Older releases dropped a shared `que-hook.exe` (plus its ambient aliases and
+/// `.sink` markers) under the plugin directories. Hooks now run through Node
+/// like on every other platform, so these are inert files — sweep them while a
+/// still-running copy simply refuses deletion and is retried next launch.
 #[cfg(windows)]
-pub(super) fn install_native_hook(
-    dir: &std::path::Path,
-    name: &str,
-) -> crate::error::AppResult<std::path::PathBuf> {
-    std::fs::create_dir_all(dir)?;
-    let body = include_bytes!(concat!(env!("OUT_DIR"), "/que-hook.exe"));
-    let file = dir.join(format!("{name}.exe"));
-    crate::paths::atomic_write(
-        &dir.join(format!("{name}.sink")),
-        &crate::paths::external_signal_dir().to_string_lossy(),
-    )?;
-    if std::fs::read(&file).ok().as_deref() != Some(body.as_slice()) {
-        sweep_stale_hooks(dir, name);
-        let temporary = dir.join(format!("{name}-{}.tmp", uuid::Uuid::new_v4()));
-        std::fs::write(&temporary, body)?;
-        if let Err(error) = std::fs::rename(&temporary, &file) {
-            // Replacing a running hook image is denied, but moving it aside is
-            // not — a live Codex session's MCP child pins the exe for days.
-            if matches!(error.raw_os_error(), Some(5) | Some(32)) {
-                let aside = dir.join(format!("{name}-{}.old", uuid::Uuid::new_v4()));
-                if std::fs::rename(&file, &aside).is_ok()
-                    && std::fs::rename(&temporary, &file).is_ok()
-                {
-                    return Ok(file);
-                }
-            }
-            let _ = std::fs::remove_file(temporary);
-            return Err(error.into());
-        }
-    }
-    Ok(file)
-}
-
-/// Leftover `.old`/`.tmp` hook images a dead process no longer pins; ones still
-/// mapped refuse deletion and are retried by the next install.
-#[cfg(windows)]
-fn sweep_stale_hooks(dir: &std::path::Path, name: &str) {
-    let prefix = format!("{name}-");
-    let Ok(entries) = std::fs::read_dir(dir) else {
+pub(super) fn sweep_legacy_hooks(plugins: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(plugins) else {
         return;
     };
     for entry in entries.flatten() {
-        let Some(text) = entry.file_name().to_str().map(|s| s.to_owned()) else {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(&dir) else {
             continue;
         };
-        if text.starts_with(&prefix) && (text.ends_with(".old") || text.ends_with(".tmp")) {
-            let _ = std::fs::remove_file(entry.path());
+        for file in files.flatten() {
+            let name = file.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if name.ends_with(".exe")
+                || name.ends_with(".sink")
+                || name.ends_with(".old")
+                || name.ends_with(".tmp")
+            {
+                let _ = std::fs::remove_file(file.path());
+            }
+        }
+    }
+    // Grok's launcher lived beside its hook file, not under harness-plugins.
+    if let Some(home) = crate::paths::user_home() {
+        let hooks = home.join(".grok/hooks");
+        for name in ["que-session-state.exe", "que-session-state.sink"] {
+            let _ = std::fs::remove_file(hooks.join(name));
         }
     }
 }

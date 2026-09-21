@@ -94,9 +94,27 @@ fn merge_hooks(config: &mut Map<String, Value>, command: &str, timeout: u32) {
 }
 
 /// An entry Que installed is recognized by where its command points — every ambient
-/// and per-card spelling lands inside `harness-plugins/devin`.
+/// and per-card spelling lands inside `harness-plugins/devin`. Commands with unsafe
+/// paths travel as a PowerShell `-EncodedCommand`, so decode that form too.
 fn is_que_command(command: &str) -> bool {
-    command.replace('\\', "/").contains("harness-plugins/devin")
+    if command.replace('\\', "/").contains("harness-plugins/devin") {
+        return true;
+    }
+    command
+        .split_once("-EncodedCommand ")
+        .and_then(|(_, encoded)| {
+            let bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded.trim())
+                    .ok()?;
+            String::from_utf16(
+                &bytes
+                    .chunks_exact(2)
+                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                    .collect::<Vec<_>>(),
+            )
+            .ok()
+        })
+        .is_some_and(|decoded| decoded.replace('\\', "/").contains("harness-plugins/devin"))
 }
 
 /// Drop Que's groups from an event list, keeping user-written entries. Mirror of
@@ -185,17 +203,9 @@ impl Harness for Devin {
         ctx: Ctx<'a>,
     ) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
         Box::pin(async move {
+            // Devin payloads carry `hook_event_name`, so one argument-free command
+            // serves every registered event.
             let command = ctx.host.command(None);
-            // Local Windows: the native ingress skips a PowerShell + node boot per
-            // event. `que-hook.exe devin` reads the event from the payload itself.
-            #[cfg(windows)]
-            let command = if !ctx.host.remote {
-                let exe =
-                    crate::harness::windows::install_native_hook(&ctx.host.root, "que-hook")?;
-                format!("{} devin", ctx.host.quote(&exe.to_string_lossy()))
-            } else {
-                command
-            };
             let mut config = user_config(&ctx).await?;
             merge_hooks(&mut config, &command, ctx.host.timeout);
             let mut plan = Plan::default();
@@ -242,13 +252,13 @@ impl Harness for Devin {
             };
             #[cfg(windows)]
             let command = {
-                // The `devin-hook` stem names the kind and marks the invocation
-                // ambient, so the native runtime skips sessions carrying Que env.
-                let exe = crate::harness::windows::install_native_hook(
-                    &ctx.plugins.join("devin"),
-                    "devin-hook",
-                )?;
-                format!("\"{}\"", exe.to_string_lossy().replace('\\', "/"))
+                // `--que-ambient` marks the registration ambient: hook.cjs exits
+                // early when Que card env is present, like the .sh shim above.
+                crate::harness::windows::windows_hook_command(
+                    &ctx.node,
+                    &ctx.hook_path("devin"),
+                    Some("--que-ambient"),
+                )
             };
             let path = config_file();
             let existing = std::fs::read_to_string(&path).ok();

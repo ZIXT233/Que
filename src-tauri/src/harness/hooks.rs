@@ -63,6 +63,8 @@ pub async fn prepare_hook_launch(
 /// Only `hook.cjs` is aligned: the config files are merged at launch, so a changed
 /// *event list* still lands the next time that kind is launched.
 pub fn sync_installed_hooks(bin_dir: &Path, plugins: &Path) -> Vec<String> {
+    #[cfg(windows)]
+    super::windows::sweep_legacy_hooks(plugins);
     let Ok(source) = std::fs::read_to_string(bin_dir.join("harness-hook.cjs")) else {
         return Vec::new();
     };

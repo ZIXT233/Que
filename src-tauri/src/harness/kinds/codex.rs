@@ -67,13 +67,6 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
         std::fs::read_to_string(ctx.bin_dir.join("harness-codex-mcp.cjs"))?,
     );
     let server = mcp_server(&ctx.host.node, &ctx.host.relative("codex-mcp.cjs"));
-    #[cfg(windows)]
-    let server = if !ctx.host.remote {
-        let exe = crate::harness::windows::install_native_hook(&ctx.host.root, "que-hook")?;
-        mcp_server(&exe.to_string_lossy(), "codex-mcp")
-    } else {
-        server
-    };
     plan.args.extend([
         "--enable".into(),
         "hooks".into(),
@@ -260,23 +253,9 @@ impl Harness for Codex {
                     scoped_mcp_handler(event, "external")
                 ));
             }
-            #[cfg(not(windows))]
             let script = ctx.plugins.join("codex/codex-mcp.cjs");
-            #[cfg(not(windows))]
             let command = ctx.node.clone();
-            #[cfg(not(windows))]
             let argument = script.to_string_lossy().into_owned();
-            #[cfg(windows)]
-            let (command, argument) = match crate::harness::windows::install_native_hook(
-                &ctx.plugins.join("codex"),
-                "que-hook",
-            ) {
-                Ok(path) => (path.to_string_lossy().into_owned(), "codex-mcp".to_owned()),
-                Err(error) => {
-                    crate::debuglog::log_error("install Codex native MCP", &error);
-                    return;
-                }
-            };
             to_append.push_str(&format!("\n{MCP_MARKER}\n[mcp_servers.que_session_state]\ncommand = {}\nargs = [{}]\nenv_vars = {MCP_ENV}\n{MCP_END}\n", serde_json::to_string(&command).unwrap(), serde_json::to_string(&argument).unwrap()));
         } else {
             return; // Preserve a conflicting user server or a failed installation.

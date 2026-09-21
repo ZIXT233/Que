@@ -4,7 +4,7 @@ const fs=require('node:fs'), path=require('node:path'), os=require('node:os'), h
 const {spawn,spawnSync}=require('node:child_process');
 const assert=require('node:assert/strict');
 const argv=process.argv.slice(2), opt=k=>argv[argv.indexOf(k)+1];
-assert(argv.includes('--launcher')&&argv.includes('--claude')&&argv.includes('--grok'),'Required: --launcher EXE --claude EXE --grok EXE');
+assert(argv.includes('--claude')&&argv.includes('--grok'),'Required: --claude EXE --grok EXE');
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'que compat 中文-'));
 const home=path.join(root,'home'), sink=path.join(root,'signals');
 for(const dir of [home,sink,path.join(home,'.claude'),path.join(home,'.grok','hooks')])fs.mkdirSync(dir,{recursive:true});
@@ -16,14 +16,11 @@ if(argv.includes('--cursor-compat-fixture') || argv.includes('--cursor-compatibl
   fs.mkdirSync(path.join(home,'.cursor'),{recursive:true});
   fs.writeFileSync(path.join(home,'.cursor','hooks.json'),JSON.stringify({version:1,hooks:Object.fromEntries(['sessionStart','beforeSubmitPrompt','stop'].map(event=>[event,[{command:`node '${path.join(plugin('cursor'),'hook.cjs').replaceAll("'","''")}' '${event}'`,timeout:5,...(argv.includes('--cursor-compatible')?{hooks:[]}: {})}]]))}));
 }
-const launcher=path.join(plugin('claude'),'external-hook.exe');fs.copyFileSync(opt('--launcher'),launcher);fs.writeFileSync(path.join(plugin('claude'),'external-node.txt'),process.execPath);
-// Test the same short profile prefix used by installation; keep the ownership suffix.
-const shortRoot=spawnSync('cmd.exe',['/d','/c','for %I in ("%QUE_FIXTURE_ROOT%") do @echo %~sI'],{env:{...process.env,QUE_FIXTURE_ROOT:root},encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true});
-assert.equal(shortRoot.status,0,shortRoot.stderr);
-const registeredLauncher=path.join(shortRoot.stdout.trim(),'harness-plugins','claude','external-hook.exe');
+// Production ambient registration is exec-form: node hook.cjs --que-ambient.
+const registeredArgs=[path.join(plugin('claude'),'hook.cjs'),'--que-ambient'];
 const events=['SessionStart','UserPromptSubmit','Stop'];
-const hookSettings=command=>({hooks:Object.fromEntries(events.map(e=>[e,[{hooks:[{type:'command',command,args:[],timeout:5}]}]]))});
-fs.writeFileSync(path.join(home,'.claude','settings.json'),JSON.stringify(hookSettings(launcher)));
+const hookSettings=(command,args=[])=>({hooks:Object.fromEntries(events.map(e=>[e,[{hooks:[{type:'command',command,args,timeout:5}]}]]))});
+fs.writeFileSync(path.join(home,'.claude','settings.json'),JSON.stringify(hookSettings(process.execPath,registeredArgs)));
 fs.writeFileSync(path.join(home,'.grok','hooks','que-session-state.json'),JSON.stringify(hookSettings(`node "${path.join(plugin('grok'),'hook.cjs').replaceAll('\\','/')}"`)));
 let requests=0;
 let grokBaseline;
@@ -58,14 +55,14 @@ const run=async(kind,compat,legacy=false)=>{
   const env={...process.env,HOME:home,USERPROFILE:home,CLAUDE_CONFIG_DIR:path.join(home,'.claude'),GROK_HOME:path.join(home,'.grok'),QUE_EXTERNAL_SIGNAL_DIR:sink,ANTHROPIC_API_KEY:'local-fixture',ANTHROPIC_BASE_URL:base,CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1',XAI_API_KEY:'local-fixture'};
   Object.assign(env,{GROK_XAI_API_BASE_URL:base+'/v1',GROK_MODELS_LIST_URL:base+'/v1/models',GROK_CLI_CHAT_PROXY_BASE_URL:base+'/v1',GROK_DISABLE_AUTOUPDATER:'1',GROK_MEMORY:'0',GROK_WORKFLOWS:'0'});
   for(const k of ['QUE_HARNESS_KIND','QUE_HARNESS_SIGNAL_DIR','QUE_HARNESS_CHANNEL','GROK_HOOK_EVENT','ANTHROPIC_AUTH_TOKEN','CLAUDE_CODE_OAUTH_TOKEN','CLAUDECODE'])delete env[k];
-  const registration=hookSettings(legacy?process.execPath:registeredLauncher);
+  const registration=hookSettings(process.execPath,registeredArgs);
   if(legacy)for(const group of Object.values(registration.hooks))for(const h of group[0].hooks){h.args=[path.join(plugin('claude'),'hook.cjs')];h.timeout=1;}
   fs.writeFileSync(path.join(home,'.claude','settings.json'),JSON.stringify(registration));
   if(kind==='grok'&&compat){
     const inspected=spawnSync(opt('--grok'),['inspect','--json'],{env,cwd:root,windowsHide:true,encoding:'utf8',timeout:10000});
     assert.equal(inspected.status,0,inspected.stderr);
     const config=JSON.parse(inspected.stdout);
-    assert(config.hooks.some(h=>h.target===(legacy?process.execPath:registeredLauncher)),'Grok must discover the actual Claude registration');
+    assert(config.hooks.some(h=>h.target===process.execPath),'Grok must discover the actual Claude registration');
     assert(config.externalCompat.cells.some(c=>c.vendor==='claude'&&c.surface==='hooks'&&c.enabled),'Compatibility must be enabled');
   }
   const args=kind==='claude'?['-p','Reply QUE_E2E_OK only.','--no-session-persistence','--strict-mcp-config','--tools','','--model','claude-sonnet-4-6']:['--cwd',root,'--model','que-test','--max-turns','1','--tools','','-p','Reply QUE_E2E_OK only.'];

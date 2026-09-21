@@ -44,29 +44,13 @@ pub(super) async fn family_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -
         format!("{}/plugin.json", manifest_dir(ctx.kind)),
         serde_json::json!({ "name": "que-session-state", "version": "1.0.0", "description": "Report this Que terminal's lifecycle" }).to_string(),
     );
-    #[cfg(windows)]
-    let native = if !ctx.host.remote {
-        Some(crate::harness::windows::install_native_hook(
-            &ctx.host.root,
-            "que-hook",
-        )?)
-    } else {
-        None
-    };
     let command = ctx.host.command(None);
     let mut hooks = serde_json::Map::new();
     for &event in events {
         // Claude's exec form passes paths as argv, with no Bash/PowerShell wrapper.
         // CodeBuddy has its own schema: keep its existing command form.
         let hook = if ctx.kind == "claude" {
-            {
-                #[cfg(windows)]
-                if let Some(path) = &native {
-                    hooks.insert(event.to_string(), serde_json::json!([{ "hooks": [{ "type":"command", "command":path, "args":["claude"], "timeout":ctx.host.timeout }] }]));
-                    continue;
-                }
-                serde_json::json!({ "type": "command", "command": ctx.host.node, "args": [ctx.host.hook_path], "timeout": ctx.host.timeout })
-            }
+            serde_json::json!({ "type": "command", "command": ctx.host.node, "args": [ctx.host.hook_path], "timeout": ctx.host.timeout })
         } else {
             serde_json::json!({ "type": "command", "command": command, "timeout": ctx.host.timeout })
         };
@@ -120,50 +104,35 @@ fn remove_owned_hooks(entries: &mut Vec<serde_json::Value>) -> bool {
     changed
 }
 
-/// An executable without required arguments also works with compatibility readers
-/// that ignore Claude's exec-form `args`. The ambient copy skips Que-owned cards.
-fn install_external_launcher(ctx: &GlobalCtx) -> AppResult<String> {
+/// The ambient registration is a full hook entry. On Unix a `.sh` shim doubles
+/// as the Que-env guard for compatibility readers; on Windows the exec form
+/// passes the same guard as the `--que-ambient` ingress flag.
+fn install_external_launcher(ctx: &GlobalCtx) -> AppResult<serde_json::Value> {
     ctx.install_ingress("claude")?;
-    let dir = ctx.plugins.join("claude");
+    let timeout = super::registry::default_hook_timeout(cfg!(windows));
     #[cfg(windows)]
     {
-        let body = include_bytes!(concat!(env!("OUT_DIR"), "/que-hook.exe"));
-        let file = dir.join("external-hook.exe");
-        atomic_write(
-            &dir.join("que-hook.sink"),
-            &crate::paths::external_signal_dir().to_string_lossy(),
-        )?;
-        // Avoid rewriting a running executable (Windows denies that operation).
-        if std::fs::read(&file).ok().as_deref() != Some(body.as_slice()) {
-            let temporary = dir.join(format!("external-hook-{}.tmp", uuid::Uuid::new_v4()));
-            std::fs::write(&temporary, body)?;
-            if let Err(error) = std::fs::rename(&temporary, &file) {
-                let _ = std::fs::remove_file(temporary);
-                return Err(error.into());
-            }
-        }
-        // Preserve the ownership suffix, but make the profile prefix a bare
-        // executable token for Grok's shell-based compatibility reader.
-        let profile = ctx.plugins.parent().unwrap_or(&ctx.plugins);
-        let prefix = crate::harness::windows::short_executable_path(&profile.to_string_lossy());
-        Ok(prefix
-            .and_then(|prefix| {
-                file.strip_prefix(profile)
-                    .ok()
-                    .map(|suffix| PathBuf::from(prefix).join(suffix))
-            })
-            .unwrap_or(file)
-            .to_string_lossy()
-            .into_owned())
+        Ok(serde_json::json!({
+            "type": "command",
+            "command": ctx.node,
+            "args": [ctx.hook_path("claude"), "--que-ambient"],
+            "timeout": timeout,
+        }))
     }
     #[cfg(not(windows))]
     {
         use std::os::unix::fs::PermissionsExt;
+        let dir = ctx.plugins.join("claude");
         let file = dir.join("external-hook.sh");
         let script = format!("#!/bin/sh\n[ -n \"${{GROK_HOOK_EVENT:-}}${{CURSOR_VERSION:-}}${{QUE_HARNESS_SIGNAL_DIR:-}}${{QUE_HARNESS_CHANNEL:-}}\" ] && exit 0\nexec {} {}\n", crate::ssh::shell_quote(&ctx.node), crate::ssh::shell_quote(&ctx.hook_path("claude")));
         atomic_write(&file, &script)?;
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o700))?;
-        Ok(file.to_string_lossy().into_owned())
+        Ok(serde_json::json!({
+            "type": "command",
+            "command": file.to_string_lossy(),
+            "args": [],
+            "timeout": timeout,
+        }))
     }
 }
 
@@ -194,7 +163,7 @@ impl Harness for Claude {
     /// entries merged into `~/.claude/settings.json`.
     fn global(&self, ctx: &GlobalCtx) {
         let launcher = match install_external_launcher(ctx) {
-            Ok(path) => path,
+            Ok(entry) => entry,
             Err(error) => {
                 crate::debuglog::log_error("install Claude external launcher", &error);
                 return;
@@ -247,7 +216,7 @@ impl Harness for Claude {
                     .cloned()
                     .unwrap_or_default();
                 remove_owned_hooks(&mut entries);
-                entries.push(serde_json::json!({ "hooks": [{ "type": "command", "command": launcher, "args": [], "timeout": super::registry::default_hook_timeout(cfg!(windows)) }] }));
+                entries.push(serde_json::json!({ "hooks": [launcher] }));
                 hooks.insert(event.into(), serde_json::Value::Array(entries));
             }
             obj.insert("hooks".into(), serde_json::Value::Object(hooks));

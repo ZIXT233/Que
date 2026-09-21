@@ -1,6 +1,6 @@
 # Real CLI headless integration checks
 
-## Grok on Windows: native hook runner
+## Grok on Windows: installed Node hook ingress
 
 `node scripts/harness-e2e/grok-native.mjs QUE_HEADLESS_EXE GROK_EXE`
 uses the installed Grok CLI and production hook registration in a temporary
@@ -10,11 +10,12 @@ Que's PTY/API/queue. Claude and Cursor compatibility are enabled, with their
 actual Que registrations installed. A local model fixture avoids paid requests;
 this is a transport/state test, not a model or total-startup benchmark.
 
-The report keeps Grok's own complete hook durations, including process startup,
-and imported compatibility hook durations. The budget is 2s for the first cold
-SessionStart and 1s for subsequent hooks. It rejects hook failures and incorrect
-queue placement. See `docs/grok-windows-hooks-2026-09-20.md` for measured results
-and why native HTTP was not used.
+The report keeps Grok's own complete hook durations, including Node process
+startup per event, and imported compatibility hook durations. The budget is 2s
+for the first cold SessionStart and 1s for subsequent hooks. It rejects hook
+failures and incorrect queue placement. See `docs/grok-windows-hooks-2026-09-20.md`
+for earlier native-runtime measurements and the trade-offs behind returning to
+per-event Node ingress.
 
 ## Diagnose the ordinary external Codex TUI on Windows
 
@@ -132,24 +133,27 @@ Reports stay in the printed temporary directory. Their durations include CLI and
 model setup, not just hook execution, and vary substantially under machine load.
 
 ```sh
-cargo build --manifest-path src-tauri/hook-runtime/Cargo.toml --locked --release --target-dir PATH_TO_TEMP
-# Executable: PATH_TO_TEMP/release/que-hook.exe
-node scripts/harness-e2e/launcher.cjs PATH_TO_TEMP/que-hook.exe
-node scripts/harness-e2e/compat-cli.cjs --launcher PATH_TO_TEMP/que-hook.exe --claude PATH_TO_CLAUDE_EXE --grok PATH_TO_GROK_EXE
+node scripts/harness-e2e/launcher.cjs
+node scripts/harness-e2e/compat-cli.cjs --claude PATH_TO_CLAUDE_EXE --grok PATH_TO_GROK_EXE
 node scripts/harness-e2e/extensions-cli.cjs --pi-entry PATH_TO_PI_JS --omp PATH_TO_OMP_EXE
 node scripts/harness-e2e/omp-ask.cjs PATH_TO_OMP_EXE
 node scripts/harness-e2e/codebuddy-cli.cjs PATH_TO_CODEBUDDY_JS
 node scripts/harness-e2e/codex-turn.cjs PATH_TO_CODEX_JS
-node scripts/harness-e2e/cursor-executor.cjs PATH_TO_CURSOR_INDEX_JS PATH_TO_TEMP/que-hook.exe
+node scripts/harness-e2e/cursor-executor.cjs PATH_TO_CURSOR_INDEX_JS
 ```
 
-- `launcher.cjs`: real child processes, Unicode/spaced paths, imported-hook and
-  ambient internal-hook suppression. A helper test, not a CLI E2E.
+The standalone `src-tauri/hook-runtime` crate is no longer built or shipped by
+the app. `native-runtime.cjs PATH_TO_QUE_HOOK_EXE` still exercises it if the
+crate is compiled manually for comparison or historical runs.
+
+- `launcher.cjs`: real `node hook.cjs --que-ambient` child processes,
+  Unicode/spaced paths, imported-hook and ambient internal-hook suppression.
+  A helper test, not a CLI E2E.
 - `compat-cli.cjs`: Claude full turn; Grok with Claude compatibility off/on, plus
   an old-registration negative control that must reproduce a hook failure.
-  Uses a spaced Unicode profile and its Windows short path. Add
-  `--cursor-compat-fixture` to reproduce Grok's current upstream failure parsing
-  native Cursor hook entries (`missing field hooks`). This case deliberately fails.
+  Uses a spaced Unicode profile. Add `--cursor-compat-fixture` to reproduce
+  Grok's current upstream failure parsing native Cursor hook entries
+  (`missing field hooks`). This case deliberately fails.
 - `extensions-cli.cjs`: real Pi and OMP external automatic discovery and internal
   explicit extension loading, exactly one submit/completion per turn.
 - `omp-ask.cjs`: real OMP `rpc-ui`, deterministic built-in ask tool call, wait with

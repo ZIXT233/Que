@@ -44,10 +44,6 @@ const SSH_MERGE: &str = r#"const fs=require("node:fs"),p=require("node:path"),de
 
 async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
-    #[cfg(windows)]
-    if !ctx.host.remote {
-        crate::harness::windows::install_native_hook(&ctx.host.root, "que-cursor-hook")?;
-    }
     plan.files.insert(
         ".cursor-plugin/plugin.json".into(),
         serde_json::json!({ "name": "que-session-state", "version": "1.0.0", "description": "Report this Que terminal's lifecycle" }).to_string(),
@@ -122,15 +118,6 @@ fn command_entry(command: String, timeout: u32) -> serde_json::Value {
 
 pub static CURSOR: Cursor = Cursor;
 
-fn native_command(path: &Path, event: Option<&str>) -> String {
-    // Cursor supplies PowerShell's call operator; quote argv without nesting a shell.
-    let mut command = format!("'{}'", path.to_string_lossy().replace('\'', "''"));
-    if let Some(event) = event {
-        command.push_str(&format!(" '{}'", event.replace('\'', "''")));
-    }
-    command
-}
-
 impl Harness for Cursor {
     fn id(&self) -> &'static str {
         "cursor"
@@ -153,20 +140,12 @@ impl Harness for Cursor {
     /// What a Cursor session Que never launched needs: its own ingress, plus entries in
     /// the user-level `hooks.json` that IDE chats and plain terminals read from anywhere.
     fn global(&self, ctx: &GlobalCtx) {
-        #[cfg(windows)]
-        if let Err(error) = crate::harness::windows::install_native_hook(
-            &ctx.plugins.join("cursor"),
-            "que-cursor-hook",
-        ) {
-            crate::debuglog::log_error("install native Cursor hook", &error);
-            return;
-        }
         let _ = ctx.install_ingress("cursor");
         let hook_path = ctx.hook_path("cursor");
         let mut hooks = serde_json::Map::new();
         for &event in self.events() {
             #[cfg(windows)]
-            let cmd = native_command(&ctx.plugins.join("cursor/que-cursor-hook.exe"), Some(event));
+            let cmd = crate::harness::windows::windows_hook_command(&ctx.node, &hook_path, Some(event));
             #[cfg(not(windows))]
             let cmd = format!(
                 "QUE_HARNESS_KIND=cursor {} {} {}",
@@ -242,9 +221,6 @@ impl Harness for Cursor {
 
     /// Avoid adding another interpreter to Cursor's own hook shell executor.
     fn hook_command(&self, host: &Host, event: Option<&str>) -> String {
-        if host.windows {
-            return native_command(&host.root.join("que-cursor-hook.exe"), event);
-        }
         host.generic_hook_command_with_prefix(event, "QUE_HARNESS_KIND=cursor ")
     }
 

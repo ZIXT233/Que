@@ -3,8 +3,8 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const Module = require('node:module'), { spawn } = require('node:child_process');
 const assert = require('node:assert/strict');
-const [bundle, launcher] = process.argv.slice(2);
-assert(bundle && launcher, 'Usage: cursor-executor.cjs PATH_TO_CURSOR_INDEX_JS NATIVE_LAUNCHER');
+const [bundle] = process.argv.slice(2);
+assert(bundle, 'Usage: cursor-executor.cjs PATH_TO_CURSOR_INDEX_JS');
 const source = fs.readFileSync(bundle, 'utf8');
 const entry = 'var __webpack_exports__=__webpack_require__("./src/main.tsx")';
 assert(source.includes(entry), 'Unsupported bundle layout');
@@ -12,7 +12,15 @@ const loaded = new Module(bundle, module); loaded.filename = bundle; loaded.path
 loaded._compile(source.replace(entry, 'module.exports=__webpack_require__'), bundle);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "que cursor 中文's executor-"));
 const sink = path.join(root, 'signals'); fs.mkdirSync(sink);
-const quote = s => "'" + s.replaceAll("'", "''") + "'";
+// Mirror windows_hook_command: bare tokens when safe, encoded PowerShell otherwise.
+const safeToken = token => token.length > 0 && [...token].every(c => /[A-Za-z0-9]/.test(c) || ':/\\._-~'.includes(c));
+const hookCommand = (dir, arg) => {
+  const tokens = [process.execPath, path.join(dir, 'hook.cjs'), arg].filter(Boolean);
+  if (tokens.every(safeToken)) return tokens.map(t => t.replaceAll('\\', '/')).join(' ');
+  const quote = s => `'${s.replaceAll("'", "''")}'`;
+  const script = `$ErrorActionPreference='Stop'; [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); & ${tokens.map(quote).join(' ')}; exit $LASTEXITCODE`;
+  return `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;
+};
 const transport = {
   async *execute(_context, command, options) {
     const script = `[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); ${command}; exit $LASTEXITCODE`;
@@ -34,11 +42,9 @@ const transport = {
   for (const kind of ['cursor', 'claude']) {
     const dir = path.join(root, 'harness-plugins', kind); fs.mkdirSync(dir, { recursive: true });
     fs.copyFileSync(path.resolve(__dirname, '../../src-tauri/resources/bin/harness-hook.cjs'), path.join(dir, 'hook.cjs'));
-    if (kind === 'cursor') fs.copyFileSync(launcher, path.join(dir, 'que-cursor-hook.exe'));
-    if (kind === 'claude') { fs.copyFileSync(launcher, path.join(dir, 'external-hook.exe')); fs.writeFileSync(path.join(dir, 'external-node.txt'), process.execPath); }
     for (const mode of ['stdin', 'argv']) {
       const executor = new Executor({}, root, { cursor_version: '2026.09.18-fixture' }, transport, undefined, undefined, undefined, { commandHookPayloadTransport: mode });
-      const command = kind === 'cursor' ? `${quote(path.join(dir, 'que-cursor-hook.exe'))} beforeSubmitPrompt` : quote(path.join(dir, 'external-hook.exe'));
+      const command = hookCommand(dir, kind === 'cursor' ? 'beforeSubmitPrompt' : '--que-ambient');
       const configCheck = validate({version:1,hooks:{beforeSubmitPrompt:[{command,timeout:15,hooks:[]}]}});
       assert(configCheck.isValid, JSON.stringify(configCheck));
       const result = await executor.executeCommandScript({ script: { command, timeout: 15 }, cwd: root, request: { hook_event_name: 'beforeSubmitPrompt', session_id: 'cursor-fixture', prompt: '中文 fixture', workspace_roots: [root] } });

@@ -21,12 +21,7 @@ impl Harness for CodeBuddy {
         // CodeBuddy's default command-hook executor is Git Bash on Windows.
         // Forward slashes retain drive paths; POSIX quoting handles spaces and $.
         if host.windows {
-            let executable = host
-                .root
-                .join("que-hook.exe")
-                .to_string_lossy()
-                .into_owned();
-            return [Some(executable.as_str()), Some("codebuddy"), event]
+            return [Some(host.node.as_str()), Some(host.hook_path.as_str()), event]
                 .into_iter()
                 .flatten()
                 .map(|value| crate::ssh::shell_quote(&value.replace('\\', "/")))
@@ -54,8 +49,6 @@ impl Harness for CodeBuddy {
             if ctx.host.remote {
                 return family_plan(ctx, self.events()).await;
             }
-            #[cfg(windows)]
-            crate::harness::windows::install_native_hook(&ctx.host.root, "que-hook")?;
             let command = self.hook_command(ctx.host, None);
             let mut plan = Plan::default();
             // One shared registration serves internal and external sessions. Do not
@@ -81,23 +74,11 @@ impl Harness for CodeBuddy {
     fn global(&self, ctx: &GlobalCtx) {
         let result = (|| -> AppResult<()> {
             ctx.install_ingress("codebuddy")?;
-            #[cfg(not(windows))]
             let command = [&ctx.node, &ctx.hook_path("codebuddy")]
                 .into_iter()
                 .map(|s| crate::ssh::shell_quote(&s.replace('\\', "/")))
                 .collect::<Vec<_>>()
                 .join(" ");
-            #[cfg(windows)]
-            let command = {
-                let exe = crate::harness::windows::install_native_hook(
-                    &ctx.plugins.join("codebuddy"),
-                    "que-hook",
-                )?;
-                format!(
-                    "{} codebuddy",
-                    crate::ssh::shell_quote(&exe.to_string_lossy().replace('\\', "/"))
-                )
-            };
             let path = codebuddy_home().join("settings.json");
             let existing = std::fs::read_to_string(&path).ok();
             let merged = merge_settings(existing.as_deref(), &hook_config(&command))?;

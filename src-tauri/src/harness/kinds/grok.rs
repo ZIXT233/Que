@@ -51,14 +51,7 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
             .to_string_lossy()
             .into_owned()
     };
-    #[cfg(windows)]
-    let mut command = ctx.host.command(None);
-    #[cfg(not(windows))]
     let command = ctx.host.command(None);
-    #[cfg(windows)]
-    if !ctx.host.remote {
-        command = install_launcher(&PathBuf::from(&path))?;
-    }
     let mut hooks = serde_json::Map::new();
     for &event in events {
         hooks.insert(event.into(), serde_json::json!([{ "hooks": [{ "type":"command", "command":command, "timeout":2 }] }]));
@@ -76,32 +69,6 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
         })),
     });
     Ok(plan)
-}
-
-#[cfg(windows)]
-fn install_launcher(config: &std::path::Path) -> AppResult<String> {
-    owned(std::fs::read_to_string(config).ok().as_deref())?;
-    let dir = config
-        .parent()
-        .ok_or_else(|| AppError::msg("Missing Grok hook directory"))?;
-    std::fs::create_dir_all(dir)?;
-    let body = include_bytes!(concat!(env!("OUT_DIR"), "/que-hook.exe"));
-    let file = dir.join("que-session-state.exe");
-    atomic_write(
-        &dir.join("que-session-state.sink"),
-        &crate::paths::external_signal_dir().to_string_lossy(),
-    )?;
-    if std::fs::read(&file).ok().as_deref() != Some(body.as_slice()) {
-        let temporary = dir.join(format!("que-session-state-{}.tmp", uuid::Uuid::new_v4()));
-        std::fs::write(&temporary, body)?;
-        if let Err(error) = std::fs::rename(&temporary, &file) {
-            let _ = std::fs::remove_file(temporary);
-            return Err(error.into());
-        }
-    }
-    // Grok resolves relative executable names against the hook file's directory.
-    // Quotes, spaces or arguments would select its shell runner instead.
-    Ok("que-session-state.exe".into())
 }
 
 /// Grok's file is a copy, not a merge: the whole file is Que's, guarded by the marker.
@@ -242,13 +209,11 @@ impl Harness for Grok {
             return;
         }
         #[cfg(windows)]
-        let command = match install_launcher(&grok_home().join("hooks/que-session-state.json")) {
-            Ok(command) => command,
-            Err(error) => {
-                crate::debuglog::log_error("install Grok launcher", &error);
-                return;
-            }
-        };
+        let command = crate::harness::windows::windows_hook_command(
+            &ctx.node,
+            &ctx.hook_path("grok"),
+            None,
+        );
         #[cfg(not(windows))]
         let command = format!(
             "{} {}",

@@ -36,7 +36,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
-const explicitEvent = process.argv[2];
+// Ambient registrations pass --que-ambient so a wild CLI session launched inside
+// a Que card terminal does not report into the card's own signal directory —
+// the same early exit the unix external-hook.sh shim performs on Que env vars.
+const ambientIngress = process.argv[2] === '--que-ambient';
+const explicitEvent = ambientIngress ? undefined : process.argv[2];
 const commandMode = require.main === module;
 const cursorEvents = new Set(['sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse', 'stop', 'sessionEnd']);
 function cursorReply(event) {
@@ -59,6 +63,7 @@ if (commandMode && process.env.CURSOR_VERSION && inferredKind === 'claude') proc
 let effectiveKind = kind;
 const token = process.env.QUE_HARNESS_CHANNEL;
 const envDirectory = process.env.QUE_HARNESS_SIGNAL_DIR;
+if (commandMode && ambientIngress && (envDirectory || token)) process.exit(0);
 const activePath = path.join(__dirname, 'active.json');
 // User-level hooks fire for IDE chats, external terminals, etc., which inherit neither
 // SIGNAL_DIR nor CHANNEL. Those sessions are not queue cards, so their events go to the
