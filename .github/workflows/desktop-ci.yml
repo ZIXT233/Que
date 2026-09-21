@@ -66,9 +66,19 @@ jobs:
         run: npm ci
 
       - name: Build Tauri application
+        if: matrix.platform != 'linux' || matrix.arch != 'arm64'
         uses: tauri-apps/tauri-action@v1.0.0
         with:
           args: --target ${{ matrix.target }}
+          uploadUpdaterJson: false
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: Que-${{ matrix.platform }}-${{ matrix.arch }}-[bundle]
+
+      - name: Build Tauri application (linux arm64)
+        if: matrix.platform == 'linux' && matrix.arch == 'arm64'
+        uses: tauri-apps/tauri-action@v1.0.0
+        with:
+          args: --target ${{ matrix.target }} --bundles deb,rpm
           uploadUpdaterJson: false
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: Que-${{ matrix.platform }}-${{ matrix.arch }}-[bundle]
