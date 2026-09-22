@@ -19,6 +19,7 @@ mod paste;
 mod paths;
 mod queue;
 mod remote;
+mod editor;
 mod settings;
 mod ssh;
 mod terminal;
@@ -185,6 +186,7 @@ pub fn run() {
                 );
             }
             app.manage(state.terminals.clone());
+            app.manage(state.clone());
             let port =
                 tauri::async_runtime::block_on(start_server(state)).map_err(|e| e.to_string())?;
             app.manage(ApiPort(Mutex::new(port)));
@@ -193,6 +195,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             api_base,
+            editor::open_in_vscode,
             open_devtools,
             reveal_log,
             notify::send_completion_notification,

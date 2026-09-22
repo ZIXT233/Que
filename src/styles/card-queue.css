@@ -2049,7 +2049,7 @@ html.dark .cq-tsp-step.is-active .cq-tsp-step-dot {
 .cq-card-title-row .cq-title-primary > .cq-score-tooltip-anchor { max-width:100%; }
 .cq-card-title-row .cq-title-controls { margin-left:auto; }
 .cq-card-title-row .cq-title-actions { gap:8px; height:22px; }
-.cq-card-title-row .cq-title-tools { height:22px; }
+.cq-card-title-row .cq-title-tools { height:22px; gap:6px; }
 .cq-title-tools > .cq-tools-trigger,.cq-card-more > .cq-tools-trigger { height:22px; padding:0 7px; gap:4px; background:color-mix(in srgb,var(--cq-muted) 8%,transparent); color:var(--cq-muted); border-radius:5px; cursor:pointer; }
 .cq-title-tools > .cq-tools-trigger:hover,.cq-card-more > .cq-tools-trigger:hover,.cq-title-tools > .cq-tools-trigger[aria-pressed=true] { background:color-mix(in srgb,var(--cq-muted) 19%,transparent); }
 .cq-card-more { position:relative; flex:0 0 auto; }

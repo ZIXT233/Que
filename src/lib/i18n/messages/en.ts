@@ -5,6 +5,8 @@ export const enLocale: LocalePlugin = {
   id: "en",
   label: "English",
   messages: {
+  "editor.open": "Open in VS Code",
+  "editor.review": "Review",
     "harness.error.HARNESS_UNSUPPORTED": "This CLI is not supported by Que.",
     "harness.error.HARNESS_RESUME_NO_ID": "The original session ID was not captured, so it cannot be resumed. Create a new session instead.",
     "harness.error.HARNESS_SESSION_ID_INVALID": "This session ID is invalid, so it cannot be resumed.",

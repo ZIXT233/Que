@@ -5,6 +5,8 @@ export const zhTWLocale: LocalePlugin = {
   id: "zh-TW",
   label: "繁體中文",
   messages: {
+  "editor.open": "在 VS Code 開啟",
+  "editor.review": "審閱",
     "harness.error.HARNESS_UNSUPPORTED": "不支援的 CLI agent。",
     "harness.error.HARNESS_RESUME_NO_ID": "未擷取到原會話 ID，無法續接。請透過新會話入口建立新卡片。",
     "harness.error.HARNESS_SESSION_ID_INVALID": "無效的會話 ID，無法續接。",

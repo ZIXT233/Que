@@ -368,7 +368,7 @@ export function SideTerminalButton({
       title={label}
       onClick={onClick}
     >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 5 7 7-7 7M14 19h6" /></svg>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fillRule="evenodd" d="M5 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H5Zm.8 5.8 3.2 3.2-3.2 3.2 1.4 1.4 4.6-4.6-4.6-4.6-1.4 1.4ZM13 14v2h5v-2h-5Z" clipRule="evenodd" /></svg>
       <span>{t("terminal.title")}</span>
     </button>
   );
