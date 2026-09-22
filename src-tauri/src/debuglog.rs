@@ -236,7 +236,11 @@ pub fn clip(value: &str, max: usize) -> String {
     if value.len() <= max {
         value.to_string()
     } else {
-        format!("{}…(len={})", &value[..max], value.len())
+        let mut end = max;
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…(len={})", &value[..end], value.len())
     }
 }
 
@@ -343,6 +347,14 @@ fn timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clip_preserves_utf8_boundaries() {
+        assert_eq!(clip("中文", 1), "…(len=6)");
+        assert_eq!(clip("中文", 4), "中…(len=6)");
+        assert_eq!(clip("a😀b", 3), "a…(len=6)");
+        assert_eq!(clip("中文", 6), "中文");
+    }
 
     #[test]
     fn formats_card_and_term() {

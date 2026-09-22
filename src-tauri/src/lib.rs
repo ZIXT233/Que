@@ -1,5 +1,6 @@
 pub mod api;
 mod conpty;
+mod crashlog;
 #[cfg(windows)]
 mod conpty_handshake;
 mod cwd;
@@ -94,6 +95,14 @@ fn reveal_log(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::crashlog::install(crate::paths::logs_dir());
+    crate::debuglog::init();
+    crate::debuglog::info("app", &format!(
+        "process-start pid={} version={} arch={} debug={} panic_strategy={} exe={:?} log_time=UTC",
+        std::process::id(), env!("CARGO_PKG_VERSION"), std::env::consts::ARCH,
+        cfg!(debug_assertions), if cfg!(panic = "abort") { "abort" } else { "unwind" },
+        std::env::current_exe().ok(),
+    ));
     #[cfg(target_os = "linux")]
     if std::env::var_os("APPDIR").is_some() {
         // AppImage hook forces X11; use native Wayland when available,
@@ -110,6 +119,7 @@ pub fn run() {
         // running instance and exits, instead of spawning a rival process that would
         // race on ~/.que/queue.json, settings.json and the terminal registry.
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            crate::debuglog::info("app", "second-instance activation received");
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
@@ -124,7 +134,6 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            crate::debuglog::init();
             #[cfg(windows)]
             tauri::async_runtime::spawn(async {
                 if let Err(error) = crate::harness::local_environment(false).await {
@@ -194,6 +203,7 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                crate::debuglog::info("app", &format!("window-close-requested label={} pid={}", window.label(), std::process::id()));
                 if window.label() == "main" {
                     #[cfg(any(target_os = "macos", target_os = "windows"))]
                     {
@@ -215,6 +225,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Que")
         .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { code, .. } = &event {
+                crate::debuglog::info("app", &format!("exit-requested pid={} code={code:?}", std::process::id()));
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {
                 has_visible_windows,
@@ -230,9 +243,12 @@ pub fn run() {
                 }
             }
             if matches!(event, tauri::RunEvent::Exit) {
+                crate::debuglog::info("app", &format!("event-loop-exit pid={} terminal-shutdown=begin", std::process::id()));
                 if let Some(hub) = app.try_state::<crate::terminal::TerminalHub>() {
                     hub.shutdown();
                 }
+                crate::debuglog::info("app", &format!("terminal-shutdown=complete pid={}", std::process::id()));
             }
         });
+    crate::debuglog::info("app", &format!("run-returned pid={}", std::process::id()));
 }

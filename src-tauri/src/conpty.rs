@@ -98,17 +98,25 @@ mod imp {
         ok
     }
 
-    fn load_library(dir: &Path) -> bool {
-        let dll = dir.join("conpty.dll");
-        if !dll.is_file() {
+    pub(super) fn load_library(dir: &Path) -> bool {
+        use windows_sys::Win32::System::LibraryLoader::{
+            LoadLibraryExW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
+        };
+        // An absolute DLL path alone does not constrain dependency resolution.
+        let Ok(dll) = dir.join("conpty.dll").canonicalize() else {
             return false;
-        }
+        };
         let wide: Vec<u16> = OsStr::new(&dll)
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let handle =
-            unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide.as_ptr()) };
+        let handle = unsafe {
+            LoadLibraryExW(
+                wide.as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+        };
         let ok = (handle as isize) != 0;
         crate::debuglog::info(
             "conpty",
@@ -121,8 +129,8 @@ mod imp {
         ok
     }
 
-    /// Search order mirrors paths::resolve_bin_dir: env override, bundled
-    /// resource layouts, then dev-tree layouts relative to the cwd.
+    /// Explicit override, bundled resources, executable-relative resources.
+    /// Working-directory lookup is only allowed in development builds.
     fn resolve_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
         let mut candidates: Vec<PathBuf> = Vec::new();
         if let Ok(dir) = std::env::var("QUE_CONPTY_DIR") {
@@ -132,6 +140,14 @@ mod imp {
             candidates.push(dir.join("resources").join("conpty").join(arch_dir()));
             candidates.push(dir.join("conpty").join(arch_dir()));
         }
+        if let Some(exe_dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+        {
+            candidates.push(exe_dir.join("resources").join("conpty").join(arch_dir()));
+            candidates.push(exe_dir.join("conpty").join(arch_dir()));
+        }
+        #[cfg(debug_assertions)]
         if let Ok(cwd) = std::env::current_dir() {
             candidates.push(cwd.join("resources").join("conpty").join(arch_dir()));
             candidates.push(
@@ -167,8 +183,6 @@ pub use imp::{preload, sideloaded};
 
 #[cfg(all(test, windows))]
 mod tests {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
     use std::path::PathBuf;
 
     #[test]
@@ -185,17 +199,9 @@ mod tests {
             dir.join("OpenConsole.exe").is_file(),
             "bundled OpenConsole.exe missing"
         );
-        // Full end-to-end resolution: LoadLibraryW fails if the module or any
-        // of its imports cannot be linked.
-        let wide: Vec<u16> = OsStr::new(&dir.join("conpty.dll"))
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let handle =
-            unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide.as_ptr()) };
         assert!(
-            (handle as isize) != 0,
-            "LoadLibraryW failed for the bundled conpty.dll"
+            super::imp::load_library(&dir),
+            "restricted LoadLibraryExW failed for the bundled conpty.dll"
         );
     }
 }

@@ -82,3 +82,26 @@ jobs:
           releaseAssetNamePattern: Que-[platform]-[arch]-[bundle].[ext]
           uploadUpdaterJson: false
           retryAttempts: 3
+
+      # Assets are still a draft. A detection/error must fail this job so the
+      # maintainer can review the saved scan output before publishing it.
+      - name: Scan Windows draft release artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = 'src-tauri/target/${{ matrix.target }}/release'
+          $artifacts = @((Join-Path $root 'que.exe'))
+          $bundles = @(Get-ChildItem -LiteralPath (Join-Path $root 'bundle') -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.msi' } |
+            ForEach-Object { $_.FullName })
+          if ($bundles.Count -eq 0) { throw 'No Windows installers found for scanning.' }
+          $artifacts += $bundles
+          & ./scripts/scan-windows-artifacts.ps1 -Artifact $artifacts
+
+      - name: Save Windows Defender reports
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: defender-${{ matrix.arch }}
+          path: logs/defender/*.json
+          if-no-files-found: warn

@@ -319,14 +319,13 @@ fn focus_window_windows(kind: &str, target: Option<&str>) -> Result<bool, String
         .map(|p| format!("\"{p}\""))
         .collect::<Vec<_>>()
         .join(",");
-    let target_str = target.unwrap_or("");
     let script = format!(
         r#"$names = @({procs_joined});
-$target = "{target_str}";
+$target = [string]$env:QUE_FOCUS_TARGET;
 foreach ($n in $names) {{
     $procs = Get-Process -Name $n -ErrorAction SilentlyContinue;
     if ($target -ne "") {{
-        $p = $procs | Where-Object {{ $_.MainWindowTitle -like "*$target*" }} | Select-Object -First 1;
+        $p = $procs | Where-Object {{ $_.MainWindowTitle.IndexOf($target, [StringComparison]::OrdinalIgnoreCase) -ge 0 }} | Select-Object -First 1;
         if ($p -and $p.MainWindowHandle) {{
             (New-Object -ComObject WScript.Shell).AppActivate($p.Id);
             exit 0;
@@ -341,8 +340,17 @@ foreach ($n in $names) {{
 exit 1"#
     );
 
-    let output = Command::new("powershell")
+    // Project names are data, never PowerShell source (quotes, $(), wildcards).
+    // Resolve the OS executable rather than searching a workspace-controlled PATH.
+    use crate::winproc::NoWindow;
+    let powershell = std::path::PathBuf::from(
+        std::env::var_os("SystemRoot").ok_or("SystemRoot is not set")?,
+    )
+    .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let output = Command::new(powershell)
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .env("QUE_FOCUS_TARGET", target.unwrap_or(""))
+        .no_window()
         .output()
         .map_err(|e| e.to_string())?;
 

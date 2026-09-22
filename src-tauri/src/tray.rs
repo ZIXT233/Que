@@ -60,7 +60,10 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
             "que.tray.open" => show_main(app),
             // Explicit application exit bypasses CloseRequested; the existing
             // RunEvent::Exit handler shuts down the terminal sessions.
-            "que.tray.quit" => app.exit(0),
+            "que.tray.quit" => {
+                crate::debuglog::info("app", "exit-source=tray code=0");
+                app.exit(0);
+            }
             _ => {}
         })
         .build(app)?;
