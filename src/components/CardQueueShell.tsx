@@ -21,7 +21,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { HarnessCard } from "./HarnessCard";
 import { PersistentTerminalProvider } from "./PersistentTerminalViews";
-import { terminalRequest } from "@/lib/terminal-client";
 import { SettingsPanel } from "./SettingsPanel";
 import { useQueueScoreClock } from "@/hooks/useQueueScoreClock";
 import { completedCards } from "@/lib/card-completion";
@@ -312,25 +311,15 @@ function CardQueueShellContent() {
   }, [pendingDetach.size]);
   const priorHarnessPhases = useRef(new Map<string, string>());
   useEffect(() => {
-    if (watching !== null && inspecting !== watching && (inspecting !== null || focus?.id !== watching)) setWatching(null);
-  }, [inspecting, watching, focus?.id]);
+    if (watching !== null && inspecting !== watching) setWatching(null);
+  }, [inspecting, watching]);
   const ready = useMemo(() => {
     // The clock invalidates time-dependent ordering even when the API is unchanged.
     void scoreTick;
     const list = queue ? sortedQueue(queue, Date.now(), true) : [];
     const queued = pendingDetach.size === 0 ? list : list.filter((card) => !pendingDetach.has(card.id));
-    // Keep the same deck subtree when a visible terminal starts working.
-    // Include the transition snapshot itself, before setWatching commits.
-    const held = queue?.cards.find(card => card.id === focus?.id && card.phase === "working"
-      && !card.detached && card.archivedAt === undefined && !pendingDetach.has(card.id)
-      && !card.manualPlacement?.background
-      && (watching === card.id || (submissionBehavior === "keep-in-view"
-        && priorHarnessPhases.current.has(card.id) && priorHarnessPhases.current.get(card.id) !== "working")));
-    if (!inspecting && held && !queued.some(card => card.id === held.id)) {
-      queued.splice(Math.min(focus?.index ?? 0, queued.length), 0, held);
-    }
     return queued;
-  }, [queue, scoreTick, pendingDetach, focus, watching, inspecting, submissionBehavior]);
+  }, [queue, scoreTick, pendingDetach]);
   const deckIndex = resolveQueueFocus(ready, focus?.id ?? null, focus?.index ?? 0);
   const leaveInspection = useCallback((cardId: string) => {
     setWatching(current => current === cardId ? null : current);
@@ -438,8 +427,8 @@ function CardQueueShellContent() {
     setFocus(current => current?.id === active.id && current.index === deckIndex ? current : {id:active.id,index:deckIndex});
   }, [active, deckIndex, inspecting, detachedId]); // Keep the next reader stable after explicit actions.
 
-  // Keep the focused card in its existing deck or inspection subtree.
-  // Changing the phase must not transfer ownership to another React parent.
+  // Working cards leave the queue. Keep-in-view uses an inspection slot;
+  // PersistentTerminalProvider retains the actual terminal across that move.
   if (submissionBehavior === "keep-in-view" && !detachedId && queue) {
     for (const card of cards) {
       if (card.phase !== "working" || card.detached || pendingDetach.has(card.id) || card.manualPlacement?.background) continue;
@@ -447,7 +436,8 @@ function CardQueueShellContent() {
       if (prior === undefined || prior === "working") continue;
       if (inspecting === card.id) {
         if (watchingRef.current !== card.id) setWatching(card.id);
-      } else if (inspecting === null && card.id === focus?.id && watching !== card.id) {
+      } else if (inspecting === null && card.id === focus?.id) {
+        setInspecting(card.id);
         setWatching(card.id);
       }
       break;
@@ -459,28 +449,16 @@ function CardQueueShellContent() {
       const previous = priorHarnessPhases.current.get(card.id);
       if (card.harness && previous && previous !== card.phase) {
         if (card.phase === "working") {
-          if (card.harness.kind !== "shell") {
-            void terminalRequest(`/api/terminal/${encodeURIComponent(card.harness.terminalId)}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ type: "input", data: "\x1b[O" }),
-            }).catch(() => {});
-          }
+          // The terminal view owns focus reporting. Working does not mean
+          // unfocused when the user is watching it in an inspection slot.
           // Keep-in-view mode keeps the card on screen while it joins the Working
           // list; the phase -> working effect skips clearing inspecting for it.
           if (watchingRef.current !== card.id && inspecting === card.id) setInspectionLeaving({ id: card.id, to: "sidebar" });
         } else if (previous === "working" && !card.detached) {
-          if (card.harness.kind !== "shell") {
-            void terminalRequest(`/api/terminal/${encodeURIComponent(card.harness.terminalId)}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ type: "input", data: "\x1b[I" }),
-            }).catch(() => {});
-          }
           // Back in the queue while its working view is open: focus where it
           // landed, then let the overlay morph the real card onto that deck
           // layer instead of dropping one view and mounting another.
-          if (inspecting === card.id && watchingRef.current !== card.id && !activeCardRef.current.detached) {
+          if (inspecting === card.id && !activeCardRef.current.detached) {
             const index = ready.findIndex((item) => item.id === card.id);
             if (index >= 0) {
               setFocus({ id: card.id, index });
@@ -1011,7 +989,7 @@ function CardQueueShellContent() {
       }} />}
     <CardTransfers
       order={ready.map((card) => card.id)}
-      locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" ? (inspecting === card.id ? "inspection" : ready.some(item => item.id === card.id) ? "deck" : "sidebar") : "deck"]))}
+      locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" ? (inspecting === card.id ? "inspection" : "sidebar") : "deck"]))}
       attentionMode={attentionMode}
       focusedId={focus?.id ?? active?.id}
     >

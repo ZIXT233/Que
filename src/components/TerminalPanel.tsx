@@ -31,7 +31,7 @@ interface Props {
   conptyCursorHide?: boolean;
   tab: TerminalTab;
   active: boolean;
-  /** Reply to CSI ?1004h. I while the card is in the queue, O otherwise. */
+  /** Reply to CSI ?1004h using the visible view's active state. */
   focusReporting?: boolean;
   inQueue?: boolean;
   onRestart: () => void;
@@ -43,6 +43,7 @@ interface Props {
   harnessName?: string;
   isStarting?: boolean;
   reconnectVersion?: number;
+  placementVersion?: number;
 }
 
 /**
@@ -54,15 +55,15 @@ export function TerminalPanel(props: Props) {
   return <PersistentTerminalSlot id={props.tab.id}><TerminalPanelView {...props} /></PersistentTerminalSlot>;
 }
 
-function TerminalPanelView({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true, cardId, harnessKind, harnessName, isStarting, reconnectVersion = 0 }: Props) {
+function TerminalPanelView({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, conptyCursorHide = true, cardId, harnessKind, harnessName, isStarting, reconnectVersion = 0, placementVersion = 0 }: Props) {
   const { t } = useI18n();
   const { id, cwd, sshHost, restored } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<TerminalSession | null>(null);
   const callbacksRef = useRef({ onClosed, onCloseError, onOutput, onUnavailable });
   callbacksRef.current = { onClosed, onCloseError, onOutput, onUnavailable };
-  const optionsRef = useRef({ active, inQueue, focusReporting, readOnly });
-  optionsRef.current = { active, inQueue, focusReporting, readOnly };
+  const optionsRef = useRef({ active, focusReporting, readOnly });
+  optionsRef.current = { active, focusReporting, readOnly };
 
   const [view, setView] = useState<TerminalSessionState>(() => ({
     status: "connecting",
@@ -144,9 +145,13 @@ function TerminalPanelView({ tab, active, onRestart, onClosed, onCloseError, onU
     };
   }, [id, cwd, sshHost, restored, remote, themeProfile, harnessKind, conptyCursorHide, cardId, reconnectKey, reconnectVersion]);
 
-  useEffect(() => {
-    sessionRef.current?.setViewOptions(sinkRef, { active, inQueue, focusReporting, readOnly });
-  }, [active, inQueue, focusReporting, readOnly]);
+  useLayoutEffect(() => {
+    sessionRef.current?.setViewOptions(sinkRef, { active, focusReporting, readOnly });
+  }, [active, focusReporting, readOnly]);
+
+  useLayoutEffect(() => {
+    sessionRef.current?.refreshPlacement();
+  }, [placementVersion]);
 
   useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
 

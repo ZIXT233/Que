@@ -70,8 +70,8 @@ export interface TerminalSessionSink {
 }
 
 export interface TerminalSessionViewOptions {
+  /** Selected for presentation; not DOM attachment or OS keyboard focus. */
   active: boolean;
-  inQueue: boolean;
   focusReporting: boolean;
   readOnly: boolean;
 }
@@ -92,13 +92,14 @@ export function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined,
  * the input writer for one terminal id. Views (TerminalPanel mounts) attach and
  * detach their container around it; while a session lives, the buffer is never
  * rebuilt, so moving a card between the deck, the inspection overlay and the
- * working list does not repaint the terminal. A session that is actually
+ * working list does not rebuild the terminal. A session that is actually
  * released rebuilds by replaying the server's SSE backlog.
  *
  * Several views can hold the same session (a suspended deck card underneath an
  * inspection overlay). The host element lives in the most recently attached
  * view; when that view detaches, the host rebinds to the next view on the
- * stack, and only a fully parked session pauses its stream.
+ * stack. The final selected view decides stream demand, including inactive
+ * views that remain mounted in a queue or in the provider's parking area.
  */
 export class TerminalSession {
   readonly id: string;
@@ -123,7 +124,9 @@ export class TerminalSession {
   private gpuLoading = false;
   private gpuGeneration = 0;
   private inactiveGpuTimer?: ReturnType<typeof setTimeout>;
-  private parkTimer?: ReturnType<typeof setTimeout>;
+  private viewReconcileQueued = false;
+  private presented = false;
+  private reportedFocus: boolean | undefined;
   private fitFrame = 0;
   private conptyCursorHidden = false;
   private conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
@@ -318,7 +321,6 @@ export class TerminalSession {
   }
 
   attach(container: HTMLElement, sink: { current: TerminalSessionSink }, options: TerminalSessionViewOptions): () => void {
-    clearTimeout(this.parkTimer);
     const entry: SessionView = { container, sink, options: { ...options } };
     this.views.push(entry);
     this.bindView(entry);
@@ -332,11 +334,7 @@ export class TerminalSession {
     const wasTop = index === this.views.length - 1;
     this.views.splice(index, 1);
     if (!wasTop) return;
-    // The visible view is going away. Flush keystrokes still waiting for their
-    // animation frame and report focus loss like an unmount used to.
-    if (entry.options.focusReporting && this.focusArmed && !entry.options.inQueue && !this.closing) {
-      this.writer.write("\x1b[O");
-    }
+    // Flush input, but let the completed view handoff decide focus and stream.
     if (this.inputRaf) { cancelAnimationFrame(this.inputRaf); this.inputRaf = 0; }
     if (this.pendingInput) { this.writer.write(this.pendingInput); this.pendingInput = ""; }
     const next = this.view;
@@ -346,13 +344,7 @@ export class TerminalSession {
       this.bindView(next);
       return;
     }
-    // A view transfer can detach and attach in the same commit. Give it a
-    // short grace period before tearing down the stream and GPU renderer.
-    this.parkTimer = setTimeout(() => {
-      if (this.destroyed || this.attached) return;
-      this.setLive(false);
-      this.disposeGpu();
-    }, 200);
+    this.reconcileView();
     this.host.remove();
     touch(this);
   }
@@ -361,12 +353,8 @@ export class TerminalSession {
     entry.container.appendChild(this.host);
     this.emit();
     this.refreshAppearance();
-    this.loadGpu();
     this.fitAndResize();
-    this.setLive(entry.options.active);
-    this.syncStdin();
-    this.sendFocusReport(entry.options.inQueue);
-    if (entry.options.active) this.focus();
+    this.reconcileView();
   }
 
   setViewOptions(sink: { current: TerminalSessionSink }, next: Partial<TerminalSessionViewOptions>) {
@@ -375,21 +363,41 @@ export class TerminalSession {
     const previous = entry.options;
     entry.options = { ...previous, ...next };
     if (entry !== this.view) return;
-    if (next.inQueue !== undefined && next.inQueue !== previous.inQueue) this.sendFocusReport(entry.options.inQueue);
-    if (next.readOnly !== undefined && next.readOnly !== previous.readOnly) this.syncStdin();
-    if (next.active !== undefined && next.active !== previous.active) {
+    this.reconcileView();
+  }
+
+  /** The only view-driven owner of stream demand, focus and GPU lifetime. */
+  private reconcileView() {
+    if (this.viewReconcileQueued || this.destroyed) return;
+    this.viewReconcileQueued = true;
+    queueMicrotask(() => {
+      this.viewReconcileQueued = false;
+      if (this.destroyed) return;
+      const active = this.view?.options.active === true;
+      const changed = active !== this.presented;
+      this.presented = active;
+      this.sendFocusReport();
+      this.setLive(active);
+      this.syncStdin();
+      if (!changed) return;
       clearTimeout(this.inactiveGpuTimer);
-      this.setLive(next.active);
-      if (next.active) { this.loadGpu(); this.focus(); }
+      if (active) { this.loadGpu(); this.refreshPlacement(); this.focus(); }
       else this.inactiveGpuTimer = setTimeout(() => {
-        if (!this.view?.options.active) this.disposeGpu();
+        if (!this.destroyed && !this.presented) this.disposeGpu();
       }, 300);
-    }
+    });
   }
 
   focus() {
     if (this.destroyed || !this.attached) return;
     this.terminal.focus();
+  }
+
+  /** A persistent portal moved without mounting a new terminal view. */
+  refreshPlacement() {
+    if (this.destroyed || !this.view) return;
+    this.refreshAppearance();
+    this.fitAndResize();
   }
 
   clearClipboardPending() {
@@ -462,7 +470,7 @@ export class TerminalSession {
   }
 
   private syncStdin() {
-    this.terminal.options.disableStdin = !(this.connected && !this.exited && !this.inputFailed && !this.readOnlyEffective());
+    this.terminal.options.disableStdin = !(this.presented && this.connected && !this.exited && !this.closing && !this.inputFailed && !this.readOnlyEffective());
   }
 
   // ---------------------------------------------------------------- theme
@@ -509,9 +517,13 @@ export class TerminalSession {
 
   // ---------------------------------------------------------------- input
 
-  private sendFocusReport(inQueueNow: boolean) {
-    if (!this.view?.options.focusReporting || !this.focusArmed) return;
-    this.writer.write(inQueueNow ? "\x1b[I" : "\x1b[O");
+  private sendFocusReport() {
+    if (!this.focusArmed || this.closing) return;
+    const focused = this.view?.options.focusReporting === true && this.presented;
+    if (focused === this.reportedFocus) return;
+    if (!this.view?.options.focusReporting && this.reportedFocus !== true) return;
+    this.reportedFocus = focused;
+    this.writer.write(focused ? "\x1b[I" : "\x1b[O");
   }
 
   private flushInput = () => {
@@ -682,7 +694,9 @@ export class TerminalSession {
   // including a stale `after` cursor. Always rebuild the request with the
   // offset we actually hold so the server replays exactly what we missed.
   private scheduleReconnect() {
-    if (this.destroyed || this.exited) return;
+    if (this.destroyed || this.exited || !this.live) return;
+    this.connected = false;
+    this.syncStdin();
     this.events?.close();
     this.events = null;
     clearTimeout(this.reconnectTimer);
@@ -727,9 +741,10 @@ export class TerminalSession {
     const view = this.view;
     if (view?.options.focusReporting && event.data.includes("\x1b[?1004h")) {
       this.focusArmed = true;
-      this.sendFocusReport(view.options.inQueue);
+      this.reportedFocus = undefined;
+      this.sendFocusReport();
     }
-    if (event.data.includes("\x1b[?1004l")) this.focusArmed = false;
+    if (event.data.includes("\x1b[?1004l")) { this.focusArmed = false; this.reportedFocus = undefined; }
     this.bytesWritten += event.data.length;
     if (event.data.length > 0 && !this.hasOutput) {
       this.hasOutput = true;
@@ -758,6 +773,9 @@ export class TerminalSession {
 
   private connect = () => {
     if (this.destroyed || this.exited || !this.live || !this.startReady || !navigator.onLine) return;
+    clearTimeout(this.reconnectTimer);
+    this.connected = false;
+    this.syncStdin();
     this.events?.close();
     // Always hand the server the offset we actually hold. Omitting it when
     // `offset === undefined` is correct (nothing read yet, full replay is what
@@ -766,8 +784,11 @@ export class TerminalSession {
     // stream, so `?after=` is the only cursor the server can trust. Without it
     // a resume after a pause degrades into a reset that replays just the
     // backlog, and anything trimmed in the meantime is lost with no signal.
-    this.events = new EventSource(`/api/terminal/${encodeURIComponent(this.id)}/events${this.offset === undefined ? "" : `?after=${this.offset}`}`);
-    this.events.onmessage = (message) => {
+    const events = new EventSource(`/api/terminal/${encodeURIComponent(this.id)}/events${this.offset === undefined ? "" : `?after=${this.offset}`}`);
+    this.events = events;
+    const current = () => !this.destroyed && !this.exited && this.live && this.events === events;
+    events.onmessage = (message) => {
+      if (!current()) return;
       const event = JSON.parse(message.data) as TerminalEvent;
       this.sseMessages += 1;
       if (event.type === "output") {
@@ -811,10 +832,12 @@ export class TerminalSession {
         this.terminal.options.disableStdin = true;
         clearTimeout(this.reconnectTimer);
         this.events?.close();
+        this.events = null;
         this.patch({ exitCode: event.type === "exit" ? event.exitCode : null, status: "exited" });
       }
     };
-    this.events.onopen = () => {
+    events.onopen = () => {
+      if (!current()) return;
       this.connected = true;
       this.resyncing = false;
       if (this.inputFailed) return;
@@ -825,8 +848,8 @@ export class TerminalSession {
       if (this.host.offsetWidth && this.host.offsetHeight) this.terminal.focus();
       this.publishProbe("ready");
     };
-    this.events.onerror = () => {
-      if (this.destroyed || this.exited) return;
+    events.onerror = () => {
+      if (!current()) return;
       this.connected = false;
       this.terminal.options.disableStdin = true;
       appLog("warn", "sse", `error after=${this.offset ?? "none"} attempt=${this.reconnectAttempt}`, { card: this.params.cardId, term: this.id });
@@ -891,7 +914,8 @@ export class TerminalSession {
     this.terminal.options.disableStdin = true;
     clearTimeout(this.reconnectTimer);
     this.events?.close();
-    if (!this.exited && !this.inputFailed) this.patch({ status: "connecting" });
+    this.events = null;
+    if (!this.exited && !this.inputFailed) this.patch({ status: this.live ? "connecting" : "paused" });
   };
 
   private pageShow = (event: PageTransitionEvent) => {
@@ -907,7 +931,6 @@ export class TerminalSession {
   private teardown() {
     this.destroyed = true;
     while (this.views.length) this.detach(this.views[this.views.length - 1]);
-    clearTimeout(this.parkTimer);
     clearTimeout(this.inactiveGpuTimer);
     cancelAnimationFrame(this.fitFrame);
     clearTimeout(this.conptyRevealTimer);
