@@ -5,7 +5,8 @@ on:
     tags: ["v*"]
 
 # A release is only initiated by an explicit version tag. The Tauri action
-# creates or updates one draft release while the six matrix jobs upload assets.
+# creates or updates one draft release while the six matrix jobs upload assets;
+# a final job publishes it once every leg (and its artifact scan) has passed.
 permissions:
   contents: write
 
@@ -51,6 +52,7 @@ jobs:
           cache: npm
 
       - name: Verify release version
+        shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: >-
@@ -105,3 +107,16 @@ jobs:
           name: defender-${{ matrix.arch }}
           path: logs/defender/*.json
           if-no-files-found: warn
+
+  # Every matrix leg must succeed (including the Windows Defender scans) before
+  # the accumulated draft release goes live with its binaries attached.
+  publish:
+    name: Publish release
+    needs: release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
