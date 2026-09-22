@@ -120,7 +120,11 @@ export class TerminalSession {
   private conptyHost: boolean;
   private gpu?: { dispose(): void };
   private gpuLoss?: { dispose(): void };
+  private gpuLoading = false;
+  private gpuGeneration = 0;
+  private inactiveGpuTimer?: ReturnType<typeof setTimeout>;
   private parkTimer?: ReturnType<typeof setTimeout>;
+  private fitFrame = 0;
   private conptyCursorHidden = false;
   private conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -374,8 +378,12 @@ export class TerminalSession {
     if (next.inQueue !== undefined && next.inQueue !== previous.inQueue) this.sendFocusReport(entry.options.inQueue);
     if (next.readOnly !== undefined && next.readOnly !== previous.readOnly) this.syncStdin();
     if (next.active !== undefined && next.active !== previous.active) {
+      clearTimeout(this.inactiveGpuTimer);
       this.setLive(next.active);
-      if (next.active) this.focus();
+      if (next.active) { this.loadGpu(); this.focus(); }
+      else this.inactiveGpuTimer = setTimeout(() => {
+        if (!this.view?.options.active) this.disposeGpu();
+      }, 300);
     }
   }
 
@@ -432,19 +440,19 @@ export class TerminalSession {
   // ---------------------------------------------------------------- options
 
   matches(params: TerminalSessionParams) {
-    return this.params.cwd === params.cwd
-      && this.params.sshHost === params.sshHost
+    return this.params.sshHost === params.sshHost
       && this.params.remote === params.remote
-      && this.params.themeProfile === params.themeProfile
       && this.params.harnessKind === params.harnessKind;
   }
 
-  /** Healthy enough to reuse; a dead or broken session is rebuilt instead. */
+  /** Exited terminals retain their final screen; broken connections can rebuild. */
   get reusable() {
-    return !this.destroyed && !this.exited && !this.inputFailed && !this.startFailed;
+    return !this.destroyed && !this.inputFailed && !this.startFailed;
   }
 
   updateMutableParams(params: TerminalSessionParams) {
+    this.params.cwd = params.cwd;
+    this.params.themeProfile = params.themeProfile;
     this.params.conptyCursorHide = params.conptyCursorHide;
     this.params.cardId = params.cardId;
   }
@@ -487,10 +495,10 @@ export class TerminalSession {
     if (size !== this.terminal.options.fontSize || font !== this.terminal.options.fontFamily) {
       this.terminal.options.fontSize = size;
       this.terminal.options.fontFamily = font;
-      this.fit.fit();
+      this.fitAndResize();
       void document.fonts.load(`${size}px ${font}`).then(() => {
         if (!this.destroyed) {
-          this.fit.fit();
+          this.fitAndResize();
           this.terminal.refresh(0, this.terminal.rows - 1);
         }
       });
@@ -589,8 +597,17 @@ export class TerminalSession {
   // ---------------------------------------------------------------- layout
 
   private fitAndResize = () => {
-    if (this.destroyed || !this.host.offsetWidth || !this.host.offsetHeight) return;
-    this.fit.fit();
+    if (this.destroyed || this.fitFrame) return;
+    // Reparenting and header portals can change layout several times in one
+    // commit. Only send the final dimensions, not intermediate empty headers.
+    this.fitFrame = requestAnimationFrame(() => {
+      this.fitFrame = 0;
+      if (this.destroyed || !this.host.isConnected || !this.host.offsetWidth || !this.host.offsetHeight) return;
+      this.fit.fit();
+      if (this.connected && !this.exited && !this.inputFailed && !this.readOnlyEffective()) {
+        this.writer.resize(this.terminal.cols, this.terminal.rows);
+      }
+    });
   };
 
   private hideConptyCursor() {
@@ -612,9 +629,11 @@ export class TerminalSession {
   // vertical seams on Windows. Parked sessions release the context so idle
   // cards cannot exhaust the browser's WebGL context budget.
   private loadGpu() {
-    if (this.gpu || this.destroyed) return;
+    if (this.gpu || this.gpuLoading || this.destroyed || !this.view?.options.active) return;
+    this.gpuLoading = true;
+    const generation = this.gpuGeneration;
     void import("@xterm/addon-webgl").then(({ WebglAddon }) => {
-      if (this.destroyed || !this.attached || this.gpu) return;
+      if (generation !== this.gpuGeneration || this.destroyed || !this.view?.options.active || this.gpu) return;
       const addon = new WebglAddon();
       try {
         this.terminal.loadAddon(addon);
@@ -629,10 +648,14 @@ export class TerminalSession {
         });
         this.terminal.refresh(0, this.terminal.rows - 1);
       } catch { addon.dispose(); }
-    }).catch(() => { /* DOM rendering remains available. */ });
+    }).catch(() => { /* DOM rendering remains available. */ }).finally(() => {
+      if (generation === this.gpuGeneration) this.gpuLoading = false;
+    });
   }
 
   private disposeGpu() {
+    this.gpuGeneration++;
+    this.gpuLoading = false;
     this.gpuLoss?.dispose();
     this.gpuLoss = undefined;
     this.gpu?.dispose();
@@ -799,7 +822,6 @@ export class TerminalSession {
       this.patch({ status: "ready" });
       if (!this.hasOutput) this.patch({ startupStage: "waiting_output" });
       this.fitAndResize();
-      if (!this.readOnlyEffective()) this.writer.resize(this.terminal.cols, this.terminal.rows);
       if (this.host.offsetWidth && this.host.offsetHeight) this.terminal.focus();
       this.publishProbe("ready");
     };
@@ -886,6 +908,8 @@ export class TerminalSession {
     this.destroyed = true;
     while (this.views.length) this.detach(this.views[this.views.length - 1]);
     clearTimeout(this.parkTimer);
+    clearTimeout(this.inactiveGpuTimer);
+    cancelAnimationFrame(this.fitFrame);
     clearTimeout(this.conptyRevealTimer);
     clearTimeout(this.reconnectTimer);
     clearTimeout(this.startupDismissTimer);

@@ -146,7 +146,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     <span>{logBusy ? t("harness.logsSaving") : t("harness.logs")}</span>
   </button>;
   const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} {...terminalOptions(harness.kind)} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} inQueue={inQueue}
-    harnessKind={harness.kind} harnessName={harnessName(harness.kind)} isStarting={harness.state === "starting" || connection > 0}
+    harnessKind={harness.kind} harnessName={harnessName(harness.kind)} reconnectVersion={connection} isStarting={harness.state === "starting" || connection > 0}
     onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen", { tmux: harness.tmux ?? (Boolean(sshHost) && useTmux) })} onClosed={() => {}} onCloseError={() => {}} /> : null;
 
   return <>

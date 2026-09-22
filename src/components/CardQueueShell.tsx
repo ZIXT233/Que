@@ -20,6 +20,7 @@ import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { HarnessCard } from "./HarnessCard";
+import { PersistentTerminalProvider } from "./PersistentTerminalViews";
 import { terminalRequest } from "@/lib/terminal-client";
 import { SettingsPanel } from "./SettingsPanel";
 import { useQueueScoreClock } from "@/hooks/useQueueScoreClock";
@@ -110,6 +111,10 @@ const openDetachedCardTab = async (cardId: string) => {
 };
 
 export function CardQueueShell() {
+  return <PersistentTerminalProvider><CardQueueShellContent /></PersistentTerminalProvider>;
+}
+
+function CardQueueShellContent() {
   const { t, locale, setLocale, supportedLocales } = useI18n();
   const router = useRouter();
   const params = useSearchParams();
@@ -135,11 +140,6 @@ export function CardQueueShell() {
   const [watching, setWatching] = useState<string | null>(null);
   const watchingRef = useRef<string | null>(null);
   watchingRef.current = watching;
-  // Every path that leaves the inspected card (Esc, backdrop click, deck
-  // navigation, notification focus, archive, pop-out) also ends keep-in-view mode.
-  useEffect(() => {
-    if (watching !== null && inspecting !== watching) setWatching(null);
-  }, [inspecting, watching]);
   const stageRef = useRef<HTMLDivElement>(null);
   const [creating, setCreating] = useState(false);
   const [addingWorkspace, setAddingWorkspace] = useState(false);
@@ -310,15 +310,30 @@ export function CardQueueShell() {
       clearTimeout(firstCheck);
     };
   }, [pendingDetach.size]);
+  const priorHarnessPhases = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (watching !== null && inspecting !== watching && (inspecting !== null || focus?.id !== watching)) setWatching(null);
+  }, [inspecting, watching, focus?.id]);
   const ready = useMemo(() => {
     // The clock invalidates time-dependent ordering even when the API is unchanged.
     void scoreTick;
     const list = queue ? sortedQueue(queue, Date.now(), true) : [];
     const queued = pendingDetach.size === 0 ? list : list.filter((card) => !pendingDetach.has(card.id));
+    // Keep the same deck subtree when a visible terminal starts working.
+    // Include the transition snapshot itself, before setWatching commits.
+    const held = queue?.cards.find(card => card.id === focus?.id && card.phase === "working"
+      && !card.detached && card.archivedAt === undefined && !pendingDetach.has(card.id)
+      && !card.manualPlacement?.background
+      && (watching === card.id || (submissionBehavior === "keep-in-view"
+        && priorHarnessPhases.current.has(card.id) && priorHarnessPhases.current.get(card.id) !== "working")));
+    if (!inspecting && held && !queued.some(card => card.id === held.id)) {
+      queued.splice(Math.min(focus?.index ?? 0, queued.length), 0, held);
+    }
     return queued;
-  }, [queue, scoreTick, pendingDetach]);
+  }, [queue, scoreTick, pendingDetach, focus, watching, inspecting, submissionBehavior]);
   const deckIndex = resolveQueueFocus(ready, focus?.id ?? null, focus?.index ?? 0);
   const leaveInspection = useCallback((cardId: string) => {
+    setWatching(current => current === cardId ? null : current);
     // A working card morphs back onto its Working button; anything else has
     // no surface to morph onto and closes instantly.
     const card = cards.find((item) => item.id === cardId);
@@ -423,12 +438,8 @@ export function CardQueueShell() {
     setFocus(current => current?.id === active.id && current.index === deckIndex ? current : {id:active.id,index:deckIndex});
   }, [active, deckIndex, inspecting, detachedId]); // Keep the next reader stable after explicit actions.
 
-  const priorHarnessPhases = useRef(new Map<string, string>());
-  // Keep-in-view mode: the moment a queue snapshot flips the focused (or
-  // already inspected) card to "working", take it over in this same render —
-  // a render-phase update re-renders before commit, so CardTransfers never
-  // sees an attention -> working zone change: no flight, no unmount. The card
-  // joins the Working list while staying exactly where it is on screen.
+  // Keep the focused card in its existing deck or inspection subtree.
+  // Changing the phase must not transfer ownership to another React parent.
   if (submissionBehavior === "keep-in-view" && !detachedId && queue) {
     for (const card of cards) {
       if (card.phase !== "working" || card.detached || pendingDetach.has(card.id) || card.manualPlacement?.background) continue;
@@ -436,8 +447,7 @@ export function CardQueueShell() {
       if (prior === undefined || prior === "working") continue;
       if (inspecting === card.id) {
         if (watchingRef.current !== card.id) setWatching(card.id);
-      } else if (inspecting === null && card.id === focus?.id) {
-        setInspecting(card.id);
+      } else if (inspecting === null && card.id === focus?.id && watching !== card.id) {
         setWatching(card.id);
       }
       break;
@@ -470,7 +480,7 @@ export function CardQueueShell() {
           // Back in the queue while its working view is open: focus where it
           // landed, then let the overlay morph the real card onto that deck
           // layer instead of dropping one view and mounting another.
-          if (inspecting === card.id && !activeCardRef.current.detached) {
+          if (inspecting === card.id && watchingRef.current !== card.id && !activeCardRef.current.detached) {
             const index = ready.findIndex((item) => item.id === card.id);
             if (index >= 0) {
               setFocus({ id: card.id, index });
@@ -1001,7 +1011,7 @@ export function CardQueueShell() {
       }} />}
     <CardTransfers
       order={ready.map((card) => card.id)}
-      locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" ? (inspecting === card.id ? "inspection" : "sidebar") : "deck"]))}
+      locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" ? (inspecting === card.id ? "inspection" : ready.some(item => item.id === card.id) ? "deck" : "sidebar") : "deck"]))}
       attentionMode={attentionMode}
       focusedId={focus?.id ?? active?.id}
     >
@@ -1119,7 +1129,7 @@ export function CardQueueShell() {
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
               : <>
-                  <CardDeck cards={ready} navigationRef={deckNavigationRef} focusedIndex={deckIndex} resetKey={deckReset} suspended={!!inspected} withheldCardId={inspectionLeaving?.id ?? null} onIndexChange={(index) => { if (ready[index]) setFocus({id: ready[index].id, index}); }} renderCard={renderCard} />
+                  <CardDeck cards={ready} navigationRef={deckNavigationRef} focusedIndex={deckIndex} resetKey={deckReset} suspended={!!inspected} withheldCardId={inspected?.id ?? inspectionLeaving?.id ?? null} onIndexChange={(index) => { if (ready[index]) setFocus({id: ready[index].id, index}); }} renderCard={renderCard} />
                 </>}
           </> : <div className="cq-empty">
             {detachedId && <div className="cq-detached-window-drag" data-tauri-drag-region aria-hidden="true" />}

@@ -16,6 +16,7 @@ import {
 } from "@/lib/terminal-pool";
 import { TerminalStartupProgress } from "./TerminalStartupProgress";
 import type { TerminalTab } from "./terminal-tab-state";
+import { PersistentTerminalSlot } from "./PersistentTerminalViews";
 
 export type { TerminalConnectionStatus };
 
@@ -41,15 +42,19 @@ interface Props {
   harnessKind?: string;
   harnessName?: string;
   isStarting?: boolean;
+  reconnectVersion?: number;
 }
 
 /**
- * The panel is only a view: the xterm instance, its DOM and its stream live in
- * a pooled TerminalSession keyed by terminal id, so unmounting this component
- * (queue → working transitions, inspection overlay moves, tab switches) detaches
- * the host element instead of destroying and repainting the terminal.
+ * Queue and inspection locations only register slots. The page-level provider
+ * keeps one TerminalPanelView and portal host per terminal id across moves.
+ * Other pages without a provider retain the pooled-session fallback.
  */
-export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true, cardId, harnessKind, harnessName, isStarting }: Props) {
+export function TerminalPanel(props: Props) {
+  return <PersistentTerminalSlot id={props.tab.id}><TerminalPanelView {...props} /></PersistentTerminalSlot>;
+}
+
+function TerminalPanelView({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true, cardId, harnessKind, harnessName, isStarting, reconnectVersion = 0 }: Props) {
   const { t } = useI18n();
   const { id, cwd, sshHost, restored } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,6 +76,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
   }));
   const { status, error, exitCode, startupStage, showStartup, clipboardPending, dragging, startedAt } = view;
   const [reconnectKey, setReconnectKey] = useState(0);
+  const previousReconnectVersion = useRef(reconnectVersion);
 
   const searchRef = useRef<SearchAddon | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -120,6 +126,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    if (reconnectVersion > 0 && reconnectVersion !== previousReconnectVersion.current) releaseTerminalSession(id);
+    previousReconnectVersion.current = reconnectVersion;
     const session = acquireTerminalSession({
       id, cwd, sshHost, restored, remote, themeProfile, harnessKind,
       conptyCursorHide, cardId,
@@ -134,7 +142,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       if (sessionRef.current === session) sessionRef.current = null;
       if (searchRef.current === session.search) searchRef.current = null;
     };
-  }, [id, cwd, sshHost, restored, remote, themeProfile, harnessKind, conptyCursorHide, cardId, reconnectKey]);
+  }, [id, cwd, sshHost, restored, remote, themeProfile, harnessKind, conptyCursorHide, cardId, reconnectKey, reconnectVersion]);
 
   useEffect(() => {
     sessionRef.current?.setViewOptions(sinkRef, { active, inQueue, focusReporting, readOnly });
