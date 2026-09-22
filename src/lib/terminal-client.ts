@@ -18,6 +18,7 @@ export async function terminalRequest(path: string, options?: RequestInit): Prom
 export function createTerminalWriter(id: string, onError: (error: Error) => void) {
   let pending = Promise.resolve();
   let stopped = false;
+  let lastSize: { cols: number; rows: number } | undefined;
   const replyRequests = new Set<AbortController>();
   let bufferedInput: { type: "input"; data: string } | null = null;
   const enqueue = (body: Record<string, unknown> | FormData | (() => Promise<Record<string, unknown>>)) => {
@@ -100,6 +101,8 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
       enqueue(form);
     },
     resize(cols: number, rows: number) {
+      if (lastSize?.cols === cols && lastSize.rows === rows) return;
+      lastSize = { cols, rows };
       bufferedInput = null;
       enqueue({ type: "resize", cols, rows });
     },

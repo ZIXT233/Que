@@ -30,18 +30,17 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   const orderKey = JSON.stringify(cards.map((card) => card.id));
   const stableCards = useMemo(() => cards.map((card, index) => ({ card, index }))
     .sort((a, b) => a.card.id.localeCompare(b.card.id)), [cards]);
-  const [viewport, setViewport] = useState({ orderKey, resetKey, position: focusedIndex, direction: 0 });
+  const [viewport, setViewport] = useState({ orderKey, resetKey, focusedIndex, position: focusedIndex, direction: 0 });
+  const reportedIndex = useRef(focusedIndex);
+  const scrollIdle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Rebase before rendering children so a reorder never unmounts or makes the
   // focused composer inert, even when it moves beyond the preview window.
   const rebased = viewport.orderKey !== orderKey || viewport.resetKey !== resetKey
-    || Math.round(viewport.position) !== focusedIndex;
+    || viewport.focusedIndex !== focusedIndex;
   const position = rebased ? focusedIndex : viewport.position;
-  const settled = Math.abs(position - Math.round(position)) < .001;
-  const liveCards = useRef(new Set<string>());
-  const wantedCards = useRef(new Set<string>());
-  const pendingLoads = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const [, bumpLive] = useState(0);
-  if (rebased) setViewport({ orderKey, resetKey, position, direction: 0 });
+  const [liveCards, setLiveCards] = useState<Set<string>>(() => new Set());
+  const lastPosition = useRef(focusedIndex);
+  if (rebased) setViewport({ orderKey, resetKey, focusedIndex, position, direction: 0 });
   const frame = useRef<number | null>(null);
   const step = deckStep(width);
   const selected = Math.min(cards.length - 1, Math.max(0, Math.round(position)));
@@ -264,7 +263,6 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     return () => observer.disconnect();
   }, []);
 
-  const reportedIndex = useRef(focusedIndex);
   const anchoredLayout = useRef<{ orderKey: string; resetKey: number; step: number } | null>(null);
   useLayoutEffect(() => {
     const previous = anchoredLayout.current;
@@ -273,57 +271,100 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     // interrupts the browser's gesture and snapping animation on every frame.
     if (layoutChanged || reportedIndex.current !== focusedIndex) {
       if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null; }
+      clearTimeout(scrollIdle.current);
+      lastPosition.current = position;
       scrollerRef.current?.scrollTo({ left: position * step, behavior: "instant" });
       reportedIndex.current = focusedIndex;
     }
     anchoredLayout.current = { orderKey, resetKey, step };
   }, [orderKey, resetKey, focusedIndex, step, position]);
 
-  useEffect(() => () => { if (frame.current !== null) cancelAnimationFrame(frame.current); }, []);
-
-  // While the deck moves, card content loads off the gesture's critical path:
-  // silhouettes slide first and real cards pop in when ready. A card that has
-  // scrolled out of the near window before its turn skips the render entirely.
-  useEffect(() => {
-    if (settled || suspended) return;
-    for (const id of wantedCards.current) {
-      if (liveCards.current.has(id) || pendingLoads.current.has(id)) continue;
-      pendingLoads.current.set(id, setTimeout(() => {
-        pendingLoads.current.delete(id);
-        if (!wantedCards.current.has(id) || liveCards.current.has(id)) return;
-        liveCards.current.add(id);
-        startTransition(() => bumpLive((n) => n + 1));
-      }, 0));
+  // Fractional motion bypasses React. A content commit must also project from
+  // the current scroll position, never the older position it rendered with.
+  const paintPosition = (current: number) => {
+    const front = Math.round(current);
+    const travel = Math.sign(current - lastPosition.current);
+    const next = travel > 0 ? Math.ceil(current) : travel < 0 ? Math.floor(current) : front;
+    for (const layer of scrollerRef.current?.querySelectorAll<HTMLElement>(".cq-deck-layer") ?? []) {
+      const index = Number(layer.dataset.deckIndex);
+      const { x, scale, distance } = projectDeckCard(index, current, width);
+      layer.style.transform = `translate3d(${x}px, 0, 0) scale(${scale})`;
+      layer.style.visibility = isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5 ? "hidden" : "";
+      layer.dataset.clear = String(index === front || index === next);
+      layer.setAttribute("aria-hidden", String(index !== front));
+      const body = layer.firstElementChild as HTMLElement | null;
+      if (body) body.inert = index !== front;
     }
+    lastPosition.current = current;
+  };
+  useLayoutEffect(() => {
+    paintPosition((scrollerRef.current?.scrollLeft ?? 0) / step);
   });
+
+  useEffect(() => {
+    const retained = new Set(cards.filter((_, index) => index >= Math.floor(position) - 2
+      && index <= Math.ceil(position) + 6).map(card => card.id));
+    if ([...liveCards].some(id => !retained.has(id))) {
+      setLiveCards(previous => new Set([...previous].filter(id => retained.has(id))));
+    }
+  }, [cards, position, liveCards]);
+
+  // Admit one card per idle task/React commit, including while scrolling.
+  // Re-evaluate from live scroll position so rapid reversals skip stale work.
+  useEffect(() => {
+    if (suspended) return;
+    const candidates = () => {
+      const current = (scrollerRef.current?.scrollLeft ?? 0) / step;
+      return cards.map((card, index) => ({ card, distance: Math.abs(index - current) }))
+        .filter(({ card, distance }) => distance <= 2 && card.id !== withheldCardId && !liveCards.has(card.id))
+        .sort((a, b) => a.distance - b.distance);
+    };
+    if (!candidates().length) return;
+    const load = () => {
+      const candidate = candidates()[0];
+      if (!candidate) return;
+      startTransition(() => setLiveCards(previous => new Set(previous).add(candidate.card.id)));
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const idle = window.requestIdleCallback(load, { timeout: 100 });
+      return () => window.cancelIdleCallback(idle);
+    }
+    const timer = setTimeout(load, 32);
+    return () => clearTimeout(timer);
+  }, [cards, selected, direction, step, liveCards, suspended, withheldCardId]);
+
   useEffect(() => () => {
-    for (const timer of pendingLoads.current.values()) clearTimeout(timer);
-    pendingLoads.current.clear();
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    clearTimeout(scrollIdle.current);
   }, []);
 
   const syncPosition = () => {
+    clearTimeout(scrollIdle.current);
+    // Content loads during motion; only terminal activation waits for idle.
+    scrollIdle.current = setTimeout(() => {
+      const nextIndex = Math.max(0, Math.min(cards.length - 1,
+        Math.round((scrollerRef.current?.scrollLeft ?? 0) / stepRef.current)));
+      if (nextIndex !== reportedIndex.current) {
+        reportedIndex.current = nextIndex;
+        onIndexRef.current(nextIndex);
+      }
+    }, 160);
     if (frame.current !== null) return;
     frame.current = requestAnimationFrame(() => {
       frame.current = null;
       const position = Math.max(0, Math.min(Math.max(0, cards.length - 1), (scrollerRef.current?.scrollLeft ?? 0) / stepRef.current));
-      const nextIndex = Math.max(0, Math.min(cards.length - 1, Math.round(position)));
-      const indexChanged = nextIndex !== reportedIndex.current;
-      reportedIndex.current = nextIndex;
+      const direction = Math.sign(position - lastPosition.current);
+      paintPosition(position);
       setViewport((previous) => {
         if (previous.orderKey === orderKey && previous.resetKey === resetKey
-          && Math.abs(position - previous.position) <= .0001) return previous;
-        return { orderKey, resetKey, position,
-          direction: previous.orderKey === orderKey && previous.resetKey === resetKey
-            ? Math.sign(position - previous.position) : 0 };
+          && Math.floor(position) === Math.floor(previous.position)
+          && Math.round(position) === Math.round(previous.position)
+          && (!direction || direction === previous.direction)) return previous;
+        return { orderKey, resetKey, focusedIndex, position,
+          direction };
       });
-      if (indexChanged) onIndexRef.current(nextIndex);
     });
   };
-
-  const wanted = new Set<string>();
-  for (const { card, index } of stableCards)
-    if (Math.abs(index - selected) <= 1) wanted.add(card.id);
-  wantedCards.current = wanted;
 
   // Native horizontal gestures browse cards; vertical mapping is limited to navigation surfaces.
   return <div className="cq-deck-scroller" inert={suspended} aria-hidden={suspended} ref={scrollerRef} onScroll={syncPosition} aria-label={t("queue.左右滑动浏览卡片，停下后自动吸附")}>
@@ -333,18 +374,15 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
             Scheduler indexes still determine every card's visual position. */}
         {stableCards.map(({ card, index }) => {
           const { distance, x, scale } = projectDeckCard(index, position, width);
-          if (isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5) return null;
+          // Keep a small shell margin so per-frame projection needs no mount.
+          if (index < Math.floor(position) - 2 || index > Math.ceil(position) + 6) return null;
           const isFront = index === selected;
           const isNeighbor = Math.abs(index - selected) === 1;
-          // Mounting a conversation tree mid-gesture stalls the slide: while
-          // the deck moves, mounts only land through the async queue above.
-          const live = card.id !== withheldCardId && (liveCards.current.has(card.id)
-            || (settled && (isFront || isNeighbor)));
-          if (live) liveCards.current.add(card.id);
+          const live = card.id !== withheldCardId && liveCards.has(card.id);
           return <div key={card.id} className="cq-deck-layer" data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="deck" data-deck-index={index} aria-hidden={!isFront}
-            style={{ transform: `translate3d(${x}px, 0, 0) scale(${scale})`, zIndex: cards.length - index, pointerEvents: "auto" }}>
+            style={{ transform: `translate3d(${x}px, 0, 0) scale(${scale})`, visibility: isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5 ? "hidden" : undefined, zIndex: cards.length - index, pointerEvents: "auto" }}>
             <div className="cq-deck-layer-body" inert={!isFront}>
-              {live ? <DeckContent card={card} isFront={isFront} renderCard={renderCard} /> : <div className="cq-back-card" />}
+              {live ? <DeckContent card={card} isFront={index === focusedIndex && !suspended} renderCard={renderCard} /> : <div className="cq-back-card" />}
             </div>
             {isNeighbor ? <button type="button" className="cq-deck-peek-hit" tabIndex={-1} aria-label={index < selected ? t("queue.上一张卡片") : t("queue.下一张卡片")} /> : null}
           </div>;

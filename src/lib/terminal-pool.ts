@@ -120,6 +120,7 @@ export class TerminalSession {
   private conptyHost: boolean;
   private gpu?: { dispose(): void };
   private gpuLoss?: { dispose(): void };
+  private parkTimer?: ReturnType<typeof setTimeout>;
   private conptyCursorHidden = false;
   private conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -313,6 +314,7 @@ export class TerminalSession {
   }
 
   attach(container: HTMLElement, sink: { current: TerminalSessionSink }, options: TerminalSessionViewOptions): () => void {
+    clearTimeout(this.parkTimer);
     const entry: SessionView = { container, sink, options: { ...options } };
     this.views.push(entry);
     this.bindView(entry);
@@ -340,8 +342,13 @@ export class TerminalSession {
       this.bindView(next);
       return;
     }
-    this.setLive(false);
-    this.disposeGpu();
+    // A view transfer can detach and attach in the same commit. Give it a
+    // short grace period before tearing down the stream and GPU renderer.
+    this.parkTimer = setTimeout(() => {
+      if (this.destroyed || this.attached) return;
+      this.setLive(false);
+      this.disposeGpu();
+    }, 200);
     this.host.remove();
     touch(this);
   }
@@ -472,8 +479,9 @@ export class TerminalSession {
 
   private refreshAppearance = () => {
     if (!this.host.isConnected) return;
-    this.terminal.options.theme = this.liveTheme();
-    this.host.closest<HTMLElement>(".terminal-panel")?.style.setProperty("--terminal-bg", this.liveTheme().background!);
+    const theme = this.liveTheme();
+    if (JSON.stringify(theme) !== JSON.stringify(this.terminal.options.theme)) this.terminal.options.theme = theme;
+    this.host.closest<HTMLElement>(".terminal-panel")?.style.setProperty("--terminal-bg", theme.background!);
     const size = this.liveFontSize();
     const font = this.liveFont();
     if (size !== this.terminal.options.fontSize || font !== this.terminal.options.fontFamily) {
@@ -877,6 +885,7 @@ export class TerminalSession {
   private teardown() {
     this.destroyed = true;
     while (this.views.length) this.detach(this.views[this.views.length - 1]);
+    clearTimeout(this.parkTimer);
     clearTimeout(this.conptyRevealTimer);
     clearTimeout(this.reconnectTimer);
     clearTimeout(this.startupDismissTimer);

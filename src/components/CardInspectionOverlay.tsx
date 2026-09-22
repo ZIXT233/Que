@@ -14,6 +14,7 @@ export function CardInspectionOverlay({ anchor, children, onClose, onSettled, tr
   const { t } = useI18n();
   const [bounds, setBounds] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const leaveStarted = useRef(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const onSettledRef = useRef(onSettled);
   onSettledRef.current = onSettled;
   useLayoutEffect(() => {
@@ -44,15 +45,22 @@ export function CardInspectionOverlay({ anchor, children, onClose, onSettled, tr
       ? anchor.current?.querySelector<HTMLElement>('.cq-deck-layer[aria-hidden="false"]')?.getBoundingClientRect()
       : root?.querySelector<HTMLElement>(`[data-transfer-id="${CSS.escape(transferId ?? "")}"][data-transfer-zone="sidebar"]`)?.getBoundingClientRect();
     if (!destination || !destination.width || !destination.height) { onSettledRef.current(); return; }
-    const frame = requestAnimationFrame(() => requestAnimationFrame(() =>
-      setBounds({ left: destination.left, top: destination.top, width: destination.width, height: destination.height })));
+    const card = cardRef.current;
+    if (!card) { onSettledRef.current(); return; }
+    const source = card.getBoundingClientRect();
+    if (!source.width || !source.height) { onSettledRef.current(); return; }
+    // Animate the surface without resizing the live terminal on every frame.
+    const motion = card.animate([
+      { transform: "none", transformOrigin: "top left" },
+      { transform: `translate(${destination.left - source.left}px, ${destination.top - source.top}px) scale(${destination.width / source.width}, ${destination.height / source.height})`, transformOrigin: "top left" },
+    ], { duration: 340, easing: "cubic-bezier(.22,.8,.25,1)", fill: "forwards" });
     const timer = setTimeout(() => onSettledRef.current(), 360);
-    return () => { cancelAnimationFrame(frame); clearTimeout(timer); };
+    return () => { motion.cancel(); clearTimeout(timer); };
   }, [leaving, anchor, transferId]);
   return (
     <div className={`cq-inspection-overlay${leaving ? " cq-leaving" : ""}`}>
       <button type="button" className="cq-inspection-backdrop" aria-label={t("queue.关闭")} onClick={onClose} />
-      {bounds && <div className="cq-static-card cq-inspection-card" style={bounds} data-transfer-id={transferId} data-transfer-zone="inspection">{children}</div>}
+      {bounds && <div ref={cardRef} className="cq-static-card cq-inspection-card" style={bounds} data-transfer-id={transferId} data-transfer-zone="inspection">{children}</div>}
     </div>
   );
 }

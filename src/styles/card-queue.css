@@ -471,7 +471,7 @@ html.dark .cq-remind-countdown{color:#e2c57e}
 /* Keep the actual layout behind one root-level backdrop. */
 .cq-inspection-overlay{position:fixed;inset:0;z-index:40;background:#242b2850;backdrop-filter:blur(5px)}
 .cq-inspection-overlay.cq-leaving{background:transparent;backdrop-filter:blur(0);transition:background .34s,backdrop-filter .34s}
-.cq-inspection-overlay.cq-leaving .cq-inspection-card{transition:left .34s cubic-bezier(.22,.8,.25,1),top .34s cubic-bezier(.22,.8,.25,1),width .34s cubic-bezier(.22,.8,.25,1),height .34s cubic-bezier(.22,.8,.25,1)}
+.cq-inspection-overlay.cq-leaving>.cq-static-card.cq-inspection-card{will-change:transform;pointer-events:none}
 .cq-inspection-backdrop{position:absolute;inset:0;margin:0;padding:0;border:0;background:transparent;cursor:pointer}
 .cq-inspection-backdrop.is-static{cursor:default;pointer-events:auto}
 .cq-inspection-overlay>.cq-static-card.cq-inspection-card{position:absolute;inset:auto;z-index:1;pointer-events:auto}
