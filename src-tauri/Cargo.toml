@@ -67,4 +67,8 @@ codegen-units = 1
 lto = true
 opt-level = 3
 panic = "abort"
-strip = true
+debug = 1
+strip = false
+
+[patch.crates-io]
+tauri-runtime-wry = { path = "vendor/tauri-runtime-wry" }

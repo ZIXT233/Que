@@ -24,7 +24,7 @@ export function CardInspectionOverlay({ anchor, children, onClose, onSettled, tr
       if (leaveStarted.current) return;
       const rect = stage.getBoundingClientRect();
       const top = window.matchMedia("(max-width: 700px)").matches ? 15 : 24;
-      setBounds({ left: rect.left, top: rect.top + top, width: rect.width, height: Math.max(0, rect.height - top - 60) });
+      setBounds({ left: rect.left + stage.clientLeft, top: rect.top + stage.clientTop + top, width: stage.clientWidth, height: Math.max(0, stage.clientHeight - top - 60) });
     };
     measure();
     const observer = new ResizeObserver(measure);

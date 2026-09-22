@@ -127,7 +127,7 @@ export class TerminalSession {
   private viewReconcileQueued = false;
   private presented = false;
   private reportedFocus: boolean | undefined;
-  private fitFrame = 0;
+  private fitTimer = 0;
   private conptyCursorHidden = false;
   private conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -609,11 +609,14 @@ export class TerminalSession {
   // ---------------------------------------------------------------- layout
 
   private fitAndResize = () => {
-    if (this.destroyed || this.fitFrame) return;
+    if (this.destroyed || this.fitTimer) return;
     // Reparenting and header portals can change layout several times in one
     // commit. Only send the final dimensions, not intermediate empty headers.
-    this.fitFrame = requestAnimationFrame(() => {
-      this.fitFrame = 0;
+    // xterm clears/resizes the canvas synchronously, then draws in its own RAF.
+    // Running fit inside our RAF exposes the cleared canvas until the next frame.
+    // A task coalesces layout changes while letting xterm draw at the next paint.
+    this.fitTimer = window.setTimeout(() => {
+      this.fitTimer = 0;
       if (this.destroyed || !this.host.isConnected || !this.host.offsetWidth || !this.host.offsetHeight) return;
       this.fit.fit();
       if (this.connected && !this.exited && !this.inputFailed && !this.readOnlyEffective()) {
@@ -932,7 +935,7 @@ export class TerminalSession {
     this.destroyed = true;
     while (this.views.length) this.detach(this.views[this.views.length - 1]);
     clearTimeout(this.inactiveGpuTimer);
-    cancelAnimationFrame(this.fitFrame);
+    clearTimeout(this.fitTimer);
     clearTimeout(this.conptyRevealTimer);
     clearTimeout(this.reconnectTimer);
     clearTimeout(this.startupDismissTimer);

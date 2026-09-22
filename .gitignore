@@ -13,6 +13,8 @@ dist-ssr
 *.local
 /Cue
 src-tauri/target
+src-tauri/target-before-path-rename-*/
+/.tmp-tauri-pr/
 .cue
 
 # Editor directories and files

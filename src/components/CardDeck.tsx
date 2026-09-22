@@ -253,8 +253,9 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
         const rightBleed = Math.max(24, layout.getBoundingClientRect().right - stage.getBoundingClientRect().right);
         element.style.setProperty("--cq-deck-bleed-right", `${rightBleed}px`);
       }
-      const style = getComputedStyle(element);
-      setWidth(element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+      // The overlay uses this same stage content box. Scroll bleed/padding is
+      // navigation space and must not alter the terminal's layout width.
+      if (stage) setWidth(stage.clientWidth);
     };
     const observer = new ResizeObserver(measure);
     measure();
@@ -309,7 +310,8 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     }
   }, [cards, position, liveCards]);
 
-  // Admit one card per idle task/React commit, including while scrolling.
+  // Admit neighboring previews one per idle task. The focused card renders
+  // immediately below, so an overlay handoff never lands on a blank placeholder.
   // Re-evaluate from live scroll position so rapid reversals skip stale work.
   useEffect(() => {
     if (suspended) return;
@@ -378,7 +380,7 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
           if (index < Math.floor(position) - 2 || index > Math.ceil(position) + 6) return null;
           const isFront = index === selected;
           const isNeighbor = Math.abs(index - selected) === 1;
-          const live = card.id !== withheldCardId && liveCards.has(card.id);
+          const live = card.id !== withheldCardId && (index === focusedIndex || liveCards.has(card.id));
           return <div key={card.id} className="cq-deck-layer" data-clear={isFront || index === approaching} data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="deck" data-deck-index={index} aria-hidden={!isFront}
             style={{ transform: `translate3d(${x}px, 0, 0) scale(${scale})`, visibility: isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5 ? "hidden" : undefined, zIndex: cards.length - index, pointerEvents: "auto" }}>
             <div className="cq-deck-layer-body" inert={!isFront}>
