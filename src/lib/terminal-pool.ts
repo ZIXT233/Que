@@ -244,6 +244,17 @@ export class TerminalSession {
     for (const ident of [4, 10, 11, 12]) {
       this.disposables.push(this.terminal.parser.registerOscHandler(ident, (data) => data.includes("?") && (this.replaying || swallowColorQueries)));
     }
+    // Observe complete mode sequences in parser order. A replay can contain
+    // enable/disable/enable together, and live chunks can split a sequence.
+    for (const enabled of [true, false]) {
+      this.disposables.push(this.terminal.parser.registerCsiHandler({ prefix: "?", final: enabled ? "h" : "l" }, (params) => {
+        if (params.includes(1004)) {
+          this.focusArmed = enabled;
+          this.reportedFocus = undefined;
+        }
+        return false; // Let xterm apply the mode too.
+      }));
+    }
 
     this.writer = createTerminalWriter(id, (reason) => {
       if (this.destroyed) return;
@@ -741,13 +752,6 @@ export class TerminalSession {
   private enqueueOutput(event: Extract<TerminalEvent, { type: "output" }>) {
     oscTrace("sse-recv", event.data, { card: this.params.cardId, term: this.id });
     this.hideConptyCursor();
-    const view = this.view;
-    if (view?.options.focusReporting && event.data.includes("\x1b[?1004h")) {
-      this.focusArmed = true;
-      this.reportedFocus = undefined;
-      this.sendFocusReport();
-    }
-    if (event.data.includes("\x1b[?1004l")) { this.focusArmed = false; this.reportedFocus = undefined; }
     this.bytesWritten += event.data.length;
     if (event.data.length > 0 && !this.hasOutput) {
       this.hasOutput = true;
@@ -766,6 +770,7 @@ export class TerminalSession {
       this.replyPolicy.observeOutput(event.data);
       this.terminal.write(this.composerColors?.feed(event.data) ?? event.data, () => {
         this.replaying = false;
+        this.sendFocusReport();
         resolve();
       });
     }));
