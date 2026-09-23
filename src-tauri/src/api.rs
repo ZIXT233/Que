@@ -50,10 +50,16 @@ pub struct AppState {
     pub bin_dir: PathBuf,
     pub default_cwd: PathBuf,
     pub launches: Arc<Mutex<HashSet<String>>>,
+    pub mcp: Arc<crate::mcp::McpControl>,
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/api/mcp/config", get(crate::mcp::config))
+        .route(
+            "/api/mcp/tools",
+            post(crate::mcp::tools).layer(DefaultBodyLimit::max(64 * 1024)),
+        )
         .route("/api/card-queue", get(get_queue).post(post_queue))
         .route("/api/card-queue/bootstrap", get(bootstrap_queue))
         .route("/api/card-queue/events", get(queue_events))
@@ -216,7 +222,10 @@ async fn post_queue(
     }
     // dismiss_external already did its work above and has no queue-side action; every
     // other action goes through apply_action. Both share this one read+response path.
-    let external_action = matches!(action.as_str(), "dismiss_external" | "external_priority_weight" | "snooze_external");
+    let external_action = matches!(
+        action.as_str(),
+        "dismiss_external" | "external_priority_weight" | "snooze_external"
+    );
     let queue = state
         .queue
         .with_queue(false, |queue| {
@@ -273,7 +282,11 @@ fn launch_identity_changed(
         || workspace.ssh_host != captured_workspace.ssh_host
 }
 
-async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResult<CardQueue> {
+pub(crate) async fn launch_harness(
+    state: &AppState,
+    body: &Value,
+    action: &str,
+) -> AppResult<CardQueue> {
     let started = std::time::Instant::now();
     let id = body
         .get("id")
@@ -289,6 +302,11 @@ async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResu
     let captured = state
         .queue
         .with_queue(true, |queue| {
+            if let Some(expected) = body.get("_mcpExpected") {
+                if crate::mcp::launch_target(queue, id) != *expected {
+                    return Err(AppError::msg("Target changed after start approval"));
+                }
+            }
             refresh_queue(queue, state);
             let card = queue
                 .cards
@@ -309,7 +327,7 @@ async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResu
                     .terminals
                     .snapshot(&harness.terminal_id)
                     .is_none_or(|t| t.exited);
-                if !["error", "exited"].contains(&harness.state.as_str()) && !dead {
+                if !["error", "exited", "not_running"].contains(&harness.state.as_str()) && !dead {
                     return Err(AppError::machine("HARNESS_STILL_RUNNING"));
                 }
                 if action == "harness_reopen" && harness.provider_session_id.is_some() {
@@ -528,7 +546,9 @@ fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCar
     crate::debuglog::info_card(
         "queue",
         &card.id,
-        card.harness.as_ref().map(|harness| harness.terminal_id.as_str()),
+        card.harness
+            .as_ref()
+            .map(|harness| harness.terminal_id.as_str()),
         "archive tmux cleanup requested",
     );
 }
@@ -557,7 +577,7 @@ fn apply_action(
                 .ok_or_else(|| AppError::msg("请先启动 CLI"))?;
             if card.archived_at.is_some()
                 || card.detached.is_some()
-                || matches!(harness.state.as_str(), "exited" | "error")
+                || matches!(harness.state.as_str(), "exited" | "error" | "not_running")
             {
                 return Err(AppError::msg("当前卡片无法切换前后台"));
             }
@@ -676,6 +696,24 @@ fn apply_action(
                 .find(|c| Some(c.id.as_str()) == id)
                 .ok_or_else(|| AppError::msg("卡片不存在"))?;
             card.priority_weight = Some(numeric_weight(body.get("weight").unwrap_or(&json!(0))));
+        }
+        "card_nickname" => {
+            let nickname = body
+                .get("nickname")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            if nickname.chars().count() > 48
+                || nickname.chars().any(|character| character.is_control())
+            {
+                return Err(AppError::msg("昵称最多 48 个字符，且不能包含控制字符"));
+            }
+            let card = queue
+                .cards
+                .iter_mut()
+                .find(|c| Some(c.id.as_str()) == id)
+                .ok_or_else(|| AppError::msg("卡片不存在"))?;
+            card.nickname = (!nickname.is_empty()).then(|| nickname.to_string());
         }
         "reset_wait" => {
             let card = queue
@@ -880,9 +918,7 @@ fn apply_action(
             if card.session.is_none() && card.harness.is_none() {
                 return Err(AppError::msg("空白卡片无需归档"));
             }
-            if matches!(card.phase, crate::models::CardPhase::Working)
-                || card.detached.is_some()
-            {
+            if matches!(card.phase, crate::models::CardPhase::Working) || card.detached.is_some() {
                 return Err(AppError::msg("请先结束工作并收回卡片"));
             }
             crate::debuglog::info_card(
@@ -1054,9 +1090,9 @@ fn apply_action(
                 let tid = terminal_id.to_string();
                 let cid = id.unwrap_or("").to_string();
                 tokio::spawn(async move {
-                    let s1 = crate::ssh::tmux_session_name(
-                        &crate::ssh::card_side_tmux_session_id(&cid, &tid),
-                    );
+                    let s1 = crate::ssh::tmux_session_name(&crate::ssh::card_side_tmux_session_id(
+                        &cid, &tid,
+                    ));
                     let s2 = crate::ssh::tmux_session_name(&tid);
                     let cmd = format!("tmux kill-session -t {} 2>/dev/null || tmux kill-session -t {} 2>/dev/null || true", crate::ssh::shell_quote(&s1), crate::ssh::shell_quote(&s2));
                     let _ = crate::ssh::ssh_exec(&host, &cmd).await;
@@ -1863,7 +1899,7 @@ async fn post_terminal_inner(
         let paths = save_terminal_files(&snapshot.cwd, &files).await?;
         return if state
             .terminals
-            .write(id, &terminal_image_paste(&paths, bracketed))
+            .write_human(id, terminal_image_paste(&paths, bracketed).as_bytes())
         {
             Ok((StatusCode::OK, Json(json!({ "success": true }))).into_response())
         } else {
@@ -1896,9 +1932,10 @@ async fn post_terminal_inner(
                 .cloned()
                 .unwrap_or_default();
             let paths = save_terminal_images(&snapshot.cwd, &images).await?;
-            if state.terminals.write(
+            if state.terminals.write_human(
                 id,
-                &terminal_image_paste(&paths, value.get("bracketed") == Some(&json!(true))),
+                terminal_image_paste(&paths, value.get("bracketed") == Some(&json!(true)))
+                    .as_bytes(),
             ) {
                 Ok((StatusCode::OK, Json(json!({ "success": true }))).into_response())
             } else {
@@ -1918,7 +1955,12 @@ async fn post_terminal_inner(
                 )
                     .into_response());
             }
-            if state.terminals.write(id, data) {
+            let written = if value["human"].as_bool() == Some(true) {
+                state.terminals.write_human(id, data.as_bytes())
+            } else {
+                state.terminals.write(id, data)
+            };
+            if written {
                 Ok((StatusCode::OK, Json(json!({ "success": true }))).into_response())
             } else {
                 Ok((
@@ -2024,6 +2066,23 @@ async fn terminal_events(
         &id,
         &format!("subscribe after={after:?} exited={exited}"),
     );
+    if let TerminalEvent::Output {
+        data,
+        from,
+        offset,
+        reset,
+        ..
+    } = &output
+    {
+        crate::debuglog::debug_term(
+            "sse",
+            &id,
+            &format!(
+                "catchup from={from} to={offset} bytes={} reset={reset:?}",
+                data.len()
+            ),
+        );
+    }
     let mut initial = vec![sse_event(&output)];
     if exited {
         initial.push(sse_event(&TerminalEvent::Exit {
@@ -2069,6 +2128,8 @@ fn with_cwd(queue: CardQueue, state: &AppState) -> Value {
 pub async fn start_server(state: AppState) -> AppResult<u16> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
+    crate::mcp::migrate_legacy_cards(&state).await?;
+    crate::mcp::publish(&state, port)?;
     let app = router(state);
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -2094,6 +2155,7 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
         bin_dir: resolve_bin_dir(resource_dir),
         default_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         launches: Arc::new(Mutex::new(HashSet::new())),
+        mcp: Arc::new(crate::mcp::McpControl::default()),
     }
 }
 

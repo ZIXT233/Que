@@ -13,6 +13,7 @@ export interface QueueWorkspace {
 export interface QueueCard {
   harness?: import("./harness/types").HarnessSession;
   promptSources?: import("./prompt-sources").PromptSourcesConfig;
+  nickname?: string;
   id: string;
   cwd: string;
   workspaceId?: string;
@@ -149,7 +150,7 @@ export const EMPTY_QUEUE: CardQueue = { version: 1, revision: 0, cards: [], orde
 export function startableHarnessCards(cards: QueueCard[]) {
   return cards.filter((card) => card.harness
     && card.archivedAt === undefined
-    && (card.harness.state === "exited" || card.harness.state === "error"));
+    && (card.harness.state === "exited" || card.harness.state === "error" || card.harness.state === "not_running"));
 }
 export const TAB_LEASE_MS = 120_000;
 
@@ -162,7 +163,7 @@ export function reconcileQueue(state: CardQueue, running: Set<string>, attention
     let phase: CardPhase = card.harness ? (card.harness.state === "working" ? "working" : "attention") : attention.has(sessionId) ? "attention" : running.has(sessionId) ? "working" : "attention";
     if (card.manualPlacement) {
       const h = card.harness;
-      if (card.archivedAt === undefined && h && h.terminalId === card.manualPlacement.terminalId && h.state === card.manualPlacement.observedState && h.state !== "exited" && h.state !== "error") {
+      if (card.archivedAt === undefined && h && h.terminalId === card.manualPlacement.terminalId && h.state === card.manualPlacement.observedState && h.state !== "exited" && h.state !== "error" && h.state !== "not_running") {
         phase = card.manualPlacement.background ? "working" : "attention";
       } else delete card.manualPlacement;
     }

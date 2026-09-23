@@ -1,11 +1,12 @@
 pub mod api;
 mod conpty;
-mod crashlog;
 #[cfg(windows)]
 mod conpty_handshake;
+mod crashlog;
 mod cwd;
 pub mod debuglog;
 mod dev_tools;
+mod editor;
 mod error;
 mod focus;
 mod harness;
@@ -13,13 +14,13 @@ mod harness;
 pub mod headless;
 mod hosts;
 mod live;
+mod mcp;
 mod models;
 mod notify;
 mod paste;
 mod paths;
 mod queue;
 mod remote;
-mod editor;
 mod settings;
 mod ssh;
 mod terminal;
@@ -34,6 +35,31 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 struct ApiPort(Mutex<u16>);
+
+#[tauri::command]
+async fn mcp_pending(
+    state: tauri::State<'_, api::AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "main" {
+        return Err("Use the main Que window".into());
+    }
+    Ok(mcp::pending(&state).await)
+}
+#[tauri::command]
+async fn mcp_decide(
+    state: tauri::State<'_, api::AppState>,
+    window: tauri::WebviewWindow,
+    id: String,
+    approve: bool,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "main" {
+        return Err("Use the main Que window".into());
+    }
+    mcp::decide(&state, &id, approve)
+        .await
+        .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 fn api_base(port: tauri::State<ApiPort>) -> String {
@@ -98,12 +124,15 @@ fn reveal_log(path: String) -> Result<(), String> {
 pub fn run() {
     crate::crashlog::install(crate::paths::logs_dir());
     crate::debuglog::init();
-    crate::debuglog::info("app", &format!(
+    crate::debuglog::info(
+        "app",
+        &format!(
         "process-start pid={} version={} arch={} debug={} panic_strategy={} exe={:?} log_time=UTC",
         std::process::id(), env!("CARGO_PKG_VERSION"), std::env::consts::ARCH,
         cfg!(debug_assertions), if cfg!(panic = "abort") { "abort" } else { "unwind" },
         std::env::current_exe().ok(),
-    ));
+    ),
+    );
     #[cfg(target_os = "linux")]
     if std::env::var_os("APPDIR").is_some() {
         // AppImage hook forces X11; use native Wayland when available,
@@ -195,6 +224,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             api_base,
+            mcp_pending,
+            mcp_decide,
             editor::open_in_vscode,
             open_devtools,
             reveal_log,
@@ -206,7 +237,14 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                crate::debuglog::info("app", &format!("window-close-requested label={} pid={}", window.label(), std::process::id()));
+                crate::debuglog::info(
+                    "app",
+                    &format!(
+                        "window-close-requested label={} pid={}",
+                        window.label(),
+                        std::process::id()
+                    ),
+                );
                 if window.label() == "main" {
                     #[cfg(any(target_os = "macos", target_os = "windows"))]
                     {
@@ -229,7 +267,10 @@ pub fn run() {
         .expect("error while building Que")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { code, .. } = &event {
-                crate::debuglog::info("app", &format!("exit-requested pid={} code={code:?}", std::process::id()));
+                crate::debuglog::info(
+                    "app",
+                    &format!("exit-requested pid={} code={code:?}", std::process::id()),
+                );
             }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {
@@ -246,11 +287,20 @@ pub fn run() {
                 }
             }
             if matches!(event, tauri::RunEvent::Exit) {
-                crate::debuglog::info("app", &format!("event-loop-exit pid={} terminal-shutdown=begin", std::process::id()));
+                crate::debuglog::info(
+                    "app",
+                    &format!(
+                        "event-loop-exit pid={} terminal-shutdown=begin",
+                        std::process::id()
+                    ),
+                );
                 if let Some(hub) = app.try_state::<crate::terminal::TerminalHub>() {
                     hub.shutdown();
                 }
-                crate::debuglog::info("app", &format!("terminal-shutdown=complete pid={}", std::process::id()));
+                crate::debuglog::info(
+                    "app",
+                    &format!("terminal-shutdown=complete pid={}", std::process::id()),
+                );
             }
         });
     crate::debuglog::info("app", &format!("run-returned pid={}", std::process::id()));

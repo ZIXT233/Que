@@ -223,6 +223,7 @@ impl Channel for RemoteChannel {
 }
 
 struct Record {
+    input_owner: Arc<Mutex<InputOwner>>,
     cwd: String,
     backlog: String,
     offset: u64,
@@ -247,6 +248,24 @@ struct Record {
     /// How many times that happened, so a single large loss is distinguishable
     /// from a steady drip.
     replay_trimmed: u64,
+}
+
+#[derive(Default)]
+struct InputOwner {
+    revision: u64,
+    last_human: Option<Instant>,
+    draft: bool,
+}
+
+pub struct TerminalRead {
+    pub data: String,
+    pub from: u64,
+    pub offset: u64,
+    pub cols: u16,
+    pub rows: u16,
+    pub exited: bool,
+    pub input_revision: u64,
+    pub dimensions_clamped: bool,
 }
 
 #[derive(Clone)]
@@ -583,6 +602,7 @@ impl TerminalHub {
         map.insert(
             id,
             Record {
+                input_owner: Arc::new(Mutex::new(InputOwner::default())),
                 cwd,
                 backlog: String::new(),
                 offset: 0,
@@ -733,8 +753,80 @@ impl TerminalHub {
             .or_else(|| read_terminal_transcript(id).map(|saved| saved.cwd))
     }
 
+    pub fn is_live(&self, id: &str) -> bool {
+        self.lock().get(id).is_some_and(|r| !r.exited)
+    }
+
     pub fn write(&self, id: &str, data: &str) -> bool {
         self.write_bytes(id, data.as_bytes())
+    }
+
+    /// Bounded copy only; screen reconstruction happens off the PTY reader thread.
+    pub fn read_for_mcp(&self, id: &str) -> Option<TerminalRead> {
+        let owner = self.lock().get(id)?.input_owner.clone();
+        let owner = lock(&owner);
+        {
+            let map = self.lock();
+            let r = map.get(id)?;
+            let mut start = r.backlog.len().saturating_sub(2 * 1024 * 1024);
+            while !r.backlog.is_char_boundary(start) {
+                start += 1;
+            }
+            let (cols, rows) = r.channel.size().unwrap_or((80, 24));
+            Some(TerminalRead {
+                data: r.backlog[start..].to_string(),
+                from: r.offset - (r.backlog.len() - start) as u64,
+                offset: r.offset,
+                cols: cols.clamp(2, 300),
+                rows: rows.clamp(2, 150),
+                exited: r.exited,
+                input_revision: owner.revision,
+                dimensions_clamped: !(2..=300).contains(&cols) || !(2..=150).contains(&rows),
+            })
+        }
+    }
+
+    pub fn write_human(&self, id: &str, data: &[u8]) -> bool {
+        let owner = self.lock().get(id).map(|r| r.input_owner.clone());
+        let Some(owner) = owner else {
+            return false;
+        };
+        let mut owner = lock(&owner);
+        owner.revision += 1;
+        owner.last_human = Some(Instant::now());
+        owner.draft = !matches!(data.last(), Some(b'\r' | b'\n' | 3));
+        self.write_bytes(id, data)
+    }
+
+    pub fn write_mcp(&self, id: &str, revision: u64, data: &str) -> AppResult<()> {
+        let owner = self
+            .lock()
+            .get(id)
+            .map(|r| r.input_owner.clone())
+            .ok_or_else(|| AppError::msg("Terminal no longer exists"))?;
+        let mut owner = lock(&owner);
+        if owner.revision != revision {
+            return Err(AppError::msg(
+                "Input changed since the last read; read the terminal again",
+            ));
+        }
+        if owner.draft
+            || owner
+                .last_human
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(3))
+        {
+            return Err(AppError::msg(
+                "The user is typing or has an unfinished input; yield control",
+            ));
+        }
+        // Consume the revision even on an ambiguous transport failure: never retry input blindly.
+        owner.revision += 1;
+        if !self.write(id, data) {
+            return Err(AppError::msg(
+                "Input delivery failed; do not retry without reading",
+            ));
+        }
+        Ok(())
     }
 
     pub fn write_bytes(&self, id: &str, data: &[u8]) -> bool {
@@ -1334,6 +1426,40 @@ mod tests {
             None
         }
         fn kill(&self) {}
+    }
+
+    #[test]
+    fn mcp_yields_to_human_drafts_and_consumes_read_revisions() {
+        let hub = TerminalHub::new(LiveBus::new());
+        let id = "01234567890123456789012345678901";
+        let channel = Arc::new(CaptureChannel(Mutex::new(Vec::new())));
+        hub.register(
+            id.into(),
+            "/work".into(),
+            false,
+            None,
+            channel.clone(),
+            Arc::new(Mutex::new(PtyProbe::default())),
+            false,
+            false,
+        );
+        let first = hub.read_for_mcp(id).unwrap();
+        assert!(hub.write_mcp(id, first.input_revision, "hello\r").is_ok());
+        assert!(hub
+            .write_mcp(id, first.input_revision, "duplicate\r")
+            .is_err());
+        assert!(hub.write_human(id, b"unfinished"));
+        let owner = hub.lock().get(id).unwrap().input_owner.clone();
+        lock(&owner).last_human = Some(Instant::now() - Duration::from_secs(10));
+        let read = hub.read_for_mcp(id).unwrap();
+        assert!(hub
+            .write_mcp(id, read.input_revision, "overwrite\r")
+            .is_err());
+        assert!(hub.write_human(id, b"\x03"));
+        lock(&owner).last_human = Some(Instant::now() - Duration::from_secs(10));
+        let read = hub.read_for_mcp(id).unwrap();
+        assert!(hub.write_mcp(id, read.input_revision, "next\r").is_ok());
+        assert_eq!(&*lock(&channel.0), b"hello\runfinished\x03next\r");
     }
 
     #[test]

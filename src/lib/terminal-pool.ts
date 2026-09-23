@@ -25,6 +25,8 @@ import { isFileDrag, droppedFiles, dropFilesError } from "./file-drop";
 import { copyText } from "./clipboard";
 import { createTerminalWriter, isTerminalAbortError, terminalRequest } from "./terminal-client";
 import { setXtermProbe } from "./terminal-probe";
+import { TerminalOutputQueue } from "./terminal-output-queue";
+import { TerminalPerformanceProbe } from "./terminal-performance";
 import { appLog, oscTrace } from "./app-log";
 import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "./image-attachments";
 import type { TerminalEvent } from "./terminal-manager";
@@ -112,6 +114,7 @@ export class TerminalSession {
   private params: TerminalSessionParams;
   private terminal: Terminal;
   private fit: FitAddon;
+  private perf: TerminalPerformanceProbe;
 
 
   private writer: ReturnType<typeof createTerminalWriter>;
@@ -143,7 +146,26 @@ export class TerminalSession {
   private serverReadOnly = false;
   private live = false;
   private replaying = true;
-  private outputQueue: Promise<void> = Promise.resolve();
+  private outputQueue = new TerminalOutputQueue<{
+    data: string; reset?: boolean; ticket: ReturnType<TerminalPerformanceProbe["enqueue"]>;
+  }>((batch, done) => {
+    if (this.destroyed) { done(); return; }
+    for (const item of batch) this.perf.start(item.ticket);
+    const prepareAt = performance.now();
+    this.replaying = batch[0].reset !== undefined;
+    if (batch[0].reset) { this.terminal.reset(); this.composerColors?.reset(); }
+    const raw = batch.map(item => item.data).join("");
+    this.replyPolicy.observeOutput(raw);
+    const data = this.composerColors?.feed(raw) ?? raw;
+    const prepareMs = performance.now() - prepareAt;
+    for (const item of batch) this.perf.prepared(item.ticket, prepareMs);
+    this.terminal.write(data, () => {
+      for (let i = 0; i < batch.length; i++) this.perf.complete(batch[i].ticket, i === batch.length - 1);
+      this.replaying = false;
+      if (!this.destroyed) this.sendFocusReport();
+      done();
+    });
+  });
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempt = 0;
   private resyncing = false;
@@ -211,6 +233,20 @@ export class TerminalSession {
     this.fit = new FitAddon();
     this.terminal.loadAddon(this.fit);
     this.terminal.open(this.host);
+    this.perf = new TerminalPerformanceProbe(() => ({
+      live: this.live, presented: this.presented, visibility: document.visibilityState,
+      renderer: this.gpu ? "webgl" : "dom", cols: this.terminal.cols, rows: this.terminal.rows,
+      buffer: this.terminal.buffer.active.type,
+      viewportY: this.terminal.buffer.active.viewportY, baseY: this.terminal.buffer.active.baseY,
+    }), summary => {
+      appLog("debug", "terminal-perf", JSON.stringify(summary), { card: this.params.cardId, term: this.id });
+      this.publishProbe(this.state.status);
+    });
+    this.perf.watchRenderer(this.terminal);
+    this.disposables.push(this.terminal.parser.registerCsiHandler({ final: "J" }, params => {
+      if (typeof params[0] === "number") this.perf.clear(params[0]);
+      return false;
+    }));
     this.refreshAppearance();
 
     const appearanceChanged = (event: Event) => {
@@ -541,7 +577,7 @@ export class TerminalSession {
     this.inputRaf = 0;
     const data = this.pendingInput;
     this.pendingInput = "";
-    if (data && this.connected && !this.exited && !this.inputFailed && !this.readOnlyEffective()) this.writer.write(data);
+    if (data && this.connected && !this.exited && !this.inputFailed && !this.readOnlyEffective()) this.writer.write(data, true);
   };
 
   private sendInput(data: string) {
@@ -551,7 +587,8 @@ export class TerminalSession {
     if (this.replyPolicy.suppress(data, this.replaying, this.view?.options.focusReporting === true)) return;
     if (!this.connected || this.terminal.options.disableStdin) return;
     if (isTerminalProtocolReply(data)) { this.writer.reply(data); return; }
-    if (!this.conptyHost) { this.writer.write(data); return; }
+    if (/^\x1b\[<\d+;\d+;\d+[Mm]$/.test(data)) { this.writer.write(data); return; }
+    if (!this.conptyHost) { this.writer.write(data, true); return; }
     // One HTTP POST per animation frame instead of one per keystroke.
     this.pendingInput += data;
     if (!this.inputRaf) this.inputRaf = requestAnimationFrame(this.flushInput);
@@ -664,12 +701,14 @@ export class TerminalSession {
       try {
         this.terminal.loadAddon(addon);
         this.gpu = addon;
+        this.perf.watchRenderer(this.terminal);
         clearTimeout(this.conptyRevealTimer);
         this.conptyCursorHidden = false;
         this.host.classList.remove("is-conpty-redraw");
         this.gpuLoss = addon.onContextLoss(() => {
           this.gpuLoss?.dispose(); this.gpuLoss = undefined;
           this.gpu?.dispose(); this.gpu = undefined;
+          this.perf.watchRenderer(this.terminal);
           this.terminal.refresh(0, this.terminal.rows - 1);
         });
         this.terminal.refresh(0, this.terminal.rows - 1);
@@ -686,6 +725,7 @@ export class TerminalSession {
     this.gpuLoss = undefined;
     this.gpu?.dispose();
     this.gpu = undefined;
+    if (!this.destroyed) this.perf.watchRenderer(this.terminal);
   }
 
   // ---------------------------------------------------------------- stream
@@ -696,6 +736,7 @@ export class TerminalSession {
       rows: this.terminal.rows,
       sseMessages: this.sseMessages,
       bytesWritten: this.bytesWritten,
+      performance: this.perf.snapshot(),
       lastOffset: this.offset,
       lastReset: this.lastReset,
       gaps: this.gaps,
@@ -749,7 +790,8 @@ export class TerminalSession {
     if (this.state.status === "connecting" || this.state.status === "ready") this.patch({ status: "paused" });
   }
 
-  private enqueueOutput(event: Extract<TerminalEvent, { type: "output" }>) {
+  private enqueueOutput(event: Extract<TerminalEvent, { type: "output" }>, jsonMs = 0) {
+    const ticket = this.perf.enqueue(event.data.length, event.offset, event.reset, jsonMs);
     oscTrace("sse-recv", event.data, { card: this.params.cardId, term: this.id });
     this.hideConptyCursor();
     this.bytesWritten += event.data.length;
@@ -761,19 +803,7 @@ export class TerminalSession {
       clearTimeout(this.startupDismissTimer);
       this.startupDismissTimer = setTimeout(() => this.patch({ showStartup: false }), 1200);
     }
-    this.outputQueue = this.outputQueue.then(() => new Promise<void>((resolve) => {
-      if (this.destroyed) { resolve(); return; }
-      // Both reset=true (full backlog) and reset=false (incremental catch-up)
-      // are historical. Live backend output omits reset entirely.
-      this.replaying = event.reset !== undefined;
-      if (event.reset) { this.terminal.reset(); this.composerColors?.reset(); }
-      this.replyPolicy.observeOutput(event.data);
-      this.terminal.write(this.composerColors?.feed(event.data) ?? event.data, () => {
-        this.replaying = false;
-        this.sendFocusReport();
-        resolve();
-      });
-    }));
+    this.outputQueue.enqueue({ data: event.data, reset: event.reset, ticket });
     this.currentSink()?.onOutput?.(event.data);
     this.offset = event.offset;
     this.publishProbe("ready");
@@ -797,7 +827,9 @@ export class TerminalSession {
     const current = () => !this.destroyed && !this.exited && this.live && this.events === events;
     events.onmessage = (message) => {
       if (!current()) return;
+      const jsonAt = performance.now();
       const event = JSON.parse(message.data) as TerminalEvent;
+      const jsonMs = performance.now() - jsonAt;
       this.sseMessages += 1;
       if (event.type === "output") {
         this.reconnectAttempt = 0;
@@ -812,7 +844,7 @@ export class TerminalSession {
             this.droppedBytes += event.dropped;
             appLog("warn", "sse", `replay lost ${event.dropped}B cursor=${this.offset ?? "none"}`, { card: this.params.cardId, term: this.id });
           }
-          this.enqueueOutput(event);
+          this.enqueueOutput(event, jsonMs);
           return;
         }
         const from = event.from ?? this.offset ?? event.offset;
@@ -833,7 +865,7 @@ export class TerminalSession {
           }
           return;
         }
-        this.enqueueOutput(event);
+        this.enqueueOutput(event, jsonMs);
       } else {
         this.exited = true;
         this.connected = false;
@@ -938,6 +970,8 @@ export class TerminalSession {
 
   private teardown() {
     this.destroyed = true;
+    this.outputQueue.dispose();
+    this.perf.dispose();
     while (this.views.length) this.detach(this.views[this.views.length - 1]);
     clearTimeout(this.inactiveGpuTimer);
     clearTimeout(this.fitTimer);

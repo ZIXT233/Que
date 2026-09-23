@@ -15,14 +15,17 @@ import { ScoreFormulaPopover } from "./ScoreFormulaPopover";
 import { tagColor } from "@/lib/tag-color";
 import { THEME_OPTIONS } from "@/lib/theme";
 import { DEFAULT_TURN_TAGS, scoreCard, sortedQueue, resolveQueueFocus } from "@/lib/turn-priority";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { HarnessCard } from "./HarnessCard";
+import { CardNicknameEditor } from "./CardNicknameEditor";
+import { nicknameHue } from "@/lib/card-nickname";
 import { VSCodeButton } from "./VSCodeButton";
 import { PersistentTerminalProvider } from "./PersistentTerminalViews";
 import { SettingsPanel } from "./SettingsPanel";
+import { McpApprovals } from "./McpApprovals";
 import { useQueueScoreClock } from "@/hooks/useQueueScoreClock";
 import { completedCards } from "@/lib/card-completion";
 import { useCompletionNotifications } from "@/hooks/useCompletionNotifications";
@@ -889,7 +892,7 @@ function CardQueueShellContent() {
     const placementButton = !detachedId && !visibleCard.detached && visibleCard.harness && !visibleCard.archivedAt
       && (visibleCard.phase === "attention" || bringForward) ? <button
         type="button" className="cq-tools-trigger" title={placementLabel} aria-label={placementLabel}
-        disabled={busy || ["exited", "error"].includes(visibleCard.harness.state)}
+        disabled={busy || ["exited", "error", "not_running"].includes(visibleCard.harness.state)}
         onClick={async () => {
           if (busy) return;
           setBusy(true);
@@ -920,7 +923,7 @@ function CardQueueShellContent() {
     <CardSideTerminal key={visibleCard.id} cardId={visibleCard.id} cwd={visibleCard.cwd} remoteShell={remoteShellOf(workspace)} active={isFront} enabled={!layout} saved={visibleCard.sideTerminals} savedOpen={visibleCard.sideTerminalOpen}>
       {({ button: sideButton, panel: sidePanel }) => (
     <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card" data-transfer-id={visibleCard.id} data-transfer-zone="deck" data-card-id={visibleCard.id} data-phase={visibleCard.phase} data-working-view={visibleCard.phase === "working"} data-urgent-call={hasUrgentCall(visibleCard)}>
-              <div className="cq-card-header">{detachedId && <div className="cq-detached-drag" data-tauri-drag-region aria-hidden="true" />}{layout?.leftToggle}<div className="cq-card-identity"><div className="cq-card-heading"><h2 title={titleOf(visibleCard)}>{titleOf(visibleCard)}</h2>{showHeaderMeta && <div className="cq-card-meta">{visibleCard.phase !== "attention" && <div className="cq-card-state"><i className={visibleCard.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{visibleCard.phase === "draft" ? t("queue.新的思路") : t("queue.WORKING")}</div>}{hasUrgentCall(visibleCard) && <span className="cq-urgent-label" title={t("queue.urgentPriority")}>🚨 Urgent Call</span>}{visibleCard.remindAt !== undefined && <span className="cq-remind-label" title={t("queue.稍后提醒")}>⏰ {t("queue.稍后提醒")} · {formatRemainder((visibleCard.remindAt ?? 0) - remindNow)}</span>}{!(visibleCard.session || visibleCard.harness) && <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />}<div className="cq-meta-harness" /></div>}{showScore && <ScoreFormulaPopover label={<><span aria-hidden="true">🧮</span> {t("queue.Score")} {hasUrgentCall(visibleCard) ? "∞" : cardScore.total}</>}>
+              <div className="cq-card-header">{detachedId && <div className="cq-detached-drag" data-tauri-drag-region aria-hidden="true" />}{layout?.leftToggle}<div className="cq-card-identity"><div className="cq-card-heading"><div className="cq-card-title-split"><h2 title={titleOf(visibleCard)}>{titleOf(visibleCard)}</h2><CardNicknameEditor cardId={visibleCard.id} nickname={visibleCard.nickname} onSave={async nickname => !!(await run("card_nickname", { id: visibleCard.id, nickname }))} /></div>{showHeaderMeta && <div className="cq-card-meta">{visibleCard.phase !== "attention" && <div className="cq-card-state"><i className={visibleCard.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{visibleCard.phase === "draft" ? t("queue.新的思路") : t("queue.WORKING")}</div>}{hasUrgentCall(visibleCard) && <span className="cq-urgent-label" title={t("queue.urgentPriority")}>🚨 Urgent Call</span>}{visibleCard.remindAt !== undefined && <span className="cq-remind-label" title={t("queue.稍后提醒")}>⏰ {t("queue.稍后提醒")} · {formatRemainder((visibleCard.remindAt ?? 0) - remindNow)}</span>}{!(visibleCard.session || visibleCard.harness) && <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />}<div className="cq-meta-harness" /></div>}{showScore && <ScoreFormulaPopover label={<><span aria-hidden="true">🧮</span> {t("queue.Score")} {hasUrgentCall(visibleCard) ? "∞" : cardScore.total}</>}>
                 <span className="cq-score-operator">=</span>
                 <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />
                 <span className="cq-score-term"><span className="cq-score-operator">+</span><ScoreChipTooltip text={t("queue.等待分钟", { minutes: waitMinutes })}><span className="cq-score-chip cq-score-wait"><span aria-hidden="true">⏳</span> {t("queue.Wait")} <b>{cardScore.waiting}</b></span></ScoreChipTooltip></span>
@@ -988,6 +991,8 @@ function CardQueueShellContent() {
           else setInspecting(urgentCard.id);
         }
       }} />}
+
+    {!detachedId && <McpApprovals />}
     <CardTransfers
       order={ready.map((card) => card.id)}
       locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" ? (inspecting === card.id ? "inspection" : "sidebar") : "deck"]))}
@@ -1005,7 +1010,11 @@ function CardQueueShellContent() {
         <div className="cq-working-list">
           {working.map((card, index) => <button key={card.id} data-transfer-id={card.id} data-transfer-zone="sidebar" className={`cq-small-card ${inspecting === card.id ? "is-selected" : ""}`} disabled={!card.session && !card.harness} onClick={() => setInspecting(card.id)}>
             <span className="cq-small-meta"><span className="cq-dot" />{displayProject(card)}<span className="cq-index">{String(index + 1).padStart(2, "0")}</span></span>
-            <strong>{titleOf(card)}</strong><span className="cq-working-bottom"><span className="cq-bars"><i /><i /><i /><i /></span>{t("queue.正在工作")}<span>↗</span></span>
+            {card.nickname ? <>
+              <strong className="cq-small-nickname" style={{ "--cq-nickname-hue": nicknameHue(card.id) } as CSSProperties}>{card.nickname}</strong>
+              <span className="cq-small-session-title">{titleOf(card)}</span>
+            </> : <strong>{titleOf(card)}</strong>}
+            <span className="cq-working-bottom"><span className="cq-bars"><i /><i /><i /><i /></span>{t("queue.正在工作")}<span>↗</span></span>
           </button>)}
           {/* Work Que does not own: open session inspection on click. */}
           {externalWorking.map((notice) => {

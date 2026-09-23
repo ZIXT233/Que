@@ -11,6 +11,7 @@ import { ATTENTION_MODES } from "@/lib/attention-mode";
 import { SUBMISSION_BEHAVIORS } from "@/lib/submission-behavior";
 import { announceQueueToast } from "@/lib/queue-toast";
 import { THEME_OPTIONS } from "@/lib/theme";
+import { McpSettings } from "./McpSettings";
 import { TerminalSettings } from "./TerminalSettings";
 import { ThemeIcon } from "./ThemeIcon";
 import { setLastSettingsSection, SETTINGS_SECTION_VALUES, type SettingsSection } from "@/lib/settings-navigation";
@@ -217,6 +218,7 @@ function GeneralSettings() {
         {logStatus && <p role="status" className="settings-general-error">{logStatus}</p>}
       </section>
 
+      <McpSettings />
       <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("common.language")}</h3>
         <div role="radiogroup" aria-label={t("common.language")} className="settings-language-options">

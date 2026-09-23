@@ -148,7 +148,7 @@ impl HarnessRuntime {
             && session.shell_command_started_at
                 == current.as_ref().and_then(|c| c.shell_command_started_at);
         let state = match &terminal {
-            None => "error".into(),
+            None => "not_running".into(),
             Some(t) if t.exited => "exited".into(),
             Some(_) if shell_card => {
                 if shell_notify
@@ -1184,12 +1184,12 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_without_live_terminal_is_error() {
+    fn snapshot_without_live_terminal_is_not_running() {
         let live = LiveBus::new();
         let terminals = TerminalHub::new(live.clone());
         let runtime = HarnessRuntime::new(live, terminals.clone());
         let next = runtime.snapshot(&session("attention"), &terminals);
-        assert_eq!(next.state, "error");
+        assert_eq!(next.state, "not_running");
         assert_eq!(next.probe.as_deref(), Some("unconfirmed"));
     }
 

@@ -1,3 +1,5 @@
+import type { TerminalPerformanceProbe } from "./terminal-performance";
+
 export interface XtermProbe {
   cols: number;
   rows: number;
@@ -13,6 +15,7 @@ export interface XtermProbe {
    */
   dropped?: number;
   status: string;
+  performance?: ReturnType<TerminalPerformanceProbe["snapshot"]>;
   at: number;
 }
 

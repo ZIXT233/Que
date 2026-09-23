@@ -20,7 +20,7 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
   let stopped = false;
   let lastSize: { cols: number; rows: number } | undefined;
   const replyRequests = new Set<AbortController>();
-  let bufferedInput: { type: "input"; data: string } | null = null;
+  let bufferedInput: { type: "input"; data: string; human: boolean } | null = null;
   const enqueue = (body: Record<string, unknown> | FormData | (() => Promise<Record<string, unknown>>)) => {
     if (stopped) return;
     pending = pending.then(async () => {
@@ -63,12 +63,12 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
         onError(error);
       }).finally(() => replyRequests.delete(controller));
     },
-    write(data: string) {
+    write(data: string, human = false) {
       if (stopped) return;
       for (const chunk of data.match(/[\s\S]{1,32768}/gu) ?? []) {
-        if (bufferedInput && bufferedInput.data.length + chunk.length <= 65536) bufferedInput.data += chunk;
+        if (bufferedInput && bufferedInput.human === human && bufferedInput.data.length + chunk.length <= 65536) bufferedInput.data += chunk;
         else {
-          bufferedInput = { type: "input", data: chunk };
+          bufferedInput = { type: "input", data: chunk, human };
           enqueue(bufferedInput);
         }
       }

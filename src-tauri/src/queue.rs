@@ -107,7 +107,7 @@ pub fn reconcile(state: &mut CardQueue) {
                 && card.harness.as_ref().is_some_and(|h| {
                     h.terminal_id == placement.terminal_id
                         && h.state == placement.observed_state
-                        && !matches!(h.state.as_str(), "exited" | "error")
+                        && !matches!(h.state.as_str(), "exited" | "error" | "not_running")
                 });
             if valid {
                 phase = if placement.background {
@@ -300,6 +300,7 @@ pub fn select_workspace_for_draft(state: &mut CardQueue, workspace: &QueueWorksp
     state.cards.push(QueueCard {
         id: id.clone(),
         cwd: workspace.runtime_cwd.clone(),
+        nickname: None,
         workspace_id: Some(workspace.id.clone()),
         session: None,
         phase: CardPhase::Draft,

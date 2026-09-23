@@ -46,6 +46,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 bytes = "1"
 thiserror = "2"
 regex = "1"
+vt100 = "0.16.2"
 glob = "0.3"
 url = "2"
 mime_guess = "2"

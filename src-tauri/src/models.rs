@@ -187,6 +187,8 @@ pub struct QueueCard {
     pub id: String,
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
     #[serde(default)]
     pub session: Option<SessionInfo>,

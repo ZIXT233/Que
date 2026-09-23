@@ -21,7 +21,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   onStartAll?: () => Promise<void>;
 }) {
   const { t } = useI18n();
-  const labels = { starting:t("harness.starting"), working:t("harness.working"), attention:t("harness.waiting"), unknown:t("harness.unknown"), exited:t("harness.processNotStarted"), error:t("harness.disconnected") };
+  const labels = { not_running:t("harness.processNotStarted"), starting:t("harness.starting"), working:t("harness.working"), attention:t("harness.waiting"), unknown:t("harness.unknown"), exited:t("harness.processNotStarted"), error:t("harness.disconnected") };
   const [target, setTarget] = useState<Element | null>(null);
   const [toolsTarget, setToolsTarget] = useState<Element | null>(null);
   const [switchPosition, setSwitchPosition] = useState<{ left: number; top: number } | null>(null);
@@ -38,6 +38,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   const [connection, setConnection] = useState(0);
   const [showTranscript, setShowTranscript] = useState(false);
   const [logBusy, setLogBusy] = useState(false);
+  const [nickname, setNickname] = useState(card.nickname ?? "");
   const harness = card.harness;
   const [canBackground, setCanBackground] = useState(false);
   const shellTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -54,7 +55,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     if (harness.shellCommandRunning) shellTimer.current = setTimeout(() => setCanBackground(true), Math.max(0, 300 - (Date.now() - (harness.shellCommandStartedAt ?? Date.now()))));
     return () => clearTimeout(shellTimer.current);
   }, [harness?.kind, harness?.shellCommandNotifications, harness?.shellCommandStartedAt, harness?.shellCommandRunning]);
-  const ended = !!harness && (["exited", "error"].includes(harness.state) || terminalStatus === "exited");
+  const ended = !!harness && (["exited", "error", "not_running"].includes(harness.state) || terminalStatus === "exited");
   // A momentary "connecting" (deck re-focus, side-terminal tab switch) must not
   // flash the recovery overlay; only a connection that stays down for a while
   // counts as disconnected.
@@ -66,6 +67,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   }, [terminalStatus]);
   const disconnected = !!harness && (ended || terminalStatus === "error" || connectingSlow);
   useEffect(() => { setShowTranscript(false); }, [disconnected, harness?.terminalId]);
+  useEffect(() => { setNickname(card.nickname ?? ""); }, [card.nickname]);
   const fresh = !card.session && !harness;
   const probeDetail = harness?.kind === "shell" ? (harness.shellCommandNotifications === false ? t("harness.plainShell") : t("harness.shellHint"))
     : harness?.probe === "title-only" ? t("harness.titleProbe")
@@ -101,15 +103,26 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   const act = async (action: string, data: Record<string, unknown> = {}) => {
     setBusy(true);
     setActionError(null);
-    try { await onAction(action, { id: card.id, ...data }); }
+    try { return await onAction(action, { id: card.id, ...data }); }
     catch (error) {
       // The SSH layer is asking for a secret, not failing: put up the auth
       // dialog, remember what the user was trying to do, and replay it once
       // the connection is in. Everything else stays a plain message.
       if (sshHost && needsSshSecret(error)) { setPendingAction({ action, data }); setAuthError(null); auth.present(error); }
       else setActionError(error);
+      return false;
     }
     finally { setBusy(false); }
+  };
+
+  const startHarness = async (kind: string) => {
+    setStartingKind(kind);
+    try {
+      if (!await act("card_nickname", { nickname: nickname.trim() })) return;
+      await act("harness_start", { kind, tmux: Boolean(sshHost) && useTmux });
+    } finally {
+      setStartingKind(null);
+    }
   };
 
   const retryWithSecret = async (secret?: string, trustedPrompt?: string) => {
@@ -129,7 +142,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     finally { setAuthBusy(false); }
   };
 
-  const showBackground = !!harness && harness.kind === "shell" && harness.shellCommandNotifications !== false && canBackground && !harness.shellNotify && !["error", "exited"].includes(harness.state);
+  const showBackground = !!harness && harness.kind === "shell" && harness.shellCommandNotifications !== false && canBackground && !harness.shellNotify && !["error", "exited", "not_running"].includes(harness.state);
   const showState = !!harness && !disconnected && harness.state !== "attention";
   const controls = fresh || !harness || (!showBackground && !showState) ? null : <div className="cq-harness-controls">
     {showBackground && <button type="button" disabled={busy} onClick={() => void act("shell_background")} title={t("harness.backgroundHint")}>↓ {t("harness.background")}</button>}
@@ -145,7 +158,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
     <span>{logBusy ? t("harness.logsSaving") : t("harness.logs")}</span>
   </button>;
-  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} {...terminalOptions(harness.kind)} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} inQueue={inQueue}
+  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} {...terminalOptions(harness.kind)} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error" || harness.state === "not_running"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} inQueue={inQueue}
     harnessKind={harness.kind} harnessName={harnessName(harness.kind)} reconnectVersion={connection} isStarting={harness.state === "starting" || connection > 0}
     onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen", { tmux: harness.tmux ?? (Boolean(sshHost) && useTmux) })} onClosed={() => {}} onCloseError={() => {}} /> : null;
 
@@ -200,13 +213,23 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
           <p>{t("harness.chooseHint")}</p>
         </div>
         <button type="button" className="cq-harness-option cq-harness-shell-entry" disabled={busy} onClick={() => {
-          setStartingKind("shell");
-          void act("harness_start", { kind: "shell", tmux: Boolean(sshHost) && useTmux }).finally(() => setStartingKind(null));
+          void startHarness("shell");
         }}>
           <span className="cq-harness-option-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg></span>
           <span><strong>{t("harness.openShell")}</strong><small>{t("harness.shellDescription")}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
         </button>
       </div>
+      <label className="cq-harness-nickname">
+        <span>{t("harness.nicknameOptional")}</span>
+        <input
+          autoComplete="off"
+          autoCorrect="off"
+          maxLength={48}
+          value={nickname}
+          placeholder={t("harness.nicknamePlaceholder")}
+          onChange={event => setNickname(event.target.value)}
+        />
+      </label>
       {Boolean(sshHost) && (
         <div style={{ margin: "8px 0 12px", display: "flex", alignItems: "center" }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "12.5px", cursor: "pointer", opacity: 0.9, userSelect: "none" }}>
@@ -222,8 +245,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
       )}
       <div className="cq-harness-options">
       {harnessPicker.map(item => <button key={item.id} type="button" className="cq-harness-option" disabled={busy} onClick={() => {
-        setStartingKind(item.id);
-        void act("harness_start", { kind: item.id, tmux: Boolean(sshHost) && useTmux }).finally(() => setStartingKind(null));
+        void startHarness(item.id);
       }}>
         <span className="cq-harness-option-icon" aria-hidden="true"><ProviderIcon id={providerIconId(item.id)} size={28} /></span>
         <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
