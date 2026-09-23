@@ -1402,13 +1402,14 @@ html.dark .settings-dialog-surface {
 }
 
 .external-harness-icon-wrap {
+  --provider-icon-ink: #1a1a1a;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  background: var(--bg);
+  background: #fff;
   border: 1px solid var(--border);
   flex-shrink: 0;
 }

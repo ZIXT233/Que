@@ -10,6 +10,9 @@ export const zhTWLocale: LocalePlugin = {
     "workspace.rcVerify": "載入並驗證",
     "workspace.rcChecking": "驗證中…",
     "workspace.rcFailed": "驗證失敗",
+    "workspace.envTitle": "會話環境變數",
+    "workspace.envHint": "可影響終端和 Que 後端的會話環境，例如用 CODEX_HOME=$HOME/.codex-alt 指定不同的 Codex 目錄。每行一個 名稱=值。",
+    "workspace.envInvalid": "請按 名稱=值 每行填寫一個環境變數，名稱以字母開頭且只含字母、數字和底線。",
 
   "editor.open": "在 VS Code 開啟",
   "editor.review": "審閱",
@@ -231,6 +234,8 @@ export const zhTWLocale: LocalePlugin = {
     "machines.connect": "連線",
     "machines.retry": "重試",
     "machines.newWorkspace": "新增工作區",
+    "machines.sessionSettings": "機器會話設定",
+    "machines.sessionSettingsHint": "套用至此機器的所有工作區。",
     "machines.close": "關閉",
     "machines.back": "上一步",
     "machines.error.HOST_TRUST_REQUIRED": "請核對主機指紋後繼續。",

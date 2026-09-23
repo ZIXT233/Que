@@ -52,8 +52,11 @@ pub enum CardPhase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueWorkspace {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Machine settings attached only while launching; never stored per folder.
+    #[serde(skip)]
     pub terminal_rc: Option<String>,
+    #[serde(skip)]
+    pub session_env: std::collections::HashMap<String, String>,
     pub id: String,
     pub name: String,
     pub kind: String,
@@ -67,6 +70,15 @@ pub struct QueueWorkspace {
         deserialize_with = "deserialize_opt_i64"
     )]
     pub default_conversation_weight: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineSessionSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_rc: Option<String>,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub session_env: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,6 +285,8 @@ pub struct CardQueue {
     pub insertion_position: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspaces: Option<Vec<QueueWorkspace>>,
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub machine_settings: std::collections::HashMap<String, MachineSessionSettings>,
 }
 
 impl CardQueue {
@@ -287,6 +301,7 @@ impl CardQueue {
             turn_tag_definitions: None,
             insertion_position: Some("bottom".into()),
             workspaces: Some(vec![]),
+            machine_settings: Default::default(),
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::cwd::{browse, pick_local_folder};
 use crate::error::{AppError, AppResult};
-use crate::harness::{session_exists, ExternalRuntime, HarnessRuntime};
+use crate::harness::{ExternalRuntime, HarnessRuntime};
 use crate::hosts::HostStore;
 use crate::live::LiveBus;
 use crate::models::{CardQueue, RemoteHost};
@@ -99,14 +99,16 @@ pub fn router(state: AppState) -> Router {
 }
 
 fn overlay_harness(queue: &mut CardQueue, state: &AppState) {
+    let workspaces = queue.workspaces.as_ref().map(|items| items.iter()
+        .map(|workspace| crate::workspace_rc::effective_workspace(queue, workspace))
+        .collect::<Vec<_>>());
     for card in &mut queue.cards {
         let Some(session) = card.harness.take() else {
             continue;
         };
-        let refresh = card.archived_at.is_none()
-            || (session.provider_session_id.is_none() && session.unpersisted_session.is_none());
+        let refresh = card.archived_at.is_none() || session.provider_session_id.is_none();
         card.harness = Some(if refresh {
-            state.harness.snapshot(&session, &state.terminals)
+            state.harness.snapshot(&session, &state.terminals, workspaces.as_ref().and_then(|ws| ws.iter().find(|w| Some(&w.id) == card.workspace_id.as_ref())))
         } else {
             session
         });
@@ -144,33 +146,29 @@ async fn post_queue(
         .to_string();
     if action == "workspace_rc_verify" {
         let queue = state.queue.read_snapshot()?;
-        let mut workspace = if body["workspaceId"].is_string() {
-            queue
-            .workspaces
-            .as_ref()
-            .and_then(|ws| {
-                ws.iter()
-                    .find(|w| Some(w.id.as_str()) == body["workspaceId"].as_str())
-            })
-            .cloned()
-            .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?
-        } else {
-            let kind = body["kind"].as_str().unwrap_or_default();
-            let cwd = body["cwd"].as_str().unwrap_or_default().trim();
-            let ssh_host = body["sshHost"].as_str().map(str::to_string);
-            if !["local", "ssh"].contains(&kind) || cwd.is_empty() { return Err(AppError::msg("Invalid workspace location")); }
-            let cwd = if kind == "local" {
-                let path = crate::paths::expand_user(cwd);
-                if !path.is_dir() { return Err(AppError::msg("Workspace directory does not exist")); }
-                path.to_string_lossy().into_owned()
+        let mut workspace = if let Some(key) = body["machineKey"].as_str() {
+            let (kind, ssh_host, cwd) = if key == "local" {
+                ("local", None, state.default_cwd.to_string_lossy().into_owned())
+            } else if let Some(host) = key.strip_prefix("ssh:").filter(|host| valid_ssh_host(host)) {
+                ("ssh", Some(host.to_string()), "/".into())
             } else {
-                if !cwd.starts_with('/') || !ssh_host.as_deref().is_some_and(valid_ssh_host) { return Err(AppError::msg("Invalid SSH workspace")); }
-                cwd.to_string()
+                return Err(AppError::msg("Invalid machine"));
             };
-            crate::models::QueueWorkspace { id: String::new(), name: String::new(), kind: kind.into(), runtime_cwd: cwd.clone(), cwd,
-                ssh_host: if kind == "ssh" { ssh_host } else { None }, terminal_rc: None, default_conversation_weight: None }
+            let workspace = queue.workspaces.as_ref().and_then(|items| items.iter()
+                .find(|workspace| crate::workspace_rc::machine_key(workspace) == key))
+                .cloned().unwrap_or(crate::models::QueueWorkspace {
+                    id: String::new(), name: String::new(), kind: kind.into(),
+                    runtime_cwd: cwd.clone(), cwd, ssh_host,
+                    terminal_rc: None, session_env: Default::default(), default_conversation_weight: None,
+                });
+            crate::workspace_rc::effective_workspace(&queue, &workspace)
+        } else {
+            return Err(AppError::msg("Machine required"));
         };
         workspace.terminal_rc = Some(body["terminalRc"].as_str().unwrap_or_default().into());
+        workspace.session_env = crate::workspace_rc::validate_session_env(
+            body.get("sessionEnv").ok_or_else(|| AppError::msg("Session environment required"))?
+        )?;
         return Ok(Json(crate::workspace_rc::verify(&workspace).await?));
     }
     // External notices live outside the queue: dismissing one never touches queue.json.
@@ -309,6 +307,7 @@ fn launch_identity_changed(
         || card.archived_at != captured_card.archived_at
         || workspace.kind != captured_workspace.kind
         || workspace.terminal_rc != captured_workspace.terminal_rc
+        || workspace.session_env != captured_workspace.session_env
         || workspace.cwd != captured_workspace.cwd
         || workspace.runtime_cwd != captured_workspace.runtime_cwd
         || workspace.ssh_host != captured_workspace.ssh_host
@@ -375,6 +374,7 @@ pub(crate) async fn launch_harness(
                 })
                 .cloned()
                 .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
+            let workspace = crate::workspace_rc::effective_workspace(queue, &workspace);
             Ok((card, workspace))
         })
         .await?;
@@ -390,16 +390,12 @@ pub(crate) async fn launch_harness(
             .map(|h| h.kind.as_str())
             .unwrap_or_default()
     };
+    // The CLI owns resume validation. A session may live outside Que's default
+    // store, so a local filesystem miss must not turn resume into a new launch.
     let resume = if action == "harness_start" || action == "harness_reopen" {
         None
     } else {
-        captured.0.harness.clone().filter(|session| {
-            session.remote == Some(true)
-                || session
-                    .provider_session_id
-                    .as_deref()
-                    .is_some_and(|id| session_exists(&session.kind, id) != Some(false))
-        })
+        captured.0.harness.clone()
     };
     let use_tmux = body
         .get("tmux")
@@ -458,7 +454,7 @@ pub(crate) async fn launch_harness(
                 .workspaces
                 .as_ref()
                 .and_then(|ws| ws.iter().find(|w| w.id == captured.1.id))
-                .cloned();
+                .map(|workspace| crate::workspace_rc::effective_workspace(queue, workspace));
             let card = queue.cards.iter_mut().find(|c| c.id == id);
             let changed = match (card.as_ref(), workspace.as_ref()) {
                 (Some(card), Some(workspace)) => launch_identity_changed(
@@ -716,21 +712,26 @@ fn apply_action(
             if name.is_empty() {
                 return Err(AppError::msg("请输入工作区名称"));
             }
-            if let Some(rc) = body.get("terminalRc") {
-                let rc = rc
-                    .as_str()
-                    .ok_or_else(|| AppError::msg("RC must be text"))?;
-                crate::workspace_rc::validate_size(rc)?;
-                workspace.terminal_rc = if rc.trim().is_empty() {
-                    None
-                } else {
-                    Some(rc.into())
-                };
-            }
             workspace.name = name.into();
             workspace.default_conversation_weight = Some(numeric_weight(
                 body.get("defaultConversationWeight").unwrap_or(&json!(0)),
             ));
+        }
+        "machine_settings_update" => {
+            let key = body.get("machineKey").and_then(Value::as_str).unwrap_or_default();
+            if key != "local" && !key.strip_prefix("ssh:").is_some_and(valid_ssh_host) {
+                return Err(AppError::msg("Invalid machine"));
+            }
+            let rc = body.get("terminalRc").and_then(Value::as_str)
+                .ok_or_else(|| AppError::msg("RC must be text"))?;
+            crate::workspace_rc::validate_size(rc)?;
+            let env = crate::workspace_rc::validate_session_env(
+                body.get("sessionEnv").ok_or_else(|| AppError::msg("Session environment required"))?
+            )?;
+            queue.machine_settings.insert(key.to_string(), crate::models::MachineSessionSettings {
+                terminal_rc: if rc.trim().is_empty() { None } else { Some(rc.to_string()) },
+                session_env: env,
+            });
         }
         "priority_weight" => {
             let card = queue
@@ -843,8 +844,6 @@ fn apply_action(
                     id,
                 )
             };
-            let rc = body.get("terminalRc").map(|v| v.as_str().ok_or_else(|| AppError::msg("RC must be text"))).transpose()?;
-            if let Some(rc) = rc { crate::workspace_rc::validate_size(rc)?; }
             let create_card = body.get("createCard").and_then(|v| v.as_bool()) == Some(true);
             let workspace = {
                 let workspaces = queue.workspaces.get_or_insert_with(Vec::new);
@@ -852,7 +851,6 @@ fn apply_action(
                     .iter_mut()
                     .find(|w| w.kind == kind && w.cwd == cwd && w.ssh_host == ssh_host)
                 {
-                    if let Some(rc) = rc { existing.terminal_rc = if rc.trim().is_empty() { None } else { Some(rc.into()) }; }
                     existing.name = name;
                     existing.default_conversation_weight = Some(numeric_weight(
                         body.get("defaultConversationWeight").unwrap_or(&json!(0)),
@@ -860,7 +858,8 @@ fn apply_action(
                     existing.clone()
                 } else {
                     let workspace = crate::models::QueueWorkspace {
-                        terminal_rc: rc.filter(|s| !s.trim().is_empty()).map(str::to_string),
+                        terminal_rc: None,
+                        session_env: Default::default(),
                         id,
                         name,
                         kind,
@@ -1747,12 +1746,13 @@ async fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<Stri
                 .iter()
                 .find(|w| Some(&w.id) == card.workspace_id.as_ref())
         })
+        .map(|workspace| crate::workspace_rc::effective_workspace(&queue, workspace))
         .filter(|w| {
-            crate::workspace_rc::script(w).is_some()
+            (crate::workspace_rc::script(w).is_some() || !w.session_env.is_empty())
                 && w.cwd == cwd
                 && w.ssh_host.as_deref() == body["sshHost"].as_str()
         });
-    if let Some(workspace) = rc_workspace {
+    if let Some(workspace) = rc_workspace.as_ref() {
         let tid = id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
         if state.terminals.is_live(&tid) {
             return Ok(tid);

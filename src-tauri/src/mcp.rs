@@ -402,7 +402,12 @@ async fn run_tool(
                 let h = card
                     .harness
                     .as_ref()
-                    .map(|h| state.harness.snapshot(h, &state.terminals));
+                    .map(|h| {
+                        let workspace = queue.workspaces.as_ref()
+                            .and_then(|workspaces| workspaces.iter().find(|workspace| Some(&workspace.id) == card.workspace_id.as_ref()))
+                            .map(|workspace| crate::workspace_rc::effective_workspace(&queue, workspace));
+                        state.harness.snapshot(h, &state.terminals, workspace.as_ref())
+                    });
                 json!({"cardId":card.id,"cwd":card.cwd,"phase":card.phase,
                 "title":h.as_ref().and_then(|h| h.session_name.as_ref()),
                 "kind":h.as_ref().map(|h| &h.kind), "state":h.as_ref().map(|h| h.state.as_str()).unwrap_or("not_started"),

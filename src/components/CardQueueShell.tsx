@@ -223,6 +223,7 @@ function CardQueueShellContent() {
     disposeInactiveCardSideTerminals(live);
   }, [cards]);
   const workspaces = queue?.workspaces ?? [];
+  const machineSettings = queue?.machineSettings ?? {};
   const titleOf = useCallback((card: QueueCard) => {
     if (card.externalNotice) {
       const raw = externalNoticeTitle(card.externalNotice);
@@ -1160,8 +1161,10 @@ function CardQueueShellContent() {
       onClose={() => leaveInspection(inspected.id)}
       onSettled={() => { setInspectionLeaving(null); setInspecting(null); }}>{renderCard(inspected)}</CardInspectionOverlay>}
     </CardTransfers>
-    {creating && <WorkspacePicker workspaces={workspaces} remoteHosts={remoteHosts} busy={busy} onClose={() => setCreating(false)} onAddWorkspace={(machine) => { setCreating(false); setError(""); setWorkspaceThenCreate(true); setWorkspaceFormEntry(machine); setAddingWorkspace(true); }} onManageHosts={() => { setCreating(false); setSettingsSection("remote-hosts"); setSettings(true); }} onUpdate={async (workspaceId, value) => {
+    {creating && <WorkspacePicker workspaces={workspaces} machineSettings={machineSettings} remoteHosts={remoteHosts} busy={busy} onClose={() => setCreating(false)} onAddWorkspace={(machine) => { setCreating(false); setError(""); setWorkspaceThenCreate(true); setWorkspaceFormEntry(machine); setAddingWorkspace(true); }} onManageHosts={() => { setCreating(false); setSettingsSection("remote-hosts"); setSettings(true); }} onUpdate={async (workspaceId, value) => {
       setBusy(true); const result = await run("workspace_update", { workspaceId, ...value }); setBusy(false); return !!result;
+    }} onUpdateMachine={async (machineKey, value) => {
+      setBusy(true); const result = await run("machine_settings_update", { machineKey, ...value }); setBusy(false); return !!result;
     }} onRemove={async (workspaceId) => {
       setBusy(true); const result = await run("workspace_remove", { workspaceId }); setBusy(false); return !!result;
     }} onSelect={async (workspaceId) => {

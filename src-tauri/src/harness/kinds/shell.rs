@@ -67,7 +67,7 @@ pub async fn prepare_shell(
     let mut files: HashMap<String, String> = HashMap::new();
     let args;
     let mut command_notifications = true;
-    let mut env: HashMap<String, String> = HashMap::new();
+    let mut env: HashMap<String, String> = crate::workspace_rc::session_environment(workspace);
     let name = Path::new(&shell)
         .file_name()
         .and_then(|s| s.to_str())
@@ -170,7 +170,11 @@ pub async fn prepare_shell(
         }
         let exports = env
             .iter()
-            .map(|(k, v)| format!("{k}={}", shell_quote(v)))
+            .map(|(k, v)| format!("{k}={}", if workspace.session_env.contains_key(k) {
+                crate::workspace_rc::remote_session_value(v)
+            } else {
+                shell_quote(v)
+            }))
             .collect::<Vec<_>>()
             .join(" ");
         let command = std::iter::once(shell.clone())

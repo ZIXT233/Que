@@ -10,6 +10,9 @@ export const enLocale: LocalePlugin = {
     "workspace.rcVerify": "Load and verify",
     "workspace.rcChecking": "Verifying…",
     "workspace.rcFailed": "Verification failed",
+    "workspace.envTitle": "Session environment variables",
+    "workspace.envHint": "Affects the session environment used by terminals and Que's backend. For example, CODEX_HOME=$HOME/.codex-alt selects another Codex directory. Enter one NAME=value per line.",
+    "workspace.envInvalid": "Enter one NAME=value per line. Names must start with a letter and contain only letters, digits, and underscores.",
 
   "editor.open": "Open in VS Code",
   "editor.review": "Review",
@@ -231,6 +234,8 @@ export const enLocale: LocalePlugin = {
     "machines.connect": "Connect",
     "machines.retry": "Retry",
     "machines.newWorkspace": "Add workspace",
+    "machines.sessionSettings": "Machine session settings",
+    "machines.sessionSettingsHint": "Applies to every workspace on this machine.",
     "machines.close": "Close",
     "machines.back": "Back",
     "machines.error.HOST_TRUST_REQUIRED": "Verify the host fingerprint to continue.",

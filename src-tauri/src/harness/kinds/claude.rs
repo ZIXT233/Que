@@ -285,6 +285,13 @@ impl Harness for Claude {
 // —— the session store ——
 
 fn claude_home() -> PathBuf {
+    claude_home_in(None)
+}
+
+fn claude_home_in(env: Option<&std::collections::HashMap<String, String>>) -> PathBuf {
+    if let Some(path) = env.and_then(|env| env.get("CLAUDE_CONFIG_DIR")) {
+        return PathBuf::from(path);
+    }
     if let Ok(path) = std::env::var("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(path);
     }
@@ -304,19 +311,27 @@ fn name_from_sidecar(body: &str) -> Option<String> {
 }
 
 pub(super) fn session_exists(session_id: &str) -> bool {
+    session_exists_in(session_id, None)
+}
+
+pub(crate) fn session_exists_in(session_id: &str, env: Option<&std::collections::HashMap<String, String>>) -> bool {
     if !safe_name_id(session_id) {
         return false;
     }
-    let projects = claude_home().join("projects");
+    let projects = claude_home_in(env).join("projects");
     find_first(&[projects.clone()], &format!("{session_id}.jsonl")).is_some()
         || find_dir(&[projects], session_id).is_some()
 }
 
 pub(super) fn session_label(session_id: &str) -> SessionLabel {
+    session_label_in(session_id, None)
+}
+
+pub(crate) fn session_label_in(session_id: &str, env: Option<&std::collections::HashMap<String, String>>) -> SessionLabel {
     if !safe_name_id(session_id) {
         return SessionLabel::default();
     }
-    let projects = claude_home().join("projects");
+    let projects = claude_home_in(env).join("projects");
     let name = find_dir(&[projects.clone()], session_id)
         .and_then(|dir| std::fs::read_to_string(dir.join("custom-title.json")).ok())
         .and_then(|body| name_from_sidecar(&body))

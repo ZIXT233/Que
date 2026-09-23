@@ -689,13 +689,29 @@ fn resolve_codex_session_prefix(prefix: &str) -> Option<String> {
 }
 
 fn codex_session_exists(id: &str) -> Option<bool> {
-    if !regex::Regex::new(r"(?i)^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
-        .unwrap()
-        .is_match(id)
-    {
+    if !valid_codex_session_id(id) {
         return None;
     }
     Some(locate_rollout(id).is_some())
+}
+
+fn valid_codex_session_id(id: &str) -> bool {
+    regex::Regex::new(r"(?i)^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+        .unwrap()
+        .is_match(id)
+}
+
+pub(crate) fn session_label_in(id: &str, env: &std::collections::HashMap<String, String>) -> SessionLabel {
+    let Some(home) = env.get("CODEX_HOME") else { return session_label(id, true); };
+    if !safe_name_id(id) { return SessionLabel::default(); }
+    let home = PathBuf::from(home);
+    let name = std::fs::read_to_string(home.join("session_index.jsonl")).ok()
+        .and_then(|body| parse_index(&body).0.remove(id));
+    let first_prompt = find_all(&[home.join("sessions"), home.join("archived_sessions")], &format!("*{id}.jsonl"))
+        .into_iter().next()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|body| first_user_from_rollout(&body));
+    SessionLabel { name, first_prompt }
 }
 
 #[derive(Debug, Clone, Default)]

@@ -10,6 +10,9 @@ export const zhCNLocale: LocalePlugin = {
     "workspace.rcVerify": "加载并验证",
     "workspace.rcChecking": "验证中…",
     "workspace.rcFailed": "验证失败",
+    "workspace.envTitle": "会话环境变量",
+    "workspace.envHint": "可影响终端和 Que 后端的会话环境，例如用 CODEX_HOME=$HOME/.codex-alt 指定不同的 Codex 目录。每行一个 名称=值。",
+    "workspace.envInvalid": "请按 名称=值 每行填写一个环境变量，名称以字母开头且只含字母、数字和下划线。",
 
   "editor.open": "在 VS Code 打开",
   "editor.review": "审阅",
@@ -231,6 +234,8 @@ export const zhCNLocale: LocalePlugin = {
     "machines.connect": "连接",
     "machines.retry": "重试",
     "machines.newWorkspace": "新增工作区",
+    "machines.sessionSettings": "机器会话设置",
+    "machines.sessionSettingsHint": "应用于此机器的所有工作区。",
     "machines.close": "关闭",
     "machines.back": "上一步",
     "machines.error.HOST_TRUST_REQUIRED": "请核对主机指纹后继续。",

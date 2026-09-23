@@ -1,23 +1,24 @@
 "use client";
-import { WorkspaceRcEditor } from "./WorkspaceRcEditor";
+import { MachineSessionSettingsDialog } from "./MachineSessionSettingsDialog";
 import { useI18n } from "@/hooks/useI18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { machineErrorText, WorkspaceMachineError } from "@/lib/workspace-machine-errors";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
 import { machineRequest } from "./RemoteHostsSettings";
 import type { RemoteHost } from "@/lib/remote-hosts";
-import type { QueueWorkspace } from "@/lib/card-queue";
+import type { MachineSessionSettings, QueueWorkspace } from "@/lib/card-queue";
 import { SshAuthChallenge, SshConnectionWait, useSshAuthChallenge } from "./SshAuthChallenge";
 
-export function WorkspacePicker({ workspaces, remoteHosts, onSelect, onUpdate, onRemove, onAddWorkspace, onManageHosts, onClose, busy }: {
-  workspaces: QueueWorkspace[]; remoteHosts: RemoteHost[]; onSelect: (id: string) => void; onUpdate: (id: string, value: { name: string; defaultConversationWeight: number; terminalRc: string }) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onAddWorkspace: (machine: RemoteHost | "local") => void; onManageHosts: () => void; onClose: () => void; busy: boolean;
+export function WorkspacePicker({ workspaces, machineSettings, remoteHosts, onSelect, onUpdate, onUpdateMachine, onRemove, onAddWorkspace, onManageHosts, onClose, busy }: {
+  workspaces: QueueWorkspace[]; machineSettings: Record<string, MachineSessionSettings>; remoteHosts: RemoteHost[]; onSelect: (id: string) => void; onUpdate: (id: string, value: { name: string; defaultConversationWeight: number }) => Promise<boolean>; onUpdateMachine: (key: string, value: { terminalRc: string; sessionEnv: Record<string, string> }) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onAddWorkspace: (machine: RemoteHost | "local") => void; onManageHosts: () => void; onClose: () => void; busy: boolean;
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(-1);
   const [hovered, setHovered] = useState<number | null>(null);
   const [collapsedHosts, setCollapsedHosts] = useState<Set<string>>(() => new Set());
-  const [editingWorkspace, setEditingWorkspace] = useState<{ workspace: QueueWorkspace; name: string; weight: number; rc: string } | null>(null);
+  const [editingWorkspace, setEditingWorkspace] = useState<{ workspace: QueueWorkspace; name: string; weight: number } | null>(null);
+  const [editingMachine, setEditingMachine] = useState<{ key: string; label: string } | null>(null);
   const [removingWorkspace, setRemovingWorkspace] = useState<QueueWorkspace | null>(null);
   const [connectingWorkspace, setConnectingWorkspace] = useState<{ workspace: QueueWorkspace; host: RemoteHost; error?: unknown } | null>(null);
   const [connectionBusy, setConnectionBusy] = useState(false);
@@ -71,15 +72,15 @@ export function WorkspacePicker({ workspaces, remoteHosts, onSelect, onUpdate, o
     }
   }, [clearConnectionChallenge, onSelect, presentConnectionChallenge]);
   const selectWorkspace = useCallback((workspace: QueueWorkspace) => {
-    if (busy || connectingWorkspace || editingWorkspace || removingWorkspace) return;
+    if (busy || connectingWorkspace || editingWorkspace || editingMachine || removingWorkspace) return;
     if (workspace.kind !== "ssh") { onSelect(workspace.id); return; }
     const host = remoteHosts.find(item => item.id === workspace.sshHost) ?? { id: workspace.sshHost || "", name: workspace.sshHost || "SSH", hostname: workspace.sshHost || "", source: "config" as const };
     void connectAndSelect(workspace, host);
-  }, [busy, connectingWorkspace, editingWorkspace, removingWorkspace, connectAndSelect, onSelect, remoteHosts]);
-  return <><div className="cq-overlay" onClick={onClose}><section inert={!!removingWorkspace || !!editingWorkspace || !!connectingWorkspace} className="cq-workspace-picker" role="dialog" aria-modal="true" aria-label={t("queue.选择工作区，新建会话")} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
+  }, [busy, connectingWorkspace, editingWorkspace, editingMachine, removingWorkspace, connectAndSelect, onSelect, remoteHosts]);
+  return <><div className="cq-overlay" onClick={onClose}><section inert={!!removingWorkspace || !!editingWorkspace || !!editingMachine || !!connectingWorkspace} className="cq-workspace-picker" role="dialog" aria-modal="true" aria-label={t("queue.选择工作区，新建会话")} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
     // React portal events can bubble here even though the DOM subtree is
     // inert. Only handle our own keyboard navigation while the picker is free.
-    if (event.defaultPrevented || event.nativeEvent.isComposing || busy || connectingWorkspace || editingWorkspace || removingWorkspace || !event.currentTarget.contains(event.target as Node)) return;
+    if (event.defaultPrevented || event.nativeEvent.isComposing || busy || connectingWorkspace || editingWorkspace || editingMachine || removingWorkspace || !event.currentTarget.contains(event.target as Node)) return;
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
     // A focused button already activates its own workspace/action on Enter.
     if ((event.target as HTMLElement).closest("button")) return;
@@ -94,10 +95,11 @@ export function WorkspacePicker({ workspaces, remoteHosts, onSelect, onUpdate, o
         return <section className="cq-workspace-group" key={group.key}>
           <div className="cq-workspace-group-heading">
             <div className="cq-workspace-group-title"><WorkspaceMachineIcon name={group.kind === "ssh" ? "remote" : "local"} size={16} connectionStatus={group.kind === "ssh" ? group.machine !== "local" && group.machine.connected ? "connected" : "disconnected" : undefined} statusLabel={group.kind === "ssh" ? t(group.machine !== "local" && group.machine.connected ? "machines.connected" : "machines.disconnected") : undefined} /><strong>{group.kind === "ssh" ? <>{t("machines.remote")}<i>·</i>{group.host}</> : t("machines.local")}</strong></div>
+            <button className="cq-workspace-group-settings" type="button" disabled={busy} title={t("machines.sessionSettings")} aria-label={`${t("machines.sessionSettings")} · ${group.host || t("machines.local")}`} onClick={() => setEditingMachine({ key: group.key, label: group.host || t("machines.local") })}><WorkspaceMachineIcon name="settings" size={19} /></button>
             <button className="cq-workspace-group-add" type="button" disabled={busy} title={t("machines.newWorkspace")} aria-label={`${t("machines.newWorkspace")} · ${group.host || t("machines.local")}`} onClick={() => onAddWorkspace(group.machine)}><WorkspaceMachineIcon name="folder-plus" size={26} /></button>
             <button className="cq-workspace-group-toggle" type="button" aria-expanded={!collapsed} aria-label={`${collapsed ? t("queue.展开") : t("queue.收起")} · ${group.host || t("machines.local")}`} onClick={() => toggleGroup(group.key)}><WorkspaceMachineIcon name="chevron" size={14} /></button>
           </div>
-          {!collapsed && group.workspaces.map((workspace) => { const i = visibleMatches.indexOf(workspace); return <div key={workspace.id} role="option" aria-selected={i === activeIndex} className={`cq-workspace-row${i === activeIndex ? " is-selected" : ""}`} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}><button className="cq-workspace-open" disabled={busy} onClick={() => selectWorkspace(workspace)}><span className="cq-workspace-text"><span className="cq-workspace-title"><strong>{workspace.name}</strong></span><small><span className="cq-workspace-meta-path"><WorkspaceMachineIcon name="folder" size={13} /><span>{workspace.cwd}</span></span></small></span></button><span className="cq-workspace-weight" aria-label={`${t("machines.weight")} ${workspace.defaultConversationWeight ?? 0}`}><span aria-hidden="true">⚖️</span>{workspace.defaultConversationWeight ?? 0}</span><button className="cq-workspace-edit" disabled={busy} aria-label={`${t("queue.editWorkspaceAction")} ${workspace.name}`} title={t("queue.editWorkspaceAction")} onClick={() => setEditingWorkspace({ workspace, name: workspace.name, rc: workspace.terminalRc ?? "", weight: workspace.defaultConversationWeight ?? 0 })}><WorkspaceMachineIcon name="edit" size={15} /></button><button className="cq-workspace-remove" disabled={busy} aria-label={`${t("i18n.remove")} ${workspace.name}`} title={t("i18n.remove")} onClick={() => setRemovingWorkspace(workspace)}><WorkspaceMachineIcon name="close" size={15} /></button></div>; })}
+          {!collapsed && group.workspaces.map((workspace) => { const i = visibleMatches.indexOf(workspace); return <div key={workspace.id} role="option" aria-selected={i === activeIndex} className={`cq-workspace-row${i === activeIndex ? " is-selected" : ""}`} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}><button className="cq-workspace-open" disabled={busy} onClick={() => selectWorkspace(workspace)}><span className="cq-workspace-text"><span className="cq-workspace-title"><strong>{workspace.name}</strong></span><small><span className="cq-workspace-meta-path"><WorkspaceMachineIcon name="folder" size={13} /><span>{workspace.cwd}</span></span></small></span></button><span className="cq-workspace-weight" aria-label={`${t("machines.weight")} ${workspace.defaultConversationWeight ?? 0}`}><span aria-hidden="true">⚖️</span>{workspace.defaultConversationWeight ?? 0}</span><button className="cq-workspace-edit" disabled={busy} aria-label={`${t("queue.editWorkspaceAction")} ${workspace.name}`} title={t("queue.editWorkspaceAction")} onClick={() => setEditingWorkspace({ workspace, name: workspace.name, weight: workspace.defaultConversationWeight ?? 0 })}><WorkspaceMachineIcon name="edit" size={15} /></button><button className="cq-workspace-remove" disabled={busy} aria-label={`${t("i18n.remove")} ${workspace.name}`} title={t("i18n.remove")} onClick={() => setRemovingWorkspace(workspace)}><WorkspaceMachineIcon name="close" size={15} /></button></div>; })}
         </section>;
       })}
       {!grouped.length && <p className="cq-workspace-empty">{t("queue.没有匹配的工作区")}</p>}
@@ -105,15 +107,29 @@ export function WorkspacePicker({ workspaces, remoteHosts, onSelect, onUpdate, o
     <button className="cq-picker-add" onClick={onManageHosts}><WorkspaceMachineIcon name="remote" size={15} />{t("machines.manage")}</button>
     {connectingWorkspace && !connectionChallenge && <SshConnectionWait hostName={connectingWorkspace.host.name} busy={connectionBusy} error={connectingWorkspace.error} onCancel={cancelConnection} onRetry={() => void connectAndSelect(connectingWorkspace.workspace, connectingWorkspace.host)} />}
     {connectingWorkspace && <SshAuthChallenge challenge={connectionChallenge} hostName={connectingWorkspace.host.name} busy={connectionBusy} error={connectingWorkspace.error} onCancel={cancelConnection} onRetry={(password, trustedPrompt) => void connectAndSelect(connectingWorkspace.workspace, connectingWorkspace.host, password, trustedPrompt)} />}
-  </section></div>{editingWorkspace && <div className="cq-overlay cq-workspace-remove-backdrop" onClick={() => !busy && setEditingWorkspace(null)}><form className="cq-dialog cq-workspace-edit-dialog" role="dialog" aria-modal="true" aria-label={t("queue.editWorkspaceTitle")} onClick={(event) => event.stopPropagation()} onSubmit={async (event) => { event.preventDefault(); const name = editingWorkspace.name.trim(); if (name && await onUpdate(editingWorkspace.workspace.id, { name, defaultConversationWeight: editingWorkspace.weight, terminalRc: editingWorkspace.rc })) setEditingWorkspace(null); }}><div className="cq-dialog-heading"><WorkspaceMachineIcon name="edit" size={20} /><button type="button" aria-label={t("queue.关闭")} disabled={busy} onClick={() => setEditingWorkspace(null)}><WorkspaceMachineIcon name="close" size={18} /></button></div><h2>{t("queue.editWorkspaceTitle")}</h2><p>{t("queue.editWorkspaceDescription")}</p><label htmlFor="edit-workspace-name">{t("machines.workspaceName")}<input id="edit-workspace-name" autoFocus required value={editingWorkspace.name} onChange={(event) => setEditingWorkspace({ ...editingWorkspace, name: event.target.value })} /></label><label htmlFor="edit-workspace-weight">{t("machines.weight")}<input id="edit-workspace-weight" type="number" required value={editingWorkspace.weight} onChange={(event) => setEditingWorkspace({ ...editingWorkspace, weight: event.target.valueAsNumber })} /></label><WorkspaceRcEditor workspaceId={editingWorkspace.workspace.id} value={editingWorkspace.rc} onChange={rc => setEditingWorkspace({ ...editingWorkspace, rc })} /><div className="cq-workspace-edit-path"><WorkspaceMachineIcon name="folder" size={13} /><span>{editingWorkspace.workspace.cwd}</span></div><div className="cq-confirm-actions"><button type="button" disabled={busy} onClick={() => setEditingWorkspace(null)}>{t("queue.取消")}</button><button className="cq-primary" disabled={busy || !editingWorkspace.name.trim()}>{t("queue.saveWorkspaceChanges")}</button></div></form></div>}{removingWorkspace && <div className="cq-overlay cq-workspace-remove-backdrop" onClick={() => !busy && setRemovingWorkspace(null)}><section className="cq-dialog cq-archive-confirm" role="alertdialog" aria-modal="true" aria-label={t("queue.removeWorkspaceTitle")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><WorkspaceMachineIcon name="folder" size={20} /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setRemovingWorkspace(null)}><WorkspaceMachineIcon name="close" size={18} /></button></div><h2>{t("queue.removeWorkspaceTitle")}</h2><p>{t("queue.removeWorkspaceDescription", { name: removingWorkspace.name })}</p><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setRemovingWorkspace(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { if (await onRemove(removingWorkspace.id)) setRemovingWorkspace(null); }}>{t("queue.removeWorkspaceAction")}</button></div></section></div>}</>;
+  </section></div>
+    {editingMachine && <MachineSessionSettingsDialog key={editingMachine.key} machineKey={editingMachine.key} label={editingMachine.label} settings={machineSettings[editingMachine.key]} busy={busy} onSave={onUpdateMachine} onClose={() => setEditingMachine(null)} />}
+    {editingWorkspace && <div className="cq-overlay cq-workspace-remove-backdrop" onClick={() => !busy && setEditingWorkspace(null)}>
+      <form className="cq-dialog cq-workspace-edit-dialog" role="dialog" aria-modal="true" aria-label={t("queue.editWorkspaceTitle")} onClick={event => event.stopPropagation()} onSubmit={async event => {
+        event.preventDefault();
+        const name = editingWorkspace.name.trim();
+        if (name && await onUpdate(editingWorkspace.workspace.id, { name, defaultConversationWeight: editingWorkspace.weight })) setEditingWorkspace(null);
+      }}>
+        <div className="cq-dialog-heading"><WorkspaceMachineIcon name="edit" size={20} /><button type="button" aria-label={t("queue.关闭")} disabled={busy} onClick={() => setEditingWorkspace(null)}><WorkspaceMachineIcon name="close" size={18} /></button></div>
+        <h2>{t("queue.editWorkspaceTitle")}</h2><p>{t("queue.editWorkspaceDescription")}</p>
+        <label htmlFor="edit-workspace-name">{t("machines.workspaceName")}<input id="edit-workspace-name" autoFocus required value={editingWorkspace.name} onChange={event => setEditingWorkspace({ ...editingWorkspace, name: event.target.value })} /></label>
+        <label htmlFor="edit-workspace-weight">{t("machines.weight")}<input id="edit-workspace-weight" type="number" required value={editingWorkspace.weight} onChange={event => setEditingWorkspace({ ...editingWorkspace, weight: event.target.valueAsNumber })} /></label>
+        <div className="cq-workspace-edit-path"><WorkspaceMachineIcon name="folder" size={13} /><span>{editingWorkspace.workspace.cwd}</span></div>
+        <div className="cq-confirm-actions"><button type="button" disabled={busy} onClick={() => setEditingWorkspace(null)}>{t("queue.取消")}</button><button className="cq-primary" disabled={busy || !editingWorkspace.name.trim()}>{t("queue.saveWorkspaceChanges")}</button></div>
+      </form>
+    </div>}{removingWorkspace && <div className="cq-overlay cq-workspace-remove-backdrop" onClick={() => !busy && setRemovingWorkspace(null)}><section className="cq-dialog cq-archive-confirm" role="alertdialog" aria-modal="true" aria-label={t("queue.removeWorkspaceTitle")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><WorkspaceMachineIcon name="folder" size={20} /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setRemovingWorkspace(null)}><WorkspaceMachineIcon name="close" size={18} /></button></div><h2>{t("queue.removeWorkspaceTitle")}</h2><p>{t("queue.removeWorkspaceDescription", { name: removingWorkspace.name })}</p><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setRemovingWorkspace(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { if (await onRemove(removingWorkspace.id)) setRemovingWorkspace(null); }}>{t("queue.removeWorkspaceAction")}</button></div></section></div>}</>;
 }
 
 export function WorkspaceForm({ defaultCwd, entry, onSave, onClose, onBack, busy, error }: {
-  defaultCwd: string; onSave: (value: { name: string; kind: "local" | "ssh"; cwd: string; sshHost?: string; defaultConversationWeight: number; terminalRc: string }) => void;
+  defaultCwd: string; onSave: (value: { name: string; kind: "local" | "ssh"; cwd: string; sshHost?: string; defaultConversationWeight: number }) => void;
   entry: RemoteHost | "local"; onClose: () => void; onBack: () => void; busy: boolean; error: unknown;
 }) {
   const { t, locale } = useI18n();
-  const [rc, setRc] = useState("");
   const remote = entry === "local" ? null : entry;
   const [loading, setLoading] = useState(!!remote), [localError, setLocalError] = useState<unknown>(null);
   const { challenge: authChallenge, present: presentAuth, clear: clearAuth } = useSshAuthChallenge();
@@ -199,7 +215,7 @@ export function WorkspaceForm({ defaultCwd, entry, onSave, onClose, onBack, busy
         {awaitingRemoteConnection && remote && <div className="machine-connection-wait" role={localError && !authChallenge ? 'alert' : 'status'}><span className="machine-symbol is-remote"><WorkspaceMachineIcon name="remote" size={24} /></span><strong>{remote.name}</strong><p>{loading ? t('machines.connecting', { name: remote.name }) : alert || t('machines.connect', { name: remote.name })}</p>{!loading && !authChallenge && <button className="machine-button is-primary" type="button" disabled={busy} onClick={() => void connect(remote)}>{t('machines.retry')}</button>}</div>}
         {!awaitingRemoteConnection && <form className="machine-folder-form" onSubmit={e => {
           e.preventDefault(); if (formBlocked) return;
-          onSave({ name: name.trim() || cwd.split('/').filter(Boolean).pop() || 'Workspace', kind: remote ? 'ssh' : 'local', cwd, defaultConversationWeight: weight, terminalRc: rc, ...(remote ? { sshHost: remote.id } : {}) });
+          onSave({ name: name.trim() || cwd.split('/').filter(Boolean).pop() || 'Workspace', kind: remote ? 'ssh' : 'local', cwd, defaultConversationWeight: weight, ...(remote ? { sshHost: remote.id } : {}) });
         }}>
           <div className="machine-context"><span><WorkspaceMachineIcon name={remote ? 'remote' : 'local'} />{remote?.name || t('machines.local')}</span></div>
           <label htmlFor="workspace-cwd">{t('machines.folderLabel')}</label>
@@ -218,7 +234,6 @@ export function WorkspaceForm({ defaultCwd, entry, onSave, onClose, onBack, busy
           </div>
           {remote ? <p className="machine-help">{t('machines.directoryHelp')}</p> : <button className="machine-browse-folder" type="button" disabled={formBlocked} onClick={() => void pickLocal()}><WorkspaceMachineIcon name="folder" size={18} /><span><strong>{t(loading ? 'machines.pickerWaiting' : 'machines.browse')}</strong><small>{t('machines.localHint')}</small></span><WorkspaceMachineIcon name="chevron" size={14} /></button>}
           <div className="machine-field-grid"><label htmlFor="workspace-name">{t('machines.workspaceName')}<input id="workspace-name" value={name} onChange={e => setName(e.target.value)} placeholder={t('machines.workspaceNameHint')} /></label><label htmlFor="workspace-weight"><span aria-hidden="true">⚖️</span> {t('machines.weight')}<input id="workspace-weight" type="number" value={weight} required onChange={e => setWeight(e.target.valueAsNumber)} /></label></div>
-          <WorkspaceRcEditor draft={{ kind: remote ? "ssh" : "local", cwd, ...(remote ? { sshHost: remote.id } : {}) }} value={rc} onChange={setRc} />
           <div className="machine-actions"><button className="machine-button" type="button" disabled={busy} onClick={goBack}>← {t('machines.back')}</button><button className="machine-button is-primary" disabled={formBlocked || !cwd} type="submit">{t(busy ? 'machines.validating' : 'machines.saveWorkspace')}</button></div>
         </form>}
         {alert && !awaitingRemoteConnection && <p className="machine-error" role="alert">{alert}</p>}

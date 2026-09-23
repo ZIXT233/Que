@@ -11,6 +11,7 @@ use super::registry;
 use super::session_find::safe_name_id;
 use super::signals::ProbeState;
 use crate::models::ExternalTurn;
+use std::collections::HashMap;
 
 /// Single-turn content limit: allow large responses and code snippets to be displayed in full.
 pub(crate) const TURN_MAX_CHARS: usize = 64_000;
@@ -31,6 +32,15 @@ pub fn session_exists(kind: &str, session_id: &str) -> Option<bool> {
         return None;
     }
     registry::find(kind)?.session_exists(session_id)
+}
+
+pub fn read_session_label_in(kind: &str, session_id: &str, env: &HashMap<String, String>) -> Option<SessionLabel> {
+    if !safe_name_id(session_id) { return None; }
+    match kind {
+        "claude" => Some(super::kinds::claude::session_label_in(session_id, Some(env))),
+        "codex" => Some(super::kinds::codex::session_label_in(session_id, env)),
+        _ => read_session_label(kind, session_id, true),
+    }
 }
 
 pub fn read_session_label(

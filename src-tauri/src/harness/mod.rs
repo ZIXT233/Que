@@ -21,7 +21,6 @@ pub use env::local_environment;
 pub use external::ExternalRuntime;
 pub use hooks::{prepare_hook_launch, sync_external_hooks, sync_installed_hooks};
 pub use osc::HookOscProbe;
-pub use session_label::session_exists;
 pub use signals::{observe_hook, observe_title, settle_held, HookSignal, ProbeState};
 pub use windows::windows_command;
 
@@ -77,7 +76,8 @@ impl HarnessRuntime {
         debug::snapshot(&self.debug, &self.probes, terminals, terminal_id)
     }
 
-    pub fn snapshot(&self, session: &HarnessSession, terminals: &TerminalHub) -> HarnessSession {
+    pub fn snapshot(&self, session: &HarnessSession, terminals: &TerminalHub, workspace: Option<&QueueWorkspace>) -> HarnessSession {
+        let session_env = workspace.map(crate::workspace_rc::session_environment).unwrap_or_default();
         let harness = find(&session.kind);
         // A harness without an adapter is a shell card: its state comes off the PTY.
         let shell_card = harness.is_some_and(|h| h.adapter().is_none());
@@ -85,6 +85,18 @@ impl HarnessRuntime {
         if current.is_some() {
             apply_file_signals(&self.probes, &self.debug, terminals, &session.terminal_id);
             current = self.probes.lock().get(&session.terminal_id).cloned();
+        }
+        if !session_env.is_empty() {
+            if let Some(state) = current.as_mut() {
+                if let (Some(kind), Some(id)) = (state.kind.as_deref(), state.session_id.as_deref()) {
+                    if !state.remote {
+                        if let Some(label) = session_label::read_session_label_in(kind, id, &session_env) {
+                            if label.name.is_some() { state.session_name = label.name; }
+                            if state.first_prompt.is_none() { state.first_prompt = label.first_prompt; }
+                        }
+                    }
+                }
+            }
         }
         let mut provider_session_id = current
             .as_ref()
@@ -97,15 +109,15 @@ impl HarnessRuntime {
             .and_then(|c| c.session_id_prefix.as_deref())
         {
             let prefix = prefix.to_lowercase();
-            provider_session_id = if session.remote == Some(true) {
-                provider_session_id.filter(|id| id.to_lowercase().starts_with(&prefix))
-            } else {
-                harness.and_then(|h| h.resolve_session_prefix(&prefix))
-            };
+            provider_session_id = provider_session_id
+                .filter(|id| id.to_lowercase().starts_with(&prefix))
+                .or_else(|| {
+                    if session.remote == Some(true) { None }
+                    else { harness.and_then(|h| h.resolve_session_prefix(&prefix)) }
+                });
         }
         let terminal = terminals.snapshot(&session.terminal_id);
         let dead = terminal.as_ref().is_none_or(|t| t.exited);
-        let mut unpersisted_session = None;
         if dead && session.remote != Some(true) {
             // The session id a dead CLI left in its terminal footer: the read is lazy,
             // so a harness without a footer never pays for it.
@@ -116,19 +128,7 @@ impl HarnessRuntime {
                     })
                 })
             }) {
-                let persisted = session_exists(&session.kind, &footer_id);
-                provider_session_id = if persisted == Some(true) {
-                    Some(footer_id)
-                } else {
-                    None
-                };
-                unpersisted_session = Some(persisted == Some(false));
-            }
-            if let Some(id) = provider_session_id.as_deref() {
-                if session_exists(&session.kind, id) == Some(false) {
-                    provider_session_id = None;
-                    unpersisted_session = Some(true);
-                }
+                provider_session_id = Some(footer_id);
             }
         }
         let session_name = current
@@ -179,7 +179,7 @@ impl HarnessRuntime {
             }
         }
         next.provider_session_id = provider_session_id.clone();
-        next.unpersisted_session = unpersisted_session;
+        next.unpersisted_session = None;
         next.reply_preview = current.as_ref().and_then(|c| c.reply_preview.clone());
         next.session_name = session_name;
         next.first_prompt = first_prompt;
@@ -364,6 +364,7 @@ impl HarnessRuntime {
                     }
                 }
             }
+            env.extend(crate::workspace_rc::session_environment(workspace));
             // Most probes are display-only; OpenCode selects its plugin API here.
             mark("environment-and-command-ready");
             // keep it off the connect path — a shim probe through cmd/PowerShell
@@ -498,7 +499,11 @@ impl HarnessRuntime {
                     .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
                 let exports = env
                     .iter()
-                    .map(|(k, v)| format!("{k}={}", crate::ssh::shell_quote(v)))
+                    .map(|(k, v)| format!("{k}={}", if workspace.session_env.contains_key(k) {
+                        crate::workspace_rc::remote_session_value(v)
+                    } else {
+                        crate::ssh::shell_quote(v)
+                    }))
                     .collect::<Vec<_>>()
                     .join(" ");
                 let mut command = std::iter::once(adapter.executable.to_string())
@@ -1231,20 +1236,89 @@ mod tests {
         let live = LiveBus::new();
         let terminals = TerminalHub::new(live.clone());
         let runtime = HarnessRuntime::new(live, terminals.clone());
-        let next = runtime.snapshot(&session("attention"), &terminals);
+        let next = runtime.snapshot(&session("attention"), &terminals, None);
         assert_eq!(next.state, "not_running");
         assert_eq!(next.probe.as_deref(), Some("unconfirmed"));
     }
 
     #[test]
-    fn snapshot_drops_missing_codex_rollout() {
+    fn snapshot_keeps_known_codex_id_even_when_rollout_is_not_in_default_store() {
         let live = LiveBus::new();
         let terminals = TerminalHub::new(live.clone());
         let runtime = HarnessRuntime::new(live, terminals.clone());
         let mut current = session("exited");
         current.provider_session_id = Some("00000000-0000-0000-0000-000000000000".into());
-        let next = runtime.snapshot(&current, &terminals);
-        assert_eq!(next.provider_session_id, None);
-        assert_eq!(next.unpersisted_session, Some(true));
+        let next = runtime.snapshot(&current, &terminals, None);
+        assert_eq!(next.provider_session_id, current.provider_session_id);
+        assert_eq!(next.unpersisted_session, None);
+    }
+
+    #[test]
+    fn snapshot_keeps_known_claude_id_even_when_session_is_not_in_default_store() {
+        let live = LiveBus::new();
+        let terminals = TerminalHub::new(live.clone());
+        let runtime = HarnessRuntime::new(live, terminals.clone());
+        let mut current = session("exited");
+        current.kind = "claude".into();
+        current.provider_session_id = Some("00000000-0000-0000-0000-000000000000".into());
+        let next = runtime.snapshot(&current, &terminals, None);
+        assert_eq!(next.provider_session_id, current.provider_session_id);
+        assert_eq!(next.unpersisted_session, None);
+    }
+
+    #[test]
+    fn snapshot_keeps_claude_session_in_workspace_configured_store() {
+        let root = tempfile::tempdir().unwrap();
+        let id = "118fcbc2-ca87-4f0c-ba01-f3f2de9359cd";
+        let project = root.path().join("projects/project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{id}.jsonl")), "").unwrap();
+        let workspace: QueueWorkspace = serde_json::from_value(serde_json::json!({
+            "id":"configured-store", "name":"Workspace", "kind":"local",
+            "cwd":root.path(), "runtimeCwd":root.path()
+        })).unwrap();
+        let mut queue = crate::models::CardQueue::empty();
+        queue.machine_settings.insert("local".into(), crate::models::MachineSessionSettings {
+            terminal_rc: None,
+            session_env: HashMap::from([("CLAUDE_CONFIG_DIR".into(), root.path().to_string_lossy().into_owned())]),
+        });
+        let workspace = crate::workspace_rc::effective_workspace(&queue, &workspace);
+        let live = LiveBus::new();
+        let terminals = TerminalHub::new(live.clone());
+        let runtime = HarnessRuntime::new(live, terminals.clone());
+        let mut current = session("exited");
+        current.kind = "claude".into();
+        current.provider_session_id = Some(id.into());
+        let next = runtime.snapshot(&current, &terminals, Some(&workspace));
+        assert_eq!(next.provider_session_id.as_deref(), Some(id));
+        assert_eq!(next.unpersisted_session, None);
+    }
+
+    #[test]
+    fn snapshot_keeps_codex_session_in_workspace_configured_store() {
+        let root = tempfile::tempdir().unwrap();
+        let id = "118fcbc2-ca87-4f0c-ba01-f3f2de9359cd";
+        let sessions = root.path().join("sessions/2026/09/23");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(sessions.join(format!("rollout-2026-09-23T00-00-00-{id}.jsonl")), "").unwrap();
+        let workspace: QueueWorkspace = serde_json::from_value(serde_json::json!({
+            "id":"configured-store", "name":"Workspace", "kind":"local",
+            "cwd":root.path(), "runtimeCwd":root.path()
+        })).unwrap();
+        let mut queue = crate::models::CardQueue::empty();
+        queue.machine_settings.insert("local".into(), crate::models::MachineSessionSettings {
+            terminal_rc: None,
+            session_env: HashMap::from([("CODEX_HOME".into(), root.path().to_string_lossy().into_owned())]),
+        });
+        let workspace = crate::workspace_rc::effective_workspace(&queue, &workspace);
+        let live = LiveBus::new();
+        let terminals = TerminalHub::new(live.clone());
+        let runtime = HarnessRuntime::new(live, terminals.clone());
+        let mut current = session("exited");
+        current.kind = "codex".into();
+        current.provider_session_id = Some(id.into());
+        let next = runtime.snapshot(&current, &terminals, Some(&workspace));
+        assert_eq!(next.provider_session_id.as_deref(), Some(id));
+        assert_eq!(next.unpersisted_session, None);
     }
 }

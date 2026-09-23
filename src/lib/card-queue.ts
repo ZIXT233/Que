@@ -2,7 +2,6 @@ import type { SessionInfo } from "./types.ts";
 
 export type CardPhase = "draft" | "working" | "attention";
 export interface QueueWorkspace {
-  terminalRc?: string;
   id: string;
   name: string;
   kind: "local" | "ssh";
@@ -10,6 +9,10 @@ export interface QueueWorkspace {
   sshHost?: string;
   runtimeCwd: string;
   defaultConversationWeight?: number;
+}
+export interface MachineSessionSettings {
+  terminalRc?: string;
+  sessionEnv?: Record<string, string>;
 }
 export interface QueueCard {
   harness?: import("./harness/types").HarnessSession;
@@ -143,6 +146,7 @@ export interface CardQueue {
   turnTagDefinitions?: import("./turn-priority").TurnTag[];
   insertionPosition?: "top" | "bottom";
   workspaces?: QueueWorkspace[];
+  machineSettings?: Record<string, MachineSessionSettings>;
   /** Read-only overlay computed on every snapshot; never persisted with the queue. */
   external?: ExternalNotice[];
 }
