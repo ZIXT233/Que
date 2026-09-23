@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { nicknameHue } from "@/lib/card-nickname";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
 
 export type CardQuickSearchItem = {
   id: string;
   title: string;
+  nickname?: string;
   host: string;
   folder: string;
   remote: boolean;
@@ -40,7 +42,12 @@ export function CardQuickSearch({ items, onOpen }: {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const results = useMemo(() => items.map((item, index) => ({ item, index, score: fuzzyTitleScore(item.title, query) }))
+  const results = useMemo(() => items.map((item, index) => {
+    const titleScore = fuzzyTitleScore(item.title, query);
+    const nicknameScore = item.nickname ? fuzzyTitleScore(item.nickname, query) : null;
+    const score = titleScore === null ? nicknameScore : nicknameScore === null ? titleScore : Math.min(titleScore, nicknameScore);
+    return { item, index, score };
+  })
     .filter((entry): entry is typeof entry & { score: number } => entry.score !== null)
     .sort((a, b) => a.score - b.score || a.index - b.index)
     .map((entry) => entry.item), [items, query]);
@@ -102,7 +109,8 @@ export function CardQuickSearch({ items, onOpen }: {
         onMouseMove={() => setActiveIndex(index)}
         onClick={() => openItem(item)}
       >
-        <strong>{item.title}</strong>
+        <strong className={item.nickname ? "cq-card-search-nickname" : undefined} style={item.nickname ? { "--cq-nickname-hue": nicknameHue(item.id) } as CSSProperties : undefined}>{item.nickname || item.title}</strong>
+        {item.nickname && <span className="cq-card-search-session-title">{item.title}</span>}
         <span className="cq-card-search-meta">
           <span><WorkspaceMachineIcon name={item.remote ? "remote" : "local"} size={14} />{item.tmux && <span className="cq-tmux-badge">TMUX</span>}{item.host}</span>
           <span><WorkspaceMachineIcon name="folder" size={14} />{item.folder}</span>

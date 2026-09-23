@@ -253,6 +253,7 @@ function CardQueueShellContent() {
   // in the background, so the sidebar lists them beside the queue's own.
   const externalWorking = externalWorkingNotices(queue?.external);
   const archived = cards.filter((card) => card.archivedAt !== undefined).sort((a, b) => b.archivedAt! - a.archivedAt!);
+  const historyMatches = archived.filter((card) => card.harness && `${card.nickname ?? ""} ${titleOf(card)} ${card.cwd}`.toLocaleLowerCase().includes(historySearch.toLocaleLowerCase()));
   const detached = cards.filter((card) => card.detached || pendingDetach.has(card.id));
   const reminding = cards.filter((card) => card.remindAt !== undefined && card.archivedAt === undefined).sort((a, b) => (a.remindAt ?? 0) - (b.remindAt ?? 0));
   const remindCount = reminding.length;
@@ -351,6 +352,7 @@ function CardQueueShellContent() {
     return {
       id: card.id,
       title: titleOf(card),
+      nickname: card.nickname,
       host: cardHostLabel(card, workspace),
       folder: projectOf(card.cwd),
       remote: workspace?.kind === "ssh",
@@ -791,7 +793,7 @@ function CardQueueShellContent() {
   const remindLater = useCallback(async (card: QueueCard, minutes: number) => {
     if (detachedId) return;
     const result = await run("remind_later", { id: card.id, minutes });
-    if (result) showQueueToast(t("queue.已设置稍后提醒", { title: titleOf(card) }));
+    if (result) showQueueToast(t("queue.已设置稍后提醒", { title: card.nickname || titleOf(card) }));
   }, [detachedId, run, showQueueToast, t, titleOf]);
   const remindBack = useCallback(async (card: QueueCard) => {
     const result = await run("remind_back", { id: card.id });
@@ -1050,7 +1052,10 @@ function CardQueueShellContent() {
         {!!detached.length && <><div className="cq-section-label"><span>{t("queue.独立标签页")}</span><span>{detached.length}</span></div><div className="cq-detached-list">{detached.map((card) => <button key={card.id} onClick={() => openDetachedCardTab(card.id)}><Icon name="out" size={14} /><span>{titleOf(card)}</span><i className={card.phase === "working" ? "cq-dot" : "cq-ready-dot"} /></button>)}</div></>}
         {!!reminding.length && <><div className="cq-section-label"><span>{t("queue.稍后提醒")}</span><span>{remindCount.toString().padStart(2, "0")}</span></div><div className="cq-remind-list">{reminding.map((card) => <button key={card.id} className={`cq-small-card cq-remind-card ${inspecting === card.id ? "is-selected" : ""}`} onClick={() => setInspecting(card.id)}>
           <span className="cq-small-meta"><Icon name="bell" size={11} />{displayProject(card)}<span className="cq-remind-countdown">{formatRemainder((card.remindAt ?? 0) - remindNow)}</span></span>
-          <strong>{titleOf(card)}</strong>
+          {card.nickname ? <>
+            <strong className="cq-small-nickname" style={{ "--cq-nickname-hue": nicknameHue(card.id) } as CSSProperties}>{card.nickname}</strong>
+            <span className="cq-small-session-title">{titleOf(card)}</span>
+          </> : <strong>{titleOf(card)}</strong>}
         </button>)}</div></>}
         <div className="cq-sidebar-bottom"><button onClick={openHistory}><Icon name="history" />{t("queue.历史对话")}<span>↗</span></button></div>
       </aside>}
@@ -1172,7 +1177,7 @@ function CardQueueShellContent() {
       }
     }} />}
     {archiveConfirm && <div className="cq-overlay" onClick={() => !busy && setArchiveConfirm(null)}><section className="cq-dialog cq-archive-confirm" role="dialog" aria-modal="true" aria-label={t("queue.确认归档")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="archive" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setArchiveConfirm(null)}><Icon name="close" /></button></div><h2>{t("queue.确认归档")}</h2><p>{t("queue.归档后会话将移到历史对话，之后仍可重新打开。")}</p><label className="cq-archive-skip"><input type="checkbox" checked={skipArchiveChecked} disabled={busy} onChange={event => setSkipArchiveChecked(event.target.checked)} /><span>{t("queue.skipArchiveThisPage")}<small>{t("queue.skipArchiveThisPageHint")}</small></span></label><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setArchiveConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { setBusy(true); const result = await run("archive", { id: archiveConfirm.id }); setBusy(false); if (result) { if (skipArchiveChecked) setSkipArchiveConfirmation(true); advanceToNextCard(archiveConfirm.id); setArchiveConfirm(null); } }}>{t("queue.归档")}</button></div></section></div>}
-    {history && <div className="cq-overlay" onClick={() => setHistory(null)}><section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div><h2>{t("queue.历史对话")}</h2><p>{t("queue.已收起的卡片和未在当前队列中的会话，点击即可继续。")}</p><input aria-label="搜索会话" placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><div className="cq-history-list">{archived.filter(card => card.harness && `${titleOf(card)} ${card.cwd}`.toLowerCase().includes(historySearch.toLowerCase())).map(card => <button key={card.id} onClick={() => { setHistory(null); setInspecting(card.id); }}><span>{harnessName(card.harness!.kind)} · {titleOf(card)}</span><small>{projectOf(card.cwd)} · {new Date(card.archivedAt!).toLocaleDateString()}</small></button>)}{!archived.some(card => card.harness && `${titleOf(card)} ${card.cwd}`.toLowerCase().includes(historySearch.toLowerCase())) && <p>{historySearch ? t("queue.没有匹配的历史对话。") : t("queue.暂无未在队列中的历史对话。")}</p>}</div></section></div>}
+    {history && <div className="cq-overlay" onClick={() => setHistory(null)}><section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div><h2>{t("queue.历史对话")}</h2><p>{t("queue.已收起的卡片和未在当前队列中的会话，点击即可继续。")}</p><input aria-label="搜索会话" placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><div className="cq-history-list">{historyMatches.map(card => <button key={card.id} onClick={() => { setHistory(null); setInspecting(card.id); }}><span>{harnessName(card.harness!.kind)} · {card.nickname ? <strong className="cq-history-nickname" style={{ "--cq-nickname-hue": nicknameHue(card.id) } as CSSProperties}>{card.nickname}</strong> : titleOf(card)}</span>{card.nickname && <small className="cq-history-session-title">{titleOf(card)}</small>}<small>{projectOf(card.cwd)} · {new Date(card.archivedAt!).toLocaleDateString()}</small></button>)}{!historyMatches.length && <p>{historySearch ? t("queue.没有匹配的历史对话。") : t("queue.暂无未在队列中的历史对话。")}</p>}</div></section></div>}
     {settings && <SettingsPanel cwd={active?.cwd || defaultCwd || null} sessionId={active?.session?.id || null} initialSection={settingsSection} onClose={() => { setSettings(false); setModelsRefreshKey((key) => key + 1); void refreshRemoteHosts(); }} onSessionReloaded={() => { setSessionRefreshKey((key) => key + 1); void refresh(); }} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={setQuoteSelectionEnabled} />}
   </div>;
 }

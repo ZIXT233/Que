@@ -122,6 +122,9 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 .cq-dialog h2 { font-size: 22px; font-weight: 500; margin: 18px 0 12px; }.cq-dialog p { color: var(--cq-muted); font-size: 12px; line-height: 1.8; margin-bottom: 22px; }
 .cq-dialog label { display: block; font-size: 11px; margin-bottom: 8px; }.cq-dialog input { width: 100%; padding: 12px; border: 1px solid var(--cq-line); border-radius: 7px; background: var(--cq-surface); font: 12px ui-monospace, monospace; color: var(--cq-ink); }.cq-dialog input:focus { outline: 1px solid var(--cq-accent); }.cq-dialog > .cq-primary { width: 100%; margin-top: 23px; }.cq-dialog .cq-form-error { color: #a24426; margin-top: 14px; }
 .cq-history { width: 560px; }.cq-history-list { max-height: 45vh; overflow-y: auto; margin-top: 18px; }.cq-history-list > button { display: block; width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--cq-line); padding: 14px 4px; text-align: left; }.cq-history-list > button:hover { background: var(--cq-surface); }.cq-history-list span { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.cq-history-list small { display: block; margin-top: 7px; font-size: 10px; color: var(--cq-muted); }
+.cq-history-list .cq-history-nickname { color: hsl(var(--cq-nickname-hue) 66% 38%); font-size: 13px; font-weight: 650; }
+.cq-history-list .cq-history-session-title { margin-top: 4px; color: var(--cq-ink); font-size: 11px; }
+html.dark .cq-history-list .cq-history-nickname { color: hsl(var(--cq-nickname-hue) 76% 70%); }
 .cq-file-panel { display: flex; flex-direction: column; width: 1000px; max-width: 95vw; height: 85vh; background: var(--bg); border-radius: 12px; overflow: hidden; }.cq-file-panel > .cq-dialog-heading { padding: 12px 20px; border-bottom: 1px solid var(--cq-line); font-size: 12px; }
 .cq-detached .cq-main { max-width: 1150px; }
 @keyframes cq-pulse { 50% { opacity: .4; } } @keyframes cq-bars { to { transform: scaleY(.35); } }
@@ -308,6 +311,9 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 .cq-card-search-results>button{display:block;width:100%;padding:10px 11px;border:0;border-radius:9px;background:transparent;color:var(--cq-ink);text-align:left}
 .cq-card-search-results>button.is-active{background:var(--cq-surface)}
 .cq-card-search-results>button strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600;line-height:1.35}
+.cq-card-search-results>button .cq-card-search-nickname{color:hsl(var(--cq-nickname-hue) 66% 38%)}
+.cq-card-search-session-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;color:var(--cq-muted);font-size:11px}
+html.dark .cq-card-search-results>button .cq-card-search-nickname{color:hsl(var(--cq-nickname-hue) 76% 70%)}
 .cq-card-search-meta{display:flex;min-width:0;align-items:center;gap:13px;margin-top:5px;color:var(--cq-muted);font-size:12px;line-height:1.25}
 .cq-card-search-meta>span{display:flex;min-width:0;max-width:50%;align-items:center;gap:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cq-card-search-meta svg{flex:0 0 auto}
@@ -405,6 +411,7 @@ html.dark .cq-score-tooltip{border-color:#3a4037;background:#252824;color:#e7e7d
 .cq-remind-list{display:flex;flex-direction:column;gap:12px;flex:0 1 auto;min-height:0;max-height:min(34vh, 204px);overflow-y:auto;overscroll-behavior:contain;padding:2px}
 .cq-remind-card{flex-shrink:0}
 .cq-remind-card strong{margin:8px 0 2px}
+.cq-remind-card .cq-small-session-title{margin-bottom:2px}
 .cq-remind-countdown{margin-left:auto;font-family:ui-monospace,monospace;color:#967000;opacity:.85}
 .cq-remind-label{padding:3px 7px;border:1px solid #e2d494;border-radius:6px;background:#fff7d6;color:#8a711c;font-size:11px;font-weight:700;white-space:nowrap}
 html.dark .cq-remind-label{border-color:#6a5c2c;background:#3d3519;color:#e2c57e}
