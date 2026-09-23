@@ -4,15 +4,42 @@ on:
   push:
     tags: ["v*"]
 
-# A release is only initiated by an explicit version tag. The Tauri action
-# creates or updates one draft release while the six matrix jobs upload assets;
+# A release is only initiated by an explicit version tag. Prepare creates one
+# draft release before the six matrix jobs upload assets;
 # a final job publishes it once every leg (and its artifact scan) has passed.
 permissions:
   contents: write
 
 jobs:
+  prepare:
+    name: Prepare draft release
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Verify release version
+        run: >-
+          node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json')); const tauri=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json')); const cargo=fs.readFileSync('src-tauri/Cargo.toml','utf8').match(/^version = \"([^\"]+)\"/m)?.[1]; const versions=[pkg.version,tauri.version,cargo]; if(new Set(versions).size !== 1 || process.env.RELEASE_TAG !== 'v'+tauri.version) { throw new Error('Version mismatch: tag='+process.env.RELEASE_TAG+', package='+pkg.version+', tauri='+tauri.version+', cargo='+cargo); }"
+
+      - name: Create draft release
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > draft-state.txt; then
+            test "$(cat draft-state.txt)" = true || { echo "Release $RELEASE_TAG is already published" >&2; exit 1; }
+          else
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "Que $RELEASE_TAG" --notes ""
+          fi
+
   release:
     name: ${{ matrix.platform }} / ${{ matrix.arch }}
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -51,13 +78,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Verify release version
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: >-
-          node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json')); const tauri=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json')); const cargo=fs.readFileSync('src-tauri/Cargo.toml','utf8').match(/^version = \"([^\"]+)\"/m)?.[1]; const versions=[pkg.version,tauri.version,cargo]; if(new Set(versions).size !== 1 || process.env.RELEASE_TAG !== 'v'+tauri.version) { throw new Error('Version mismatch: tag='+process.env.RELEASE_TAG+', package='+pkg.version+', tauri='+tauri.version+', cargo='+cargo); }"
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -77,13 +97,31 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: --target ${{ matrix.target }}
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ matrix.platform != 'macos' && github.ref_name || '' }}
           releaseName: Que ${{ github.ref_name }}
           releaseDraft: true
           prerelease: false
-          releaseAssetNamePattern: Que-${{ matrix.platform }}-${{ matrix.arch }}-[bundle][ext]
+          releaseAssetNamePattern: Que-${{ matrix.platform }}-${{ matrix.arch }}[ext]
           uploadUpdaterJson: false
           retryAttempts: 3
+
+      - name: Upload macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          bundle_dir="src-tauri/target/$RELEASE_TARGET/release/bundle/dmg"
+          count=$(find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')
+          test "$count" -eq 1 || { echo "Expected one DMG, found $count" >&2; exit 1; }
+          dmg=$(find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' -print -quit)
+          asset="$RUNNER_TEMP/Que-macos-$RELEASE_ARCH.dmg"
+          cp "$dmg" "$asset"
+          gh release upload "$RELEASE_TAG" "$asset" --clobber
 
       # Assets are still a draft. A detection/error must fail this job so the
       # maintainer can review the saved scan output before publishing it.
