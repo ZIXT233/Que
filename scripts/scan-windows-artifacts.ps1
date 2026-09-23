@@ -1,5 +1,5 @@
 # Run after signing and packaging, before distributing the exact artifacts.
-# Keeps Defender enabled; custom scans report detections without remediation.
+# Leaves Defender settings unchanged; custom scans report detections without remediation.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -23,9 +23,11 @@ try {
     $status = Get-MpComputerStatus
     $report.defender = $status | Select-Object AMEngineVersion, AntivirusSignatureVersion,
         AntivirusSignatureLastUpdated, AntivirusEnabled, RealTimeProtectionEnabled
-    if (-not $status.AntivirusEnabled -or -not $status.RealTimeProtectionEnabled) {
-        throw 'Defender antivirus and real-time protection must be enabled.'
+    if (-not $status.AntivirusEnabled) {
+        throw 'Defender antivirus must be enabled.'
     }
+    # Hosted Windows runners disable real-time monitoring. The explicit custom
+    # scan below still has to succeed; record monitoring state without gating on it.
     $platform = Join-Path $env:ProgramData 'Microsoft/Windows Defender/Platform'
     $scanner = Get-ChildItem -LiteralPath $platform -Directory -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending |
@@ -52,6 +54,8 @@ try {
                 status = [string]$signature.Status
                 subject = $(if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { $null })
             }
+            # With -DisableRemediation, custom scans ignore file exclusions and
+            # scan archives, including on runners that exclude their build drives.
             $output = & $scanner -Scan -ScanType 3 -File $entry.path -DisableRemediation 2>&1
             $entry.exitCode = $LASTEXITCODE
             $entry.output = ($output | Out-String).Trim()

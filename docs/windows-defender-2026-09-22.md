@@ -173,6 +173,18 @@ turn off real-time protection. Its detections appear in command output rather
 than Protection History. A clean result applies only to those bytes and that
 scanner/signature version; it does not guarantee other devices or future scans.
 
+CI compatibility correction (September 23): GitHub's Windows runner images
+disable real-time monitoring. The script records that state but no longer
+requires it to be enabled before running an explicit custom scan. Defender
+antivirus must still be enabled and every artifact must pass the scan and hash
+check. No Defender settings are changed. The custom scan's
+`-DisableRemediation` option ignores file exclusions and scans archives, as
+documented in the MpCmdRun reference below. The earlier report with
+`scanner: null` and `artifacts: []` was a precondition failure, not a completed
+malware scan. The final publish job also explicitly sets `GH_REPO`, since it
+runs without a repository checkout. These corrections require a fresh tagged
+workflow run for hosted-runner validation.
+
 For an incorrectly detected release, submit the exact detected file through
 [Microsoft's developer submission portal](https://www.microsoft.com/en-us/wdsi/filesubmission).
 The submission should include the threat name, SHA-256 and saved scan output.
