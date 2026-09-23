@@ -5,6 +5,12 @@ export const zhCNLocale: LocalePlugin = {
   id: "zh-CN",
   label: "简体中文",
   messages: {
+    "workspace.rcTitle": "终端 RC 脚本",
+    "workspace.rcHint": "留空关闭；保存后对新终端生效。验证会实际执行脚本。",
+    "workspace.rcVerify": "加载并验证",
+    "workspace.rcChecking": "验证中…",
+    "workspace.rcFailed": "验证失败",
+
   "editor.open": "在 VS Code 打开",
   "editor.review": "审阅",
     "mcp.approvalTitle": "允许访问这张卡片？",

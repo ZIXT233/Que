@@ -33,7 +33,7 @@ use crate::settings::SettingsStore;
 use crate::ssh::{ssh_login_command, ssh_login_exec};
 use crate::terminal::{Spawn, TerminalHub};
 use crate::transcript::read_terminal_transcript;
-use kinds::shell::prepare_shell;
+pub(crate) use kinds::shell::prepare_shell;
 use notify_osc::{notify_osc_kinds, observe_notify, prefer_kitty_notifications, KittyNotifyProbe};
 use parking_lot::Mutex;
 use registry::{find, LaunchTweaks};
@@ -244,7 +244,10 @@ impl HarnessRuntime {
         // `exec: …: not found` inside the opened card, after launch has succeeded.
         // Probe once, through the same login shell the card will use, and fail before
         // anything opens.
-        if !shell_card && workspace.kind == "ssh" {
+        if !shell_card
+            && workspace.kind == "ssh"
+            && crate::workspace_rc::script(workspace).is_none()
+        {
             let host = workspace
                 .ssh_host
                 .as_deref()
@@ -299,7 +302,7 @@ impl HarnessRuntime {
             let mut command_path = adapter.executable.to_string();
             let mut command_prefix: Vec<String> = Vec::new();
             let tweaks: LaunchTweaks = harness.launch_tweaks();
-            if workspace.kind == "local" {
+            if workspace.kind == "local" && crate::workspace_rc::script(workspace).is_none() {
                 let mut local = local_environment(false).await.unwrap_or_default();
                 let extra_dirs: Vec<std::path::PathBuf> = crate::paths::user_home()
                     .map(|home| {
@@ -498,11 +501,17 @@ impl HarnessRuntime {
                     .map(|(k, v)| format!("{k}={}", crate::ssh::shell_quote(v)))
                     .collect::<Vec<_>>()
                     .join(" ");
-                let command = std::iter::once(adapter.executable.to_string())
+                let mut command = std::iter::once(adapter.executable.to_string())
                     .chain(launch_args)
                     .map(|s| crate::ssh::shell_quote(&s))
                     .collect::<Vec<_>>()
                     .join(" ");
+                if crate::workspace_rc::script(workspace).is_some() {
+                    let quoted = crate::ssh::shell_quote(adapter.executable);
+                    let alias_command =
+                        format!("{}{}", adapter.executable, &command[quoted.len()..]);
+                    command = crate::workspace_rc::remote(workspace, &alias_command);
+                }
                 let unset = tweaks
                     .ssh_unset
                     .iter()
@@ -547,6 +556,17 @@ impl HarnessRuntime {
                 spawn = Spawn::Remote {
                     host: host.to_string(),
                     command: ssh_login_command(&remote),
+                };
+            } else if crate::workspace_rc::script(workspace).is_some() {
+                let (executable, args) = crate::workspace_rc::local_command(
+                    workspace,
+                    adapter.executable,
+                    &launch_args,
+                )?;
+                spawn = Spawn::Local {
+                    executable,
+                    args,
+                    env,
                 };
             } else if cfg!(windows) {
                 let launch = windows_command(&command_path, &launch_args);
@@ -920,6 +940,29 @@ async fn detect_version(
     flag: &str,
     env: &HashMap<String, String>,
 ) -> AppResult<String> {
+    if crate::workspace_rc::script(workspace).is_some() {
+        let cmd = format!("{} {}", command_path, crate::ssh::shell_quote(flag));
+        if workspace.kind == "ssh" {
+            let out = crate::ssh::ssh_exec(
+                workspace
+                    .ssh_host
+                    .as_deref()
+                    .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?,
+                &crate::workspace_rc::remote(workspace, &cmd),
+            )
+            .await?;
+            return Ok(String::from_utf8_lossy(&out).trim().into());
+        }
+        let (program, args) =
+            crate::workspace_rc::local_command(workspace, command_path, &[flag.into()])?;
+        let output = tokio::process::Command::new(program)
+            .args(args)
+            .envs(env)
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().into());
+    }
     if workspace.kind == "ssh" {
         let host = workspace
             .ssh_host

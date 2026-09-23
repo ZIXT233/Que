@@ -1,4 +1,5 @@
 pub mod api;
+mod workspace_rc;
 mod conpty;
 #[cfg(windows)]
 mod conpty_handshake;

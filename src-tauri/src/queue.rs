@@ -361,6 +361,7 @@ pub fn sync_queue(state: &mut CardQueue, terminals: &TerminalHub) {
                 .unwrap_or(&card.cwd)
                 .to_string();
             workspaces.push(QueueWorkspace {
+                terminal_rc: None,
                 id: id.clone(),
                 name,
                 kind: "local".into(),

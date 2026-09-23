@@ -52,6 +52,8 @@ pub enum CardPhase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueWorkspace {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_rc: Option<String>,
     pub id: String,
     pub name: String,
     pub kind: String,

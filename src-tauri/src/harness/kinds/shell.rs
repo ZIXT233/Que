@@ -71,10 +71,22 @@ pub async fn prepare_shell(
     let name = Path::new(&shell)
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or("");
-    if !remote && cfg!(windows) && powershell {
-        shell = "powershell.exe".into();
-        let script = std::fs::read_to_string(bin_dir.join("shell/powershell-integration.ps1"))?;
+        .unwrap_or("")
+        .to_string();
+    if !remote
+        && ((cfg!(windows) && (powershell || crate::workspace_rc::script(workspace).is_some()))
+            || crate::workspace_rc::is_powershell(&shell))
+    {
+        if cfg!(windows) {
+            shell = "powershell.exe".into();
+        }
+        let mut script = std::fs::read_to_string(bin_dir.join("shell/powershell-integration.ps1"))?;
+        if crate::workspace_rc::script(workspace).is_some() {
+            script.push_str(&format!(
+                "\ntry {{\n{}\n}} catch {{ Write-Error $_; exit 1 }}",
+                crate::workspace_rc::powershell_prelude(workspace)
+            ));
+        }
         let encoded = utf16_le_base64(&script);
         args = vec![
             "-NoLogo".into(),
@@ -118,6 +130,25 @@ pub async fn prepare_shell(
     } else {
         args = vec!["-il".into()];
         command_notifications = false;
+    }
+    if let Some(rc) = crate::workspace_rc::script(workspace)
+        .filter(|_| !crate::workspace_rc::is_powershell(&shell))
+    {
+        let filename = match name.as_str() {
+            "bash" => "bashrc",
+            "zsh" => ".zshrc",
+            _ => {
+                return Err(crate::error::AppError::msg(
+                    "Workspace RC requires bash or zsh",
+                ))
+            }
+        };
+        let load = format!(
+            "\ncd {} || exit $?\n{}",
+            shell_quote(&workspace.cwd),
+            crate::workspace_rc::prelude(rc)
+        );
+        files.entry(filename.into()).or_default().push_str(&load);
     }
     if remote {
         let host = workspace.ssh_host.as_deref().unwrap();

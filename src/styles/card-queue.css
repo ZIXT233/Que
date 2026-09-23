@@ -1053,6 +1053,13 @@ html.dark .cq-remind-countdown{color:#e2c57e}
 .machine-browse-folder small { color: var(--cq-muted); font-size: 11px; }
 .machine-dialog .machine-button, .machine-auth-theme .machine-button { padding: 9px 15px; border: 1px solid var(--cq-line); border-radius: 7px; color: var(--cq-muted); background: var(--cq-paper); font-size: 12px; }
 .machine-dialog .machine-button.is-primary, .machine-dialog .config-button-primary, .machine-auth-theme .machine-button.is-primary { background: var(--machine-accent); border-color: var(--machine-accent); color: #fff; }
+.workspace-rc-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.workspace-rc-actions p { flex: 1; min-width: 0; margin: 0; color: var(--cq-muted); font-size: 12px; line-height: 1.5; }
+.workspace-rc-verify { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 8px 14px; border: 1px solid #5f8058; border-radius: 7px; background: #5f8058; color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
+.workspace-rc-verify:hover:not(:disabled) { background: #4c7045; border-color: #4c7045; }
+.workspace-rc-verify:focus-visible { outline: 2px solid #5f8058; outline-offset: 2px; }
+.workspace-rc-verify:disabled { opacity: .6; cursor: wait; }
+.workspace-rc-result { max-height: 160px; margin: 10px 0 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--cq-line); border-radius: 7px; background: var(--cq-surface); color: var(--cq-ink); font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .machine-dialog .config-button-secondary { border-color: var(--cq-line); background: var(--cq-paper); color: var(--cq-muted); }
 .directory-combobox { position: relative; }
 .remote-directory-popup { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20; border: 1px solid var(--cq-line); border-radius: 8px; background: var(--cq-paper); box-shadow: 0 8px 24px #202d2524; padding: 4px; }

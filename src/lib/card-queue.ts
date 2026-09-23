@@ -2,6 +2,7 @@ import type { SessionInfo } from "./types.ts";
 
 export type CardPhase = "draft" | "working" | "attention";
 export interface QueueWorkspace {
+  terminalRc?: string;
   id: string;
   name: string;
   kind: "local" | "ssh";

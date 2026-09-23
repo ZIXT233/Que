@@ -5,6 +5,12 @@ export const zhTWLocale: LocalePlugin = {
   id: "zh-TW",
   label: "繁體中文",
   messages: {
+    "workspace.rcTitle": "終端 RC 腳本",
+    "workspace.rcHint": "留空關閉；儲存後對新終端生效。驗證會實際執行腳本。",
+    "workspace.rcVerify": "載入並驗證",
+    "workspace.rcChecking": "驗證中…",
+    "workspace.rcFailed": "驗證失敗",
+
   "editor.open": "在 VS Code 開啟",
   "editor.review": "審閱",
     "mcp.approvalTitle": "允許存取這張卡片？",

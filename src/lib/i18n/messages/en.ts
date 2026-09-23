@@ -5,6 +5,12 @@ export const enLocale: LocalePlugin = {
   id: "en",
   label: "English",
   messages: {
+    "workspace.rcTitle": "Terminal RC script",
+    "workspace.rcHint": "Leave empty to disable. Applies to new terminals after saving. Verification executes the script.",
+    "workspace.rcVerify": "Load and verify",
+    "workspace.rcChecking": "Verifying…",
+    "workspace.rcFailed": "Verification failed",
+
   "editor.open": "Open in VS Code",
   "editor.review": "Review",
     "mcp.approvalTitle": "Allow access to this card?",
