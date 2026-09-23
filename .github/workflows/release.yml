@@ -116,19 +116,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - name: Remove incorrectly named assets from earlier builds
-        shell: bash
-        run: |
-          set -euo pipefail
-          release_id=$(gh api "repos/${GH_REPO}/releases/tags/${RELEASE_TAG}" --jq '.id')
-          gh api --paginate "repos/${GH_REPO}/releases/${release_id}/assets?per_page=100" \
-            --jq '.[] | select(.name | startswith("Que-") and contains("..")) | .id' |
-            while IFS= read -r asset_id; do
-              gh api -X DELETE "repos/${GH_REPO}/releases/assets/${asset_id}"
-            done
-
       - name: Publish draft release
         run: gh release edit "$RELEASE_TAG" --draft=false
