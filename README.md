@@ -7,7 +7,7 @@
   <a href="https://github.com/ZIXT233/Que/releases"><img src="https://img.shields.io/github/downloads/ZIXT233/Que/total?style=flat-square&amp;color=2ea66f" alt="Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b5cf6?style=flat-square" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-64748b?style=flat-square" alt="Windows, macOS, Linux" />
-  <img src="https://img.shields.io/badge/Rust%20%2B%20Tauri-2-e88a39?style=flat-square" alt="Rust + Tauri 2" />
+  <img src="https://img.shields.io/badge/Rust%20%2B%20Tauri%202-e88a39?style=flat-square" alt="Rust + Tauri 2" />
 </p>
 
 <p align="center">
