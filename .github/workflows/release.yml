@@ -102,7 +102,7 @@ jobs:
 
       - name: Save Windows Defender reports
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: defender-${{ matrix.arch }}
           path: logs/defender/*.json
