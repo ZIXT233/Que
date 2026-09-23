@@ -50,18 +50,18 @@ Que supports mainstream CLI harnesses through terminal cards, so you can handle 
 ## Supported harnesses
 
 <p align="center">
-  <kbd><img src="docs/assets/harness/openai.svg" width="16" height="16" alt="" /> Codex</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/anthropic.svg" width="16" height="16" alt="" /> Claude Code</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/cursor.svg" width="16" height="16" alt="" /> Cursor Agent</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/opencode.svg" width="16" height="16" alt="" /> OpenCode</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/antigravity.svg" width="16" height="16" alt="" /> Antigravity</kbd>
+  <img src="docs/assets/harness/openai.svg" width="20" height="20" align="absmiddle" alt="" /> Codex &nbsp;
+  <img src="docs/assets/harness/anthropic.svg" width="20" height="20" align="absmiddle" alt="" /> Claude Code &nbsp;
+  <img src="docs/assets/harness/cursor.svg" width="20" height="20" align="absmiddle" alt="" /> Cursor Agent &nbsp;
+  <img src="docs/assets/harness/opencode.svg" width="20" height="20" align="absmiddle" alt="" /> OpenCode &nbsp;
+  <img src="docs/assets/harness/antigravity.svg" width="20" height="20" align="absmiddle" alt="" /> Antigravity
 </p>
 <p align="center">
-  <kbd><img src="docs/assets/harness/pi.svg" width="16" height="16" alt="" /> Pi</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/omp.svg" width="16" height="16" alt="" /> Oh My Pi</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/codebuddy.svg" width="16" height="16" alt="" /> CodeBuddy</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/grok.svg" width="16" height="16" alt="" /> Grok Build</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/devin.svg" width="16" height="16" alt="" /> Devin</kbd>
+  <img src="docs/assets/harness/pi.svg" width="20" height="20" align="absmiddle" alt="" /> Pi &nbsp;
+  <img src="docs/assets/harness/omp.svg" width="20" height="20" align="absmiddle" alt="" /> Oh My Pi &nbsp;
+  <img src="docs/assets/harness/codebuddy.svg" width="20" height="20" align="absmiddle" alt="" /> CodeBuddy &nbsp;
+  <img src="docs/assets/harness/grok.svg" width="20" height="20" align="absmiddle" alt="" /> Grok Build &nbsp;
+  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin
 </p>
 
 Use your existing CLIs, accounts and model settings. Que sets up the integration when launching a card. A plain Shell card is also available. Enable external-session notices per tool in Settings. [Integration docs →](docs/harness/hook-api.md)

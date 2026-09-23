@@ -50,18 +50,18 @@ Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方�
 ## 支持的 Harness
 
 <p align="center">
-  <kbd><img src="docs/assets/harness/openai.svg" width="16" height="16" alt="" /> Codex</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/anthropic.svg" width="16" height="16" alt="" /> Claude Code</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/cursor.svg" width="16" height="16" alt="" /> Cursor Agent</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/opencode.svg" width="16" height="16" alt="" /> OpenCode</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/antigravity.svg" width="16" height="16" alt="" /> Antigravity</kbd>
+  <img src="docs/assets/harness/openai.svg" width="20" height="20" align="absmiddle" alt="" /> Codex &nbsp;
+  <img src="docs/assets/harness/anthropic.svg" width="20" height="20" align="absmiddle" alt="" /> Claude Code &nbsp;
+  <img src="docs/assets/harness/cursor.svg" width="20" height="20" align="absmiddle" alt="" /> Cursor Agent &nbsp;
+  <img src="docs/assets/harness/opencode.svg" width="20" height="20" align="absmiddle" alt="" /> OpenCode &nbsp;
+  <img src="docs/assets/harness/antigravity.svg" width="20" height="20" align="absmiddle" alt="" /> Antigravity
 </p>
 <p align="center">
-  <kbd><img src="docs/assets/harness/pi.svg" width="16" height="16" alt="" /> Pi</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/omp.svg" width="16" height="16" alt="" /> Oh My Pi</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/codebuddy.svg" width="16" height="16" alt="" /> CodeBuddy</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/grok.svg" width="16" height="16" alt="" /> Grok Build</kbd> &nbsp;
-  <kbd><img src="docs/assets/harness/devin.svg" width="16" height="16" alt="" /> Devin</kbd>
+  <img src="docs/assets/harness/pi.svg" width="20" height="20" align="absmiddle" alt="" /> Pi &nbsp;
+  <img src="docs/assets/harness/omp.svg" width="20" height="20" align="absmiddle" alt="" /> Oh My Pi &nbsp;
+  <img src="docs/assets/harness/codebuddy.svg" width="20" height="20" align="absmiddle" alt="" /> CodeBuddy &nbsp;
+  <img src="docs/assets/harness/grok.svg" width="20" height="20" align="absmiddle" alt="" /> Grok Build &nbsp;
+  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin
 </p>
 
 使用已有的 CLI、账号和模型配置，从卡片启动时自动完成接入。另提供普通 Shell 卡片。外部会话通知在设置中按工具开启。[接入文档 →](docs/harness/hook-api.zh-CN.md)
