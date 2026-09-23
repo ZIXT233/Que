@@ -27,6 +27,28 @@ struct ToolState {
     receipts: VecDeque<(String, Value, Value)>,
     pending: HashMap<String, PendingAccess>,
     grants: HashSet<RunScope>,
+    all_cards_grants: HashSet<SourceScope>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SourceScope {
+    principal: String,
+    card: String,
+    terminal: String,
+}
+impl SourceScope {
+    fn valid(&self, state: &AppState) -> bool {
+        state.terminals.is_live(&self.terminal)
+            && state.queue.read_snapshot().is_ok_and(|queue| {
+                queue.cards.iter().any(|card| {
+                    card.id == self.card
+                        && card.archived_at.is_none()
+                        && card
+                            .harness
+                            .as_ref()
+                            .is_some_and(|h| h.terminal_id == self.terminal)
+                })
+            })
+    }
 }
 struct ReadPermit {
     client: String,
@@ -49,14 +71,20 @@ impl RunScope {
             return false;
         };
         let live = |card: &str, terminal: &str| {
-            state.terminals.is_live(terminal)
-                && queue.cards.iter().any(|c| {
-                    c.id == card
-                        && c.archived_at.is_none()
-                        && c.harness
+            queue.cards.iter().any(|c| {
+                c.id == card
+                    && c.archived_at.is_none()
+                    && if terminal.is_empty() {
+                        c.harness
                             .as_ref()
-                            .is_some_and(|h| h.terminal_id == terminal)
-                })
+                            .is_none_or(|h| !state.terminals.is_live(&h.terminal_id))
+                    } else {
+                        state.terminals.is_live(terminal)
+                            && c.harness
+                                .as_ref()
+                                .is_some_and(|h| h.terminal_id == terminal)
+                    }
+            })
         };
         live(&self.card, &self.terminal)
             && self
@@ -138,6 +166,7 @@ pub async fn pending(state: &AppState) -> Value {
     let mut tools = state.mcp.tools.lock().await;
     expire(&mut tools);
     tools.grants.retain(|scope| scope.valid(state));
+    tools.all_cards_grants.retain(|scope| scope.valid(state));
     tools.pending.retain(|_, p| p.valid(state));
     let mut values: Vec<_> = tools
         .pending
@@ -145,7 +174,7 @@ pub async fn pending(state: &AppState) -> Value {
         .map(|(id, p)| {
             json!({
                 "id":id,"sourceCardId":p.scope.source_card,"scope":"run","source":p.source,"target":p.target,"cardId":p.body["cardId"],
-                "tool":p.body["tool"],"kind":p.body["kind"],"text":p.body["text"],"key":p.body["key"],
+                "tool":p.body["tool"],"kind":p.body["kind"],"text":p.body["text"],"key":p.body["key"],"nickname":p.body["nickname"],
                 "submit":p.body["submit"].as_bool().unwrap_or(true),"expiresAt":p.expires_at
             })
         })
@@ -160,7 +189,12 @@ pub async fn pending(state: &AppState) -> Value {
 }
 
 // Approval is native UI IPC only. It is intentionally not an HTTP/MCP tool.
-pub async fn decide(state: &AppState, id: &str, approve: bool) -> AppResult<Value> {
+pub async fn decide(
+    state: &AppState,
+    id: &str,
+    approve: bool,
+    all_cards: bool,
+) -> AppResult<Value> {
     let mut tools = state.mcp.tools.lock().await;
     expire(&mut tools);
     let p = tools
@@ -170,6 +204,19 @@ pub async fn decide(state: &AppState, id: &str, approve: bool) -> AppResult<Valu
     let body = &p.body;
     let card_id = required(body, "cardId")?;
     let terminal_id = body["terminalId"].as_str().unwrap_or_default();
+    if all_cards && (!approve || p.scope.source_card.is_none()) {
+        tools.pending.insert(id.to_string(), p);
+        return Err(AppError::msg(
+            "All-card access requires approval from a source card",
+        ));
+    }
+    if approve && all_cards && p.valid(state) {
+        tools.all_cards_grants.insert(SourceScope {
+            principal: p.scope.principal.clone(),
+            card: p.scope.source_card.clone().unwrap(),
+            terminal: p.scope.source_terminal.clone(),
+        });
+    }
     let result = if !p.valid(state) {
         json!({"requestId":body["requestId"],"delivery":"expired","execution":"not-sent","error":"Source or target run ended or changed"})
     } else if approve && body["tool"] == "start_card" {
@@ -194,7 +241,7 @@ pub async fn decide(state: &AppState, id: &str, approve: bool) -> AppResult<Valu
                     tools.grants.insert(scope);
                 }
                 json!({"requestId":body["requestId"],"delivery":"started","cardId":card_id,"terminalId":terminal.terminal_id,
-                    "scope":"run","execution":"unconfirmed","next":"read_terminal using the returned terminalId before sending input"})
+                    "scope":if all_cards { "source-run-all-cards" } else { "run" },"execution":"unconfirmed","next":"read_terminal using the returned terminalId before sending input"})
             }
             Err(error) => {
                 json!({"requestId":body["requestId"],"delivery":"not-started","error":error.to_string(),"execution":"unconfirmed"})
@@ -204,8 +251,8 @@ pub async fn decide(state: &AppState, id: &str, approve: bool) -> AppResult<Valu
         if approve {
             tools.grants.insert(p.scope.clone());
         }
-        json!({"requestId":body["requestId"],"delivery":if approve { "authorized" } else { "denied" },"scope":if approve { "run" } else { "request" },"execution":"not-sent",
-            "next":"If authorized, retry the original terminal tool. Authorization itself does not send input."})
+        json!({"requestId":body["requestId"],"delivery":if approve { "authorized" } else { "denied" },"scope":if approve && all_cards { "source-run-all-cards" } else if approve { "run" } else { "request" },"execution":"not-sent",
+            "next":"If authorized, retry the original tool. Authorization itself does not send input."})
     };
     crate::debuglog::info_card(
         "mcp",
@@ -347,6 +394,64 @@ fn required<'a>(body: &'a Value, name: &str) -> AppResult<&'a str> {
         .ok_or_else(|| AppError::msg(format!("Missing {name}")))
 }
 
+fn card_title(
+    harness: Option<&crate::models::HarnessSession>,
+    workspace_name: Option<&str>,
+) -> String {
+    let Some(h) = harness else {
+        return "新会话".into();
+    };
+    h.session_name
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| h.submit_prompt.as_deref().filter(|s| !s.trim().is_empty()))
+        .or_else(|| h.first_prompt.as_deref().filter(|s| !s.trim().is_empty()))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| {
+            let kind = match h.kind.as_str() {
+                "claude" => "Claude Code",
+                "cursor" => "Cursor Agent",
+                "antigravity" => "Antigravity CLI",
+                "codebuddy" => "CodeBuddy",
+                "grok" => "Grok Build",
+                "shell" => "纯终端，不响应 Agent 事件",
+                "codex" => "Codex",
+                "opencode" => "OpenCode",
+                "pi" => "Pi",
+                "omp" => "OMP",
+                "devin" => "Devin",
+                other => other,
+            };
+            format!("{kind} · {}", workspace_name.unwrap_or("新会话"))
+        })
+}
+
+fn source_scope(
+    source_card: Option<&crate::models::QueueCard>,
+    principal: &str,
+    terminal: &str,
+) -> Option<SourceScope> {
+    source_card.map(|card| SourceScope {
+        principal: principal.into(),
+        card: card.id.clone(),
+        terminal: terminal.into(),
+    })
+}
+
+fn source_label(card: &crate::models::QueueCard) -> String {
+    let name = card
+        .nickname
+        .as_deref()
+        .or_else(|| {
+            card.harness
+                .as_ref()
+                .and_then(|h| h.session_name.as_deref())
+        })
+        .or_else(|| card.harness.as_ref().map(|h| h.kind.as_str()))
+        .unwrap_or("新会话");
+    format!("MCP · {name} · {}", card.cwd)
+}
+
 async fn run_tool(
     state: &AppState,
     tools: &mut ToolState,
@@ -377,6 +482,9 @@ async fn run_tool(
         .map(|c| format!("card:{}:{source_terminal}", c.id))
         .unwrap_or_else(|| format!("client:{client}"));
     tools.grants.retain(|scope| scope.valid(state));
+    tools.all_cards_grants.retain(|scope| scope.valid(state));
+    let all_cards = source_scope(source_card, &principal, source_terminal)
+        .is_some_and(|scope| tools.all_cards_grants.contains(&scope));
     if tool == "get_request_status" {
         let request = required(body, "requestId")?;
         let keys = [
@@ -399,17 +507,20 @@ async fn run_tool(
             .iter()
             .filter(|c| c.archived_at.is_none())
             .map(|card| {
+                let workspace = queue.workspaces.as_ref()
+                    .and_then(|workspaces| workspaces.iter().find(|workspace| Some(&workspace.id) == card.workspace_id.as_ref()));
                 let h = card
                     .harness
                     .as_ref()
                     .map(|h| {
-                        let workspace = queue.workspaces.as_ref()
-                            .and_then(|workspaces| workspaces.iter().find(|workspace| Some(&workspace.id) == card.workspace_id.as_ref()))
-                            .map(|workspace| crate::workspace_rc::effective_workspace(&queue, workspace));
-                        state.harness.snapshot(h, &state.terminals, workspace.as_ref())
+                        let effective = workspace.map(|workspace| crate::workspace_rc::effective_workspace(&queue, workspace));
+                        state.harness.snapshot(h, &state.terminals, effective.as_ref())
                     });
                 json!({"cardId":card.id,"cwd":card.cwd,"phase":card.phase,
-                "title":h.as_ref().and_then(|h| h.session_name.as_ref()),
+                "title":card_title(h.as_ref(), workspace.map(|w| w.name.as_str())),
+                "nickname":card.nickname,"sessionTitle":h.as_ref().and_then(|h| h.session_name.as_ref()),
+                "sessionId":h.as_ref().and_then(|h| h.provider_session_id.as_ref()),
+                "workspaceName":workspace.map(|w| &w.name),
                 "kind":h.as_ref().map(|h| &h.kind), "state":h.as_ref().map(|h| h.state.as_str()).unwrap_or("not_started"),
                 "stateNote": "not_started: blank card; not_running: no attached process, awaiting start or recovery; not proof of failure or remote job exit",
                 "terminalId":h.as_ref().map(|h| &h.terminal_id),
@@ -469,6 +580,37 @@ async fn run_tool(
                 "A stopped card must retain its existing harness kind",
             ));
         }
+        if all_cards {
+            let launch = json!({"id":card_id,"cardId":card_id,"kind":kind});
+            let action = if card.harness.is_none() {
+                "harness_start"
+            } else if card
+                .harness
+                .as_ref()
+                .is_some_and(|h| h.provider_session_id.is_some())
+            {
+                "harness_resume"
+            } else {
+                "harness_reopen"
+            };
+            let result = match crate::api::launch_harness(state, &launch, action).await {
+                Ok(queue) => {
+                    let terminal = queue
+                        .cards
+                        .iter()
+                        .find(|c| c.id == card_id)
+                        .and_then(|c| c.harness.as_ref())
+                        .ok_or_else(|| AppError::msg("Started terminal is missing"))?;
+                    json!({"requestId":request_id,"delivery":"started","cardId":card_id,"terminalId":terminal.terminal_id,
+                        "scope":"source-run-all-cards","execution":"unconfirmed","next":"read_terminal using the returned terminalId before sending input"})
+                }
+                Err(error) => {
+                    json!({"requestId":request_id,"delivery":"not-started","error":error.to_string(),"execution":"unconfirmed"})
+                }
+            };
+            remember(tools, key, json!({"_original":body}), result.clone());
+            return Ok(result);
+        }
         let scope = RunScope {
             principal,
             source_card: source_card.map(|c| c.id.clone()),
@@ -503,13 +645,7 @@ async fn run_tool(
             at: Instant::now(),
             expires_at: crate::queue::now_ms() + 30_000,
             source: source_card
-                .map(|c| {
-                    format!(
-                        "MCP · {} · {}",
-                        c.harness.as_ref().map(|h| h.kind.as_str()).unwrap_or(""),
-                        c.cwd
-                    )
-                })
+                .map(source_label)
                 .unwrap_or_else(|| "External MCP client".into()),
             target: format!("{kind} · {}", card.cwd),
         };
@@ -519,17 +655,41 @@ async fn run_tool(
         state.live.notify("mcp-approval");
         return Ok(result);
     }
-    let terminal_id = required(body, "terminalId")?;
-    if card.harness.as_ref().map(|h| h.terminal_id.as_str()) != Some(terminal_id) {
+    let nickname_tool = tool == "set_card_nickname";
+    let terminal_id = if nickname_tool {
+        card.harness
+            .as_ref()
+            .filter(|h| state.terminals.is_live(&h.terminal_id))
+            .map(|h| h.terminal_id.as_str())
+            .unwrap_or("")
+    } else {
+        required(body, "terminalId")?
+    };
+    if !nickname_tool && card.harness.as_ref().map(|h| h.terminal_id.as_str()) != Some(terminal_id)
+    {
         return Err(AppError::msg(
             "The card's terminal changed; list cards again",
         ));
     }
     if !matches!(
         tool,
-        "read_terminal" | "observe_terminal" | "send_text" | "send_key"
+        "read_terminal" | "observe_terminal" | "send_text" | "send_key" | "set_card_nickname"
     ) {
         return Err(AppError::msg("Unknown terminal tool"));
+    }
+    if nickname_tool {
+        if required(body, "requestId")?.len() > 128 {
+            return Err(AppError::msg("requestId is too long"));
+        }
+        let nickname = body["nickname"]
+            .as_str()
+            .ok_or_else(|| AppError::msg("Missing nickname"))?
+            .trim();
+        if nickname.chars().count() > 48 || nickname.chars().any(char::is_control) {
+            return Err(AppError::msg(
+                "Nickname must be at most 48 characters with no control characters",
+            ));
+        }
     }
     let scope = RunScope {
         principal: principal.clone(),
@@ -541,7 +701,7 @@ async fn run_tool(
     if !scope.valid(state) {
         return Err(AppError::msg("Source or target run ended or changed"));
     }
-    if !tools.grants.contains(&scope) {
+    if !all_cards && !tools.grants.contains(&scope) {
         if let Some((id, pending)) = tools.pending.iter().find(|(_, p)| p.scope == scope) {
             return Ok(pending_result(id, pending));
         }
@@ -552,25 +712,23 @@ async fn run_tool(
         let request_id = Uuid::new_v4().to_string();
         let pending = PendingAccess {
             key: format!("{principal}:{request_id}"),
-            body: json!({"requestId":request_id,"cardId":card_id,"terminalId":terminal_id,"tool":tool}),
+            body: json!({"requestId":request_id,"cardId":card_id,"terminalId":terminal_id,"tool":tool,"nickname":body["nickname"]}),
             scope,
             at: Instant::now(),
             expires_at: crate::queue::now_ms() + 30_000,
             source: source_card
-                .map(|c| {
-                    format!(
-                        "MCP · {} · {}",
-                        c.harness.as_ref().map(|h| h.kind.as_str()).unwrap_or(""),
-                        c.cwd
-                    )
-                })
+                .map(source_label)
                 .unwrap_or_else(|| "External MCP client".into()),
             target: format!(
                 "{} · {}",
-                card.harness
-                    .as_ref()
-                    .map(|h| h.session_name.as_deref().unwrap_or(&h.kind))
-                    .unwrap_or(""),
+                card.nickname
+                    .as_deref()
+                    .or_else(|| card
+                        .harness
+                        .as_ref()
+                        .and_then(|h| h.session_name.as_deref()))
+                    .or_else(|| card.harness.as_ref().map(|h| h.kind.as_str()))
+                    .unwrap_or("新会话"),
                 card.cwd
             ),
         };
@@ -580,6 +738,67 @@ async fn run_tool(
         return Ok(result);
     }
     match tool {
+        "set_card_nickname" => {
+            let request_id = required(body, "requestId")?;
+            if request_id.len() > 128 {
+                return Err(AppError::msg("requestId is too long"));
+            }
+            let request_key = format!("{client}:{request_id}");
+            if let Some((_, original, result)) =
+                tools.receipts.iter().find(|(id, _, _)| id == &request_key)
+            {
+                if original != body {
+                    return Err(AppError::msg(
+                        "requestId was already used for another action",
+                    ));
+                }
+                return Ok(result.clone());
+            }
+            let nickname = body["nickname"].as_str().unwrap().trim();
+            let changed = state
+                .queue
+                .with_queue(false, |queue| {
+                    if scope.source_card.as_ref().is_some_and(|id| {
+                        !state.terminals.is_live(source_terminal)
+                            || !queue.cards.iter().any(|c| {
+                                c.id == *id
+                                    && c.archived_at.is_none()
+                                    && c.harness
+                                        .as_ref()
+                                        .is_some_and(|h| h.terminal_id == source_terminal)
+                            })
+                    }) {
+                        return Err(AppError::msg("Source run changed"));
+                    }
+                    let target = queue
+                        .cards
+                        .iter_mut()
+                        .find(|c| c.id == card_id && c.archived_at.is_none())
+                        .ok_or_else(|| AppError::msg("Card is missing or archived"))?;
+                    let current = target
+                        .harness
+                        .as_ref()
+                        .filter(|h| state.terminals.is_live(&h.terminal_id))
+                        .map(|h| h.terminal_id.as_str())
+                        .unwrap_or("");
+                    if current != terminal_id {
+                        return Err(AppError::msg("Target run changed"));
+                    }
+                    target.nickname = (!nickname.is_empty()).then(|| nickname.to_string());
+                    Ok(())
+                })
+                .await;
+            let result = match changed {
+                Ok(()) => {
+                    json!({"requestId":request_id,"delivery":"updated","cardId":card_id,"nickname":if nickname.is_empty() { None } else { Some(nickname) }})
+                }
+                Err(error) => {
+                    json!({"requestId":request_id,"delivery":"not-updated","error":error.to_string()})
+                }
+            };
+            remember(tools, request_key, body.clone(), result.clone());
+            Ok(result)
+        }
         "read_terminal" | "observe_terminal" => {
             let read = state
                 .terminals
@@ -749,5 +968,24 @@ mod tests {
             tool_input(&json!({"tool":"send_key","key":"CtrlC"})).unwrap(),
             "\x03"
         );
+    }
+
+    #[test]
+    fn card_title_follows_the_displayed_session_title_fallbacks() {
+        let mut harness: crate::models::HarnessSession = serde_json::from_value(json!({
+            "kind":"codex","terminalId":"terminal","state":"attention"
+        }))
+        .unwrap();
+        assert_eq!(card_title(None, Some("Project")), "新会话");
+        assert_eq!(
+            card_title(Some(&harness), Some("Project")),
+            "Codex · Project"
+        );
+        harness.first_prompt = Some("first".into());
+        assert_eq!(card_title(Some(&harness), Some("Project")), "first");
+        harness.submit_prompt = Some("latest".into());
+        assert_eq!(card_title(Some(&harness), Some("Project")), "latest");
+        harness.session_name = Some("named".into());
+        assert_eq!(card_title(Some(&harness), Some("Project")), "named");
     }
 }

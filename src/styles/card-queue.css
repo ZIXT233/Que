@@ -2108,3 +2108,5 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-mcp-approval button { padding: 8px 12px; border: 1px solid var(--cq-line); border-radius: 7px; background: var(--cq-paper); color: var(--cq-ink); }
 .cq-mcp-approval button:hover { background: var(--cq-surface); }
 .cq-mcp-approval button:focus-visible { outline: 2px solid var(--cq-ink); outline-offset: 2px; }
+.cq-mcp-all-cards { display:flex; align-items:flex-start; gap:8px; margin:18px 0; font-size:14px; line-height:1.5; cursor:pointer; }
+.cq-mcp-all-cards input { margin-top:3px; accent-color:var(--cq-ink); }

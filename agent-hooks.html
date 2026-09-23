@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>各家 Agent CLI 的 Hook 能力调查表</title>
+<style>
+  :root {
+    --bg: #f7f2e5;          /* 浅米黄 */
+    --bg-soft: #fbf8ee;
+    --ink: #3d3628;
+    --ink-soft: #6b6250;
+    --line: #e3d9c0;
+    --accent: #a68a4e;
+    --accent-soft: #f0e7cf;
+    --tag-ask: #7c8b4d;
+    --tag-guess: #b3763c;
+    --tag-none: #9a9280;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+    line-height: 1.65;
+    padding: 48px 20px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { margin-bottom: 32px; }
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--accent);
+    display: inline-block;
+    padding-bottom: 8px;
+  }
+  header p { color: var(--ink-soft); margin-top: 12px; font-size: 14px; }
+
+  .legend { margin: 20px 0 28px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .dot.ask { background: var(--tag-ask); }
+  .dot.guess { background: var(--tag-guess); }
+  .dot.none { background: var(--tag-none); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 13.5px;
+    box-shadow: 0 2px 10px rgba(120, 100, 60, 0.08);
+  }
+  th, td { padding: 12px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  thead th {
+    background: var(--accent-soft);
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.4px;
+    border-bottom: 2px solid var(--accent);
+  }
+  tbody tr:hover { background: #f3ecd7; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.vendor { font-weight: 700; white-space: nowrap; }
+  td.vendor small { display: block; font-weight: 400; color: var(--ink-soft); font-size: 11.5px; margin-top: 2px; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: #efe8d2;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+  .events { color: var(--ink-soft); }
+  .events code { margin: 2px 3px 2px 0; display: inline-block; }
+
+  .untested { color: var(--ink-soft); opacity: 0.75; font-style: italic; }
+
+  .tag {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 2px 10px;
+    color: #fff;
+  }
+  .tag.ask { background: var(--tag-ask); }
+  .tag.guess { background: var(--tag-guess); }
+  .tag.none { background: var(--tag-none); }
+
+  .note {
+    margin-top: 28px;
+    background: var(--accent-soft);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 18px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .note b { color: var(--accent); }
+
+  h2 {
+    font-size: 18px;
+    margin: 44px 0 14px;
+    padding-left: 10px;
+    border-left: 4px solid var(--accent);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>各家 Agent CLI 的 Hook 能力调查表</h1>
+    <p>项目无关 · 只看各 CLI 自带的生命周期钩子：注册哪些事件、真正的「需要人介入」信号来自哪里、哪些只能靠猜测。</p>
+  </header>
+
+  <div class="legend">
+    <span><i class="dot ask"></i>真正的询问来源（明确上报）</span>
+    <span><i class="dot guess"></i>只能猜测（挂起等待升级）</span>
+    <span><i class="dot none"></i>无 hook，靠字节流探测</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:130px">CLI</th>
+        <th style="width:170px">接入方式</th>
+        <th>注册的 Hook 事件</th>
+        <th style="width:190px">询问来源</th>
+        <th style="width:150px">备注</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="vendor">Claude Code<small>同机制：CodeBuddy</small></td>
+        <td>命令式 hook<br><code>stdin JSON</code></td>
+        <td class="events">
+          <code>SessionStart</code><code>UserPromptSubmit</code><code>PreToolUse</code><code>PermissionRequest</code><code>Notification</code><code>PostToolUse</code><code>PostToolUseFailure</code><code>Stop</code><code>StopFailure</code>
+        </td>
+        <td><span class="tag ask">明确</span><br><code>PermissionRequest</code>、<code>Notification(permission_prompt)</code></td>
+        <td>事件词汇最完整，权限事件原生</td>
+      </tr>
+      <tr>
+        <td class="vendor">Codex</td>
+        <td>命令式 hook<br><code>stdin JSON</code></td>
+        <td class="events">
+          <code>SessionStart</code><code>UserPromptSubmit</code><code>PreToolUse</code><code>PermissionRequest</code><code>PostToolUse</code><code>Stop</code>
+        </td>
+        <td><span class="tag ask">明确</span><br><code>PermissionRequest</code>、终端 <code>OSC 9</code> action-required</td>
+        <td>额外可观察 TUI 标题变化</td>
+      </tr>
+      <tr>
+        <td class="vendor">Cursor</td>
+        <td>用户级命令式 hook<br><code>stdin JSON</code></td>
+        <td class="events">
+          <code>sessionStart</code><code>beforeSubmitPrompt</code><code>preToolUse</code><code>postToolUse</code><code>postToolUseFailure</code><code>beforeShellExecution</code><code>beforeMCPExecution</code><code>afterAgentResponse</code><code>stop</code><code>sessionEnd</code>
+        </td>
+        <td><span class="tag ask">明确</span><br>通知类 <code>OSC 99</code>（"waiting for you"）、<code>stop</code></td>
+        <td>hook 会阻塞，stdout 必须回 JSON 裁决；hook 是全局的，非本工具会话也会上报</td>
+      </tr>
+      <tr>
+        <td class="vendor">Antigravity</td>
+        <td>命令式 hook<br><code>stdin JSON</code></td>
+        <td class="events">
+          <code>PreInvocation</code><code>PostInvocation</code><code>PreToolUse</code><code>PostToolUse</code><code>Stop</code>
+        </td>
+        <td><span class="tag none">无权限事件</span><br><span class="tag guess">只能猜</span><code>PreToolUse</code></td>
+        <td><code>Stop</code> 附带 <code>fullyIdle</code> 字段区分「回合真的结束」与「中途暂停」</td>
+      </tr>
+      <tr>
+        <td class="vendor">Gemini CLI</td>
+        <td>命令式 hook<br><code>stdin JSON</code></td>
+        <td class="events">
+          <code>SessionStart</code><code>BeforeAgent</code><code>AfterAgent</code><code>BeforeTool</code><code>AfterTool</code><code>Notification</code>
+        </td>
+        <td><span class="tag ask">明确</span><br><code>Notification</code></td>
+        <td>没有提交形态事件，回合起点用 <code>BeforeAgent</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">Grok CLI</td>
+        <td>命令式 hook<br><code>stdin JSON</code></td>
+        <td class="events">
+          <code>SessionStart</code><code>UserPromptSubmit</code><code>PreToolUse</code><code>PostToolUse</code><code>PostToolUseFailure</code><code>Stop</code><code>StopFailure</code><code>StopCancelled</code><code>Notification</code>
+        </td>
+        <td><span class="tag ask">明确</span><br><code>Notification</code></td>
+        <td>词汇较全，含 <code>StopCancelled</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">OpenCode</td>
+        <td>插件回调<br><code>plugin API</code></td>
+        <td class="events">
+          <code>session.*</code><code>permission.asked</code><code>question.asked</code><code>permission.replied</code><code>session.idle</code>
+        </td>
+        <td><span class="tag ask">明确</span><br><code>permission.asked</code>、<code>question.asked</code></td>
+        <td>原生区分「权限」与「提问」两类询问</td>
+      </tr>
+      <tr>
+        <td class="vendor">Pi<small>同机制：Omp</small></td>
+        <td>扩展回调<br><code>extension API</code></td>
+        <td class="events">
+          <code>session_start</code><code>before_agent_start</code><code>agent_start</code><code>agent_end</code> / <code>agent_settled</code><code>ui_prompt_start</code><code>ui_prompt_end</code>
+        </td>
+        <td><span class="tag ask">明确</span><br><code>ui_prompt_start</code></td>
+        <td>询问以 UI 提示事件呈现</td>
+      </tr>
+      <tr>
+        <td class="vendor">普通 Shell</td>
+        <td>—</td>
+        <td class="events">无 hook，直接探测 PTY 字节流</td>
+        <td><span class="tag none">探测</span><br>命令执行结束</td>
+        <td>只能观察，不能订阅</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>能力支持情况实测表</h2>
+  <table style="margin-bottom:8px">
+    <thead>
+      <tr>
+        <th style="width:130px">CLI</th>
+        <th>消息发送</th>
+        <th>普通回复</th>
+        <th>ask（询问）</th>
+        <th>perm（权限）</th>
+        <th>resume 同步</th>
+        <th style="width:320px">标题（命名回退链）</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="vendor">Codex</td>
+        <td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td>
+        <td class="events">事件时读 session 文件：<code>thread_name</code> → 会话第一条 prompt → hook 最后一次 prompt → <code>Codex · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">Claude Code</td>
+        <td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td class="untested">未测</td><td>✅ 正常</td>
+        <td class="events">事件时读 session 文件：<code>custom-title</code> → 会话第一条 prompt → hook 最后一次 prompt → <code>Claude Code · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">CodeBuddy</td>
+        <td class="untested">未测</td><td class="untested">未测</td><td class="untested">未测</td><td class="untested">未测</td><td class="untested">未测</td>
+        <td class="events">事件时读 session 文件：<code>custom-title</code> → <code>ai-title</code> → <code>topic</code> → 会话第一条 prompt → hook 最后一次 prompt → <code>CodeBuddy · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">Cursor</td>
+        <td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 通过</td>
+        <td class="events">事件时读 session 文件：<code>meta.title</code> → <code>prompt_history</code> 首条 → hook 最后一次 prompt → <code>Cursor Agent · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">Pi CLI</td>
+        <td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td>
+        <td class="events">事件时读 session 文件：<code>session_info.name</code> → 会话第一条 prompt → hook 最后一次 prompt → <code>Pi CLI · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">Oh My Pi</td>
+        <td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td>
+        <td class="events">事件时读 session 文件：<code>title</code> → <code>session_info.name</code> → 会话第一条 prompt → hook 最后一次 prompt → <code>Oh My Pi · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">Grok Build</td>
+        <td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td>
+        <td class="events">事件时读 session 文件：<code>summary.generated_title</code> → 会话第一条 prompt → hook 最后一次 prompt → <code>Grok Build · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">Antigravity</td>
+        <td class="untested">未测</td><td class="untested">未测</td><td class="untested">未测</td><td class="untested">未测</td><td class="untested">未测</td>
+        <td class="events">无稳定 session 文件：hook 最后一次 prompt → <code>Antigravity CLI · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">OpenCode</td>
+        <td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td><td>✅ 正常</td>
+        <td class="events">稳定 OSC <code>info.title</code>（过滤 <code>New session</code> 默认值）→ hook 首条 prompt → hook 最后一次 prompt → <code>OpenCode · 工作区</code></td>
+      </tr>
+      <tr>
+        <td class="vendor">普通 Shell</td>
+        <td class="untested">—</td><td class="untested">—</td><td class="untested">—</td><td class="untested">—</td><td class="untested">—</td>
+        <td class="events">工作区名</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size:12.5px;color:var(--ink-soft);margin:8px 2px 0">「未测」= 调查记录中该项为空，尚无实测结论。</p>
+
+  <h2>共同规律</h2>
+  <div class="note">
+    <p><b>命名不同，边界相同。</b>各家用不同的名字标注同一批边界：回合开始（<code>beforeSubmitPrompt</code> / <code>UserPromptSubmit</code> / <code>BeforeAgent</code> / <code>PreInvocation</code>）、工具前后（<code>PreToolUse</code> / <code>BeforeTool</code>…）、回合结束（<code>Stop</code> / <code>sessionEnd</code> / <code>AfterAgent</code> / <code>agent_settled</code>）。</p>
+    <br>
+    <p><b>两类询问要分清。</b>Antigravity 与 Cursor 的工具 hook 在「用户是否被询问」上是同一个事件、无法从载荷分辨——直接当询问处理会在每次读文件、每次 grep 时报警。可靠的做法是：先按「工作中」处理并挂起猜测，工具毫秒级自动放行则后续事件冲销；若超过窗口（如 5 秒）仍无下文，才升级为真实的「需要人介入」。</p>
+    <br>
+    <p><b>子 Agent 事件一律丢弃。</b>凡载荷携带子 Agent 标识（如 <code>agentId</code>）的事件，与队列状态无关。</p>
+    <br>
+    <p><b>旁观的 hook 不设闸。</b>凡要求 stdout 回裁决的 hook（如 Cursor），一律返回放行——观察者不应阻塞 CLI。</p>
+  </div>
+
+</div>
+</body>
+</html>

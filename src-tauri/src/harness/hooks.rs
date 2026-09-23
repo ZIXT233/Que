@@ -1,14 +1,33 @@
 use super::install::{GlobalCtx, Host};
-use super::registry::{self, Ctx};
-use crate::error::AppResult;
+use super::registry::{self, Ctx, Plan};
+use crate::error::{AppError, AppResult};
 use crate::models::{AppSettings, QueueWorkspace};
 use crate::paths::{atomic_write, signal_dir};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct HookLaunch {
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
+    host: Host,
+    plan: Plan,
+}
+
+impl HookLaunch {
+    pub fn remote_launch_path(&self, terminal_id: &str) -> AppResult<PathBuf> {
+        let home = self
+            .host
+            .home
+            .as_deref()
+            .ok_or_else(|| AppError::machine("REMOTE_HOME_UNKNOWN"))?;
+        Ok(Path::new(home)
+            .join(".cache/que/harness-launch")
+            .join(format!("{terminal_id}.sh")))
+    }
+
+    pub async fn install(&self, launch_script: Option<(&Path, &str)>) -> AppResult<()> {
+        self.host.install(&self.plan, launch_script).await
+    }
 }
 
 pub async fn prepare_hook_launch(
@@ -40,21 +59,25 @@ pub async fn prepare_hook_launch(
     if !plan.files.contains_key("hook.cjs") {
         plan.files.insert("hook.cjs".into(), ingress);
     }
-    host.install(&plan).await?;
-    let args = plan.args;
-    let mut env = plan.env;
+    let args = std::mem::take(&mut plan.args);
+    let mut env = std::mem::take(&mut plan.env);
     env.extend(host.base_env(directory));
     if !host.remote {
         let _ = signal_dir(token);
     }
-    Ok(HookLaunch { args, env })
+    Ok(HookLaunch {
+        args,
+        env,
+        host,
+        plan,
+    })
 }
 
 /// Bring plugin copies that already exist up to the running build, and report which
 /// kinds were rewritten.
 ///
-/// `prepare_hook_launch` is the only writer, and it only runs when a card of that kind
-/// launches. So a build that ships a new ingress script leaves every kind it no longer
+/// `HookLaunch::install` runs when a card of that kind launches. So a build that
+/// ships a new ingress script leaves every kind it no longer
 /// launches on the old one — Cursor in particular keeps a *current* `~/.cursor/hooks.json`
 /// pointing at a stale `hook.cjs`, which fails silently. Startup closes that gap for
 /// local copies; remote (SSH) copies still wait for their card, because reaching them

@@ -28,7 +28,8 @@ grants, read tokens and input receipts: list/read again before any new input.
 ## Tools
 
 - `start_card`: request approval to start a blank or stopped card, and grant access to the resulting run. Supply `cardId`, unique `requestId`, and `kind` for a blank card. A stopped card keeps its harness kind and resumes its session when supported. Running cards are never restarted.
-- `list_cards`: active cards, exact IDs, process state and controllability.
+- `list_cards`: active cards, exact IDs, displayed card `title`, optional Que `nickname`, provider `sessionTitle` and `sessionId`, workspace name, process state and controllability.
+- `set_card_nickname`: set a Que card nickname (up to 48 characters), or pass an empty string to clear it. Supply `cardId` and a unique `requestId`. This does not rename the provider session.
 - `read_terminal`: reconstructed current screen plus a 30-second read token.
 - `observe_terminal`: screen and whether output changed after an offset.
 - `send_text`: user-authorized single-line text, optional Enter.
@@ -61,23 +62,28 @@ They are not loaded or served by MCP. External clients own context persistence.
 
 ## Human approval for a source-target run pair
 
-The first `read_terminal`, `observe_terminal`, `send_text` or `send_key` for a
+The first `read_terminal`, `observe_terminal`, `send_text`, `send_key` or `set_card_nickname` for a
 source-target pair returns `approval-required` without reading output or sending
 input. Que shows the source and target and **Deny** / **Allow for this run**.
+For a source card, an unchecked-by-default option also allows that card to operate
+on all other cards until its current terminal run ends. This includes starting
+cards and changing nicknames. External clients cannot receive this wider grant.
 `list_cards` remains available for target discovery. Pending dialogs expire after
 30 seconds; Escape denies. Approval itself sends no input.
 
 Use `get_request_status` with the **returned** requestId (the authorization request
 has its own ID). After `authorized`, retry the original tool. All four terminal
-tools then work without another Que prompt for this pair. Fresh reads, input
+tools and nickname changes then work without another Que prompt for this pair. Fresh reads, input
 revision checks, human typing protection and write receipt deduplication still
-apply. The grant does not authorize the reverse direction or other target cards.
+apply. The ordinary grant does not authorize the reverse direction or other target cards.
 A denial applies only to that authorization request. A later access attempt can
 request approval again; it must be approved before any access is allowed. Clients
 should not automatically loop after a denial. Old request receipts remain denied.
 
-Grants are in memory only. Either card's terminal ending/restarting, a missing or
-archived card, or Que restarting invalidates access. “Run” means the attached
+Grants are in memory only. For a pair grant, either card's terminal ending or
+restarting, a missing or archived card, or Que restarting invalidates access.
+An all-card grant ends when the source run ends or its card is archived, or when
+Que restarts. “Run” means the attached
 terminal process lifetime, not an individual model response. Approval rechecks
 both runs; subsequent calls check them again. Approval uses native desktop IPC,
 not a public HTTP route or an MCP tool.
