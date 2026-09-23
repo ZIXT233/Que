@@ -4,6 +4,7 @@ version = "0.1.2"
 description = "Queue of Agent Cues"
 authors = ["Que"]
 edition = "2021"
+license = "MIT"
 default-run = "que"
 
 [features]

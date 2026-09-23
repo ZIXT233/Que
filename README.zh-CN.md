@@ -1,59 +1,93 @@
-# Que
+<h1 align="center"><img src="src-tauri/icons/icon.png" alt="Que logo" width="64" height="64" align="absmiddle" /> Que</h1>
 
-**English** | [简体中文](README.zh-CN.md)
+<p align="center"><strong>让 Agent 排队找你</strong></p>
 
-**让 Agent 排队找你**
+<p align="center">
+  <a href="https://github.com/ZIXT233/Que/releases/latest"><img src="https://img.shields.io/github/v/release/ZIXT233/Que?style=flat-square&amp;color=b77c5f" alt="Latest release" /></a>
+  <a href="https://github.com/ZIXT233/Que/releases"><img src="https://img.shields.io/github/downloads/ZIXT233/Que/total?style=flat-square&amp;color=b77c5f" alt="Downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-b77c5f?style=flat-square" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-78685c?style=flat-square" alt="Windows, macOS, Linux" />
+  <img src="https://img.shields.io/badge/Rust%20%2B%20Tauri-2-78685c?style=flat-square" alt="Rust + Tauri 2" />
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="https://github.com/ZIXT233/Que/issues">反馈</a>
+</p>
+
+<h3 align="center"><a href="https://github.com/ZIXT233/Que/releases/latest">下载 Que</a></h3>
 
 Que 通过统一的待处理 Agent 会话队列调度你的注意力，让你只需处理队首，而不用追着通知小红点跑。
 
 Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方处理多个 Harness 工作流。
 
-## 工作流
+## 功能
 
-### 待回复卡片队列
+<table>
+<tr>
+<td width="45%" valign="middle">
+<h3>待回复卡片队列</h3>
+<p>需要回复的会话进入队列，回复后移到侧边栏工作，需要你时再回队。支持优先级排序、先进先出、稍后提醒和独立窗口。</p>
+</td>
+<td width="55%"><a href="docs/assets/queue-demo.gif"><img src="docs/assets/queue-demo.gif" alt="会话在待回复队列和工作侧栏之间切换" width="440" /></a></td>
+</tr>
+<tr>
+<td width="45%" valign="middle">
+<h3>外部会话接入</h3>
+<p>启用对应 hook 后，IDE、桌面应用和独立终端中的会话也能进入通知队列。在原应用处理后，通知卡自动退出。</p>
+</td>
+<td width="55%"><a href="docs/assets/external-notice.gif"><img src="docs/assets/external-notice.gif" alt="外部会话进入 Que 通知队列" width="440" /></a></td>
+</tr>
+<tr>
+<td width="45%" valign="middle">
+<h3>远程工作区与 tmux</h3>
+<p>新建会话时选择 SSH 工作区，可启用 tmux 保活。连接断开或客户端退出后，会话继续运行。远程主机需安装对应 CLI 和 tmux。</p>
+</td>
+<td width="55%"><a href="docs/assets/remote-tmux.gif"><img src="docs/assets/remote-tmux.gif" alt="选择远程工作区和 tmux 并打开终端" width="440" /></a></td>
+</tr>
+</table>
 
-- 每个会话一张卡片，状态实时更新。正在干活的卡片不占队列——队里排的就是在等回复的。
-- 排序两种：评分（等待时长 + 卡片权重）或先进先出。「稍后提醒」的卡片到点自动回队。
-- 处理完一张，下一张顶上；干完的归档，跑着的可以拆成独立窗口盯着。
-- 会话需要你时弹桌面通知，点一下直接跳到那张卡片。
+## 支持的 Harness
 
-### 多CLI Harness响应支持
+<p align="center">
+  <kbd><img src="docs/assets/harness/openai.svg" width="16" height="16" alt="" /> Codex</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/anthropic.svg" width="16" height="16" alt="" /> Claude Code</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/cursor.svg" width="16" height="16" alt="" /> Cursor Agent</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/opencode.svg" width="16" height="16" alt="" /> OpenCode</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/antigravity.svg" width="16" height="16" alt="" /> Antigravity</kbd>
+</p>
+<p align="center">
+  <kbd><img src="docs/assets/harness/pi.svg" width="16" height="16" alt="" /> Pi</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/omp.svg" width="16" height="16" alt="" /> Oh My Pi</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/codebuddy.svg" width="16" height="16" alt="" /> CodeBuddy</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/grok.svg" width="16" height="16" alt="" /> Grok Build</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/devin.svg" width="16" height="16" alt="" /> Devin</kbd>
+</p>
 
-Claude Code、CodeBuddy、Codex、Cursor、Antigravity、Gemini、Grok、OpenCode、Pi / OMP，外加一张万能的 Shell 卡片。
+使用已有的 CLI、账号和模型配置，从卡片启动时自动完成接入。另提供普通 Shell 卡片。外部会话通知在设置中按工具开启。[接入文档 →](docs/harness/hook-api.zh-CN.md)
 
-- 从卡片启动会话时自动完成接入，不需要你手动配 hook；你手写的配置条目永远不会被覆盖。
-- 卡片上显示真实的会话标题和提问内容，重开一张卡会自动接回原来的对话。
-- 各家 Harness 的实测状态（消息发送 / 普通回复 / ask / perm / resume 同步 / 标题来源）：
+## 开始使用
 
-| Harness | 消息发送 | 普通回复 | ask | perm | resume 同步 | 标题 |
-| --- | --- | --- | --- | --- | --- | --- |
-| Codex | 正常 | 正常 | 正常 | 正常 | 正常 | thread_name |
-| Claude Code | 正常 | 正常 | 正常 | 正常 | 正常 | custom-title 或 会话第一条prompt |
-| CodeBuddy | 正常 | 正常 | 正常 | 正常 | 正常 | custom-title 或 ai-title |
-| Cursor | 正常 | 正常 | 正常 | 正常 | 通过 | meta.title |
-| Pi | 正常 | 正常 | 正常 | 正常 | 正常 | session_info.name |
-| OMP | 正常 | 正常 | 正常 | 正常 | 正常 | title |
-| Grok | 正常 | 正常 | 正常 | 正常 | 正常 | generated_title |
-| Antigravity | 正常 | 正常 | 正常 | 正常 | 正常 | hook最后一次prompt |
-| OpenCode | 正常 | 正常 | 正常 | 正常 | 正常 | OSC info.title |
-| Shell | | | | | | 工作区名 |
+1. 从 [Releases](https://github.com/ZIXT233/Que/releases/latest) 下载对应系统和架构的安装包。
+2. 安装并登录要使用的 CLI 工具。
+3. 在 Que 中选择工具和工作区，新建会话。
 
-### 外部Agent会话捕捉
+## 从源码运行
 
-IDE 聊天窗口、裸终端里跑的同一批 Harness 也会向你要注意力。装好用户级 hook 后，Que 会把这些询问一并抓进来：以通知卡的形式出现在同一个牌堆里，带着项目名、问题和到目前为止的对话，会话回到工作状态时自动消失；每一家的外部抓取都可以在设置里单独开关。
-
-### 远程工作区支持
-
-- SSH 主机保存一次，选中上面的一个目录，之后卡片、状态、通知和本地完全一致。
-
-## 开发
-
-环境要求：Node.js 22+、Rust 工具链，以及你所在平台的 [Tauri 2 依赖](https://v2.tauri.app/start/prerequisites/)。
+需要 Node.js 22+、Rust 和当前平台的 [Tauri 2 依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
-npm install
-npm run tauri dev     # 跑桌面端
-npm run tauri build   # 打当前平台的安装包
+git clone https://github.com/ZIXT233/Que.git
+cd Que
+npm ci
+npm run tauri dev
+# 打包当前平台
+npm run tauri build
 ```
 
-应用数据在 `~/.que`。协议细节与调试指南：[docs/harness/hook-api.zh-CN.md](docs/harness/hook-api.zh-CN.md)。
+应用数据位于 `~/.que`。
+
+
+## 协议
+
+[MIT](LICENSE)。第三方组件保留各自的协议与版权声明。

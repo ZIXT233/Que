@@ -1,59 +1,93 @@
-# Que
+<h1 align="center"><img src="src-tauri/icons/icon.png" alt="Que logo" width="64" height="64" align="absmiddle" /> Que</h1>
 
-**English** | [简体中文](README.zh-CN.md)
+<p align="center"><strong>Queue of Agent Cues</strong></p>
 
-**Queue of Agent Cues**
+<p align="center">
+  <a href="https://github.com/ZIXT233/Que/releases/latest"><img src="https://img.shields.io/github/v/release/ZIXT233/Que?style=flat-square&amp;color=b77c5f" alt="Latest release" /></a>
+  <a href="https://github.com/ZIXT233/Que/releases"><img src="https://img.shields.io/github/downloads/ZIXT233/Que/total?style=flat-square&amp;color=b77c5f" alt="Downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-b77c5f?style=flat-square" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-78685c?style=flat-square" alt="Windows, macOS, Linux" />
+  <img src="https://img.shields.io/badge/Rust%20%2B%20Tauri-2-78685c?style=flat-square" alt="Rust + Tauri 2" />
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="https://github.com/ZIXT233/Que/issues">Issues</a>
+</p>
+
+<h3 align="center"><a href="https://github.com/ZIXT233/Que/releases/latest">Download Que</a></h3>
 
 Que schedules your attention with a unified queue of waiting Agent sessions, so you can just handle the one at the front instead of chasing notification badges.
 
 Que supports mainstream CLI harnesses through terminal cards, so you can handle multiple harness workflows in one place.
 
-## How it works
+## Features
 
-### Pending-reply card queue
+<table>
+<tr>
+<td width="45%" valign="middle">
+<h3>Pending-reply card queue</h3>
+<p>Sessions waiting for a reply enter the queue. After your reply, they move to the working sidebar and return when they need you. Includes priority sorting, FIFO, reminders and separate windows.</p>
+</td>
+<td width="55%"><a href="docs/assets/queue-demo.gif"><img src="docs/assets/queue-demo.gif" alt="Sessions move between the pending queue and working sidebar" width="440" /></a></td>
+</tr>
+<tr>
+<td width="45%" valign="middle">
+<h3>External sessions</h3>
+<p>Enable the corresponding hooks to collect sessions from IDEs, desktop apps and standalone terminals. Reply in the original app; the notice leaves the queue when work resumes.</p>
+</td>
+<td width="55%"><a href="docs/assets/external-notice.gif"><img src="docs/assets/external-notice.gif" alt="An external session enters the Que notice queue" width="440" /></a></td>
+</tr>
+<tr>
+<td width="45%" valign="middle">
+<h3>SSH workspaces & tmux</h3>
+<p>Choose an SSH workspace and enable tmux keep-alive. Sessions keep running through a disconnect or client exit. Install the CLI and tmux on the remote host first.</p>
+</td>
+<td width="55%"><a href="docs/assets/remote-tmux.gif"><img src="docs/assets/remote-tmux.gif" alt="Choose a remote workspace and tmux, then open a terminal" width="440" /></a></td>
+</tr>
+</table>
 
-- One card per session with live state. Working sessions are not in the queue — the queue is exactly the cards waiting for a reply.
-- Two sort modes: score (wait minutes + card weight) or FIFO. Remind-later parks a card and it re-enters on its own.
-- Finish one, the next steps up. Archive finished work, pop a running session out into its own window.
-- When a session needs you, a desktop notification takes you straight to its card.
+## Supported harnesses
 
-### Multi-CLI harness response support
+<p align="center">
+  <kbd><img src="docs/assets/harness/openai.svg" width="16" height="16" alt="" /> Codex</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/anthropic.svg" width="16" height="16" alt="" /> Claude Code</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/cursor.svg" width="16" height="16" alt="" /> Cursor Agent</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/opencode.svg" width="16" height="16" alt="" /> OpenCode</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/antigravity.svg" width="16" height="16" alt="" /> Antigravity</kbd>
+</p>
+<p align="center">
+  <kbd><img src="docs/assets/harness/pi.svg" width="16" height="16" alt="" /> Pi</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/omp.svg" width="16" height="16" alt="" /> Oh My Pi</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/codebuddy.svg" width="16" height="16" alt="" /> CodeBuddy</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/grok.svg" width="16" height="16" alt="" /> Grok Build</kbd> &nbsp;
+  <kbd><img src="docs/assets/harness/devin.svg" width="16" height="16" alt="" /> Devin</kbd>
+</p>
 
-Claude Code, CodeBuddy, Codex, Cursor, Antigravity, Gemini, Grok, OpenCode, Pi / OMP — plus a plain shell card for everything else.
+Use your existing CLIs, accounts and model settings. Que sets up the integration when launching a card. A plain Shell card is also available. Enable external-session notices per tool in Settings. [Integration docs →](docs/harness/hook-api.md)
 
-- Launching a card sets the harness up automatically; no manual hook configuration, and config entries you wrote yourself are never overwritten.
-- Cards show real session titles and prompts, and restarting a card picks the original conversation back up.
-- Current checked state per harness (message send / normal reply / ask / permission / resume sync / title):
+## Quick start
 
-| Harness | Message send | Normal reply | Ask | Permission | Resume sync | Title |
-| --- | --- | --- | --- | --- | --- | --- |
-| Codex | OK | OK | OK | OK | OK | thread_name |
-| Claude Code | OK | OK | OK | OK | OK | custom title or first session prompt |
-| CodeBuddy | OK | OK | OK | OK | OK | custom title or ai-title |
-| Cursor | OK | OK | OK | OK | pass | meta.title |
-| Pi | OK | OK | OK | OK | OK | session_info.name |
-| OMP | OK | OK | OK | OK | OK | title |
-| Grok | OK | OK | OK | OK | OK | generated_title |
-| Antigravity | OK | OK | OK | OK | OK | last hooked prompt |
-| OpenCode | OK | OK | OK | OK | OK | OSC info.title |
-| Shell | | | | | | workspace name |
+1. Download the build for your OS and architecture from [Releases](https://github.com/ZIXT233/Que/releases/latest).
+2. Install and sign in to your CLI tool.
+3. Choose a tool and workspace in Que, then create a session.
 
-### External agent session capture
+## Build from source
 
-IDE chats and plain terminals run the same harnesses. With the user-level hooks installed, Que captures those asks too and shows them as notice cards in the same deck — with the project, the question, and the conversation so far. They disappear when the session goes back to work, and each harness's capture can be toggled in settings.
-
-### Remote workspace support
-
-- Save an SSH host once and pick a directory on it — cards, live state and notifications work exactly like local.
-
-## Development
-
-Prerequisites: Node.js 22+, a Rust toolchain, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
+Requires Node.js 22+, Rust and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
-npm install
-npm run tauri dev     # run the desktop app
-npm run tauri build   # package the current OS
+git clone https://github.com/ZIXT233/Que.git
+cd Que
+npm ci
+npm run tauri dev
+# Package for the current platform
+npm run tauri build
 ```
 
-App data lives in `~/.que`. The harness wire contract and debugging guide: [docs/harness/hook-api.md](docs/harness/hook-api.md).
+App data lives in `~/.que`.
+
+
+## License
+
+[MIT](LICENSE). Third-party components retain their own licenses and notices.

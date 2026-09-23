@@ -48,3 +48,7 @@ src-tauri/target-before-path-rename-*/
 /.cargo-test.log
 /.cargo-full.log
 /.cli-ls.txt
+
+# Local promotional video production (README assets stay tracked)
+/docs/promo/
+/scripts/render-promo.py
