@@ -67,6 +67,10 @@ Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方�
 
 使用已有的 CLI、账号和模型配置，从卡片启动时自动完成接入。另提供普通 Shell 卡片。外部会话通知在设置中按工具开启。[接入文档 →](docs/harness/hook-api.zh-CN.md)
 
+### Harness 扩展
+
+Que 可以通过 Node.js 扩展接入更多 CLI Harness。Qwen Code 扩展随 Que 发布；你也可以将自定义扩展放入 `~/.que/extensions/<id>/`。用户仍需安装对应 CLI 和 Node.js。参见[扩展指南](docs/harness/extensions.zh-CN.md)与[Qwen Code 示例](examples/harness-extensions/qwen-code/README.zh-CN.md)。
+
 ## 开始使用
 
 1. 从 [Releases](https://github.com/ZIXT233/Que/releases/latest) 下载对应系统和架构的安装包。
@@ -86,7 +90,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-应用数据在 `~/.que`。参见 [Harness Hook 协议](docs/harness/hook-api.zh-CN.md)、[自定义 Harness 扩展指南](docs/harness/extensions.zh-CN.md)与[随包提供的 Qwen Code 扩展](examples/harness-extensions/qwen-code/README.zh-CN.md)。
+应用数据在 `~/.que`。参见 [Harness Hook 协议](docs/harness/hook-api.zh-CN.md)。
 
 ## 协议
 

@@ -2,160 +2,116 @@
 
 [English](extensions.md) | **简体中文**
 
-用户扩展放在 `~/.que/extensions/<id>/`，入口为 `index.mjs`。开发版使用
-`~/.que-dev/extensions/`；`QUE_DATA_DIR` 可覆盖根目录。目录名必须与注册的 `id`
-相同。扩展是用户信任的 Node.js 代码，Que 不从网络自动安装。目标机器需要 Node.js。
-Que 自带的扩展随应用资源发布并自动加载，更新时跟随 Que 更新；同名用户扩展保留在
-用户目录，但由随包版本优先。[Qwen Code 扩展](../../examples/harness-extensions/qwen-code/README.zh-CN.md)
-包含图标、卡片 hook 和外部会话 hook。
-当前上传器复制扩展目录中的 UTF-8 文本文件；请将入口和所需脚本放在该目录内，
-不要依赖符号链接或二进制附件。远端所需的其他依赖由扩展自行安装或预先配置。
+随包提供的 [Qwen Code 扩展](../../examples/harness-extensions/qwen-code/index.mjs)是完整的 API v1 示例。本文沿着它的源码，依次讲解注册、Que 卡片和外部会话。[示例 README](../../examples/harness-extensions/qwen-code/README.zh-CN.md)说明 Qwen 专用的安装和配置。
 
-Que 启动时加载扩展；运行中可调用 `POST /api/extensions/harnesses` 重新加载。
-`GET /api/extensions/harnesses` 返回已加载扩展和最近一次加载错误，不扫描目录。
-注册成功的 harness 会出现在新会话选择器中。扩展目录与 Que 自动生成的
-`harness-plugins/` 分开，后者不要手工编辑。
-可选 `icon` 指向 `index.mjs` 同目录下最大 64 KiB 的普通 `.svg` 文件；
-Que 随扩展复制它，并在选择器、卡片和外部会话设置中显示。省略时使用默认图标。
+## 扩展文件放在哪里
 
-扩展也可以通过 `externalHooks` 接入本机 Que 外启动的会话。外部通知默认关闭；
-注册扩展后，需要在 Que 现有的“外部会话”设置中启用。
+用户扩展放在 `~/.que/extensions/<id>/index.mjs`。开发版使用 `~/.que-dev/extensions/`；`QUE_DATA_DIR` 可以覆盖数据目录。目录名必须与注册的 `id` 相同。Que 自带的扩展作为应用资源随包发布：安装 Que 后即可使用 Qwen；与用户扩展同名时，随包版本优先，但不会删除用户副本。修改扩展文件后重启 Que。
+
+扩展是受信任的 Node.js 代码，Que 不从网络下载。运行扩展的机器需要另行安装 Node.js 和目标 CLI（例如 `qwen`）。Que 会为每张卡片复制扩展目录内的 UTF-8 文本文件；不支持符号链接和二进制文件。入口与所需脚本应放在同一扩展目录。Que 自动生成的 `harness-plugins/` 副本与源码目录分开，不要手工修改。
+
+## 注册 Harness
+
+`index.mjs` 必须默认导出一个函数，并在其中恰好调用一次 `que.register(...)`。Qwen 的注册结构如下；辅助函数定义在[源码](../../examples/harness-extensions/qwen-code/index.mjs)中：
 
 ```js
-// ~/.que/extensions/example/index.mjs
-import fs from 'node:fs';
-import path from 'node:path';
-
 export default function activate(que) {
   que.register({
     type: 'harness',
     apiVersion: 1,
-    id: 'example',
-    name: 'Example Agent',
-    description: 'Example Agent CLI',
-    // icon: 'icon.svg', // 可选；与 index.mjs 同目录，最大 64 KiB。
-
-    launch({ pluginDir }) {
-      return { command: 'example-agent', args: [] };
+    id: 'qwen-code',
+    name: 'Qwen Code',
+    description: 'Qwen Code CLI and external sessions',
+    icon: 'qwen-color.svg',
+    launch({ pluginDir, remote }) {
+      return launchCommand(pluginDir, remote);
     },
-
-    async installHooks(ctx) {
-      // 可反复执行；保留用户配置中不属于此扩展的条目。
-      const stopCommand = ctx.hookCommand('Stop');
-      const config = path.join(ctx.home, '.example-agent', 'config.json');
-      const current = fs.existsSync(config) ? JSON.parse(fs.readFileSync(config, 'utf8')) : {};
-      current.hooks ??= {};
-      current.hooks.Stop = [
-        ...(current.hooks.Stop || []).filter(item => item.queOwner !== 'example'),
-        { queOwner: 'example', command: stopCommand },
-      ];
-      fs.mkdirSync(path.dirname(config), { recursive: true });
-      fs.writeFileSync(config, JSON.stringify(current, null, 2));
+    resume({ pluginDir, remote, sessionId }) {
+      return launchCommand(pluginDir, remote, ['--resume', sessionId]);
     },
-
-    onHook({ event, input }, ctx) {
-      ctx.emit({ event, sessionId: input.session_id });
-      // 需要 stdout 应答的 agent 可以返回字符串或 { stdout: string }。
-    },
-
-    resume({ sessionId }) {
-      return { command: 'example-agent', args: ['--resume', sessionId] };
+    installHooks: installCard,
+    externalHooks: { install: installExternal, uninstall: uninstallExternal },
+    onHook({ event, input, scope }, ctx) {
+      // 解析 CLI 事件，然后调用 ctx.emit(signal)。
     },
   });
 }
 ```
 
-## 回调
+`type`、`apiVersion`、`id`、`name` 和 `launch` 必填；其余字段按功能选用，但填写 `externalHooks` 时必须同时提供 `install` 和 `uninstall`。`id` 须以小写字母开头，只能包含小写字母、数字和连字符，最长 64 字符，且不能与内置 Harness 重名。`icon` 指向 `index.mjs` 同目录下最大 64 KiB 的普通 SVG 文件；Que 会在选择器、卡片和外部会话设置中显示它。
 
-- `launch(ctx)` 返回 `{ command, args }`；Que 设置工作目录、终端与信号环境变量。
-  `ctx` 有 `cwd`、`remote`、`pluginDir`。使用 `pluginDir` 引用扩展附件，避免硬编码本机路径。
-- `installHooks(ctx)` 在目标机器上、终端启动前运行。`ctx` 有 `home`、`remote`、
-  `pluginDir`、`hookCommand(event)`。它可编辑目标 agent 配置或安装 Pi 式扩展。
-  同一机器的每次启动都可能再次调用，所以必须幂等，不覆盖用户自己的 hook。
-- 命令式 hook 使用 `ctx.hookCommand(event)` 得到完整命令。agent 调用后，Que 将其
-  stdin JSON 传给 `onHook({event,input},ctx)`；`ctx.emit(signal)` 上报信号。
-  不需要 stdout 应答时返回 `undefined`。只有目标 agent 明确要求时才返回应答；
-  Que 只观察，不替用户做授权决定。
-- Pi 一类进程内扩展可在 `installHooks` 中安装附件，并在 `launch` 中用
-  `pluginDir` 增加加载参数。附件若需自行发信，可通过其上级目录中的
-  `extension-host.cjs` 导出函数 `emit(kind, signal)`。Que 为会话设置
-  `QUE_HARNESS_KIND`、`QUE_HARNESS_SIGNAL_DIR`（本机）、`QUE_HARNESS_CHANNEL` 和
-  `QUE_HARNESS_TTY`（远程）。
-- `resume({sessionId,cwd,remote,pluginDir})` 返回恢复命令。Que 保存 hook 报告的
-  `sessionId`，恢复时原样传入；由目标 CLI 判定会话是否还存在。需要更复杂的恢复
-  可从 `resume` 返回 `node` 和扩展目录内的通用脚本路径。若目标 CLI 没有恢复能力，
-  可省略此回调，但已记录会话的恢复操作会明确报错。
+宿主在发现扩展和执行各项操作时都会导入 `index.mjs` 并调用默认导出函数。不要依赖模块全局变量在不同回调之间保存状态。[宿主实现](../../src-tauri/resources/bin/extension-host.cjs)定义并校验这套 API。
 
-## 外部会话 Hook
+## 启动与恢复 Que 卡片
 
-目标 agent 支持用户级 hook 时，在同一个 `type: 'harness'` 注册中加入
-`externalHooks`，并同时提供安装和撤销回调：
+`launch(ctx)` 返回 `{ command, args }`。`command` 和 `args` 中每项都必须是字符串；Que 将它们作为进程参数传入，并提供卡片的工作目录、终端和信号环境。`ctx` 含 `cwd`、`remote` 和 `pluginDir`；`pluginDir` 是目标机器上这张卡片的扩展文件副本路径。引用文件时用它，不要硬编码开发机器的路径。
+
+Qwen 的 `launchCommand` 在 Windows 本机返回 `node <pluginDir>/launch.cjs`，在 macOS、Linux 和 SSH 主机返回 `sh <pluginDir>/launch.sh`。启动器运行 `card-settings.cjs`，将现有 Qwen 系统默认设置与卡片 hook 合并，再用 `QWEN_CODE_SYSTEM_DEFAULTS_PATH` 指向合并后的文件。这样卡片 hook 不会覆盖用户全局设置。Windows 启动器会隐藏子进程窗口。
+
+`resume(ctx)` 还会收到 `sessionId`，同样返回 `{ command, args }`。Qwen 校验 ID 后添加 `--resume <sessionId>`。Que 传入此前由 hook 上报的 ID；目标 CLI 自行判断会话是否还存在。省略 `resume` 后，尝试恢复已记录会话会返回错误。
+
+## 给 Que 卡片安装 hook
+
+`installHooks(ctx)` 在每次卡片启动前于目标机器运行，也适用于 SSH 主机。此时 Que 已复制扩展文件。`ctx` 含 `home`、`remote`、`pluginDir` 和 `hookCommand(event)`。回调可异步执行；由于可能反复调用，写配置时应保留用户内容并保证幂等。
+
+Qwen 的 `installCard` 写入 `<pluginDir>/card-hooks.json`。其 `eventHooks` 辅助函数为每个 Qwen 事件登记 `ctx.hookCommand(event)`。Que 会生成包含 Windows 引号处理在内的平台专用完整命令，扩展无需自行拼接宿主命令。随后 Qwen 启动器让 CLI 加载这份卡片专用文件。如果目标 CLI 要在自己的进程内加载扩展文件，也可以在 `installHooks` 中安装文件，并由 `launch` 使用 `pluginDir` 添加加载参数。
 
 ```js
-externalHooks: {
-  install(ctx) {
-    const command = ctx.hookCommand('Stop');
-    // 在 agent 的用户级配置中加入由此扩展拥有的 hook。
-    // 保留用户原有条目，重复安装也不应产生重复项。
-  },
-  uninstall(ctx) {
-    // 只移除此扩展写入的用户级 hook 条目。
-  },
-},
-onHook({ event, input, scope }, ctx) {
-  ctx.emit({ event, sessionId: input.session_id, workspaceRoot: input.cwd });
-},
+function installCard(ctx) {
+  const file = path.join(ctx.pluginDir, 'card-hooks.json');
+  const hooks = eventHooks(
+    event => ctx.hookCommand(event),
+    event => `que-qwen-code-card-${event}`,
+  );
+  writeSettings(file, { hooks });
+}
 ```
 
-`install(ctx)` 和 `uninstall(ctx)` 在本机运行；`ctx` 提供 `home`、`pluginDir`、
-`externalSignalDir`、`hookCommand(event)`。Que 将扩展复制到
-`harness-plugins/<id>/global/`。启用外部通知和该 Harness 时执行安装，关闭任一开关
-或移除扩展时执行撤销。`POST /api/extensions/harnesses` 会重新加载扩展并同步外部
-hook；安装错误在其 `errors` 中返回，设置更新则返回 `extensionErrors`。
+## 接收 hook 输入并上报信号
 
-同一台机器可能同时运行多个 Que 数据目录，例如 `.que` 和 `.que-dev`。扩展在用户级
-配置中注册 hook 时，应以 `ctx.pluginDir` 区分实例；`install` 只替换当前实例的条目，
-`uninstall` 也只移除当前实例的条目。目标 agent 以名称或文件名作为唯一键时，名称或
-文件名也要包含从 `ctx.pluginDir` 派生的稳定实例标识，避免两个实例互相覆盖。
+生成的 hook 命令会调用 `onHook({ event, input, scope }, ctx)`。`input` 是目标 CLI 写入 stdin 的 JSON，字段由该 CLI 定义。`scope` 为 `'card'` 或 `'external'`。`ctx` 含 `pluginDir` 和 `emit(signal)`；`ctx.emit` 会填入作为 `kind` 的 Harness ID 与作为 `at` 的时间戳，扩展至少提供 `event`。CLI 不需要 stdout 应答时无需返回；需要时返回字符串或 `{ stdout: string }`。控制台日志会转到 stderr，stdout 留给 hook 应答。
 
-全局 `hookCommand` 在没有 Que 卡片信号环境时向外部通知目录投递。生成的全局 hook
-会跳过 Que 启动的会话；这类卡片仍须通过 `installHooks` 或 `launch` 注册自己的 hook。
-`onHook` 会收到 `scope: 'card' | 'external'`。外部信号应提供稳定的 `sessionId` 或
-`workspaceRoot`，供 Que 识别会话；外部通知设置仍控制信号是否生效。进程内适配器
-可在没有卡片环境时显式调用导出的
-`emit(kind, signal, { externalSignalDir: ctx.externalSignalDir })`。
+Qwen 校验事件与 scope，把 `session_id` 和 `cwd` 转成 `sessionId`、`workspaceRoot`，然后调用 `ctx.emit(signal)`。它把 Qwen 的 `SessionEnd` 转成 Que 的 `sessionEnd`。会话开始、提交提示词和回合结束时，它会尽量读取 Qwen 的 JSONL 会话记录，补充 `title`、`firstPrompt` 和最近的 `turns`；新用户消息取自 `submitted_prompt`，回复预览取自 `last_assistant_message`。`tool_name` 和 `agent_id` 分别成为 `tool`、`agentId`。读取会话记录是 [index.mjs](../../examples/harness-extensions/qwen-code/index.mjs) 中的 Qwen 专用逻辑，并非 Que 提供的 API。
 
-`command` 和 `args` 必须是字符串，不经过用户 shell 拼接。`id` 只能含小写字母、
-数字和连字符并以字母开头，最长 64 字符，不得与内置 harness 冲突。
+Qwen 的 `onHook` 上报信号时，核心步骤如下：
 
-## 信号
+```js
+const signal = { event: event === 'SessionEnd' ? 'sessionEnd' : event };
+if (typeof input?.session_id === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(input.session_id)) {
+  signal.sessionId = input.session_id;
+}
+if (typeof input?.cwd === 'string' && input.cwd) signal.workspaceRoot = input.cwd;
+if (!signal.sessionId && !signal.workspaceRoot) return;
+// Qwen 还会在可用时从会话记录补充信号字段。
+ctx.emit(signal);
+```
 
-`ctx.emit` 接收现有 `HookSignal` 字段。Que 填写 `kind` 和时间；插件至少填写
-`event`，并应尽早提供 `sessionId`。会话 ID 须以字母或数字开头，其余字符只接受
-字母、数字、下划线、连字符，最长 128 字符。常用事件：
-
-| 事件 | 卡片效果 |
+| 信号事件 | 卡片效果 |
 | --- | --- |
 | `SessionStart` | 启动完成，等待用户 |
-| `UserPromptSubmit` | 开始工作 |
+| `UserPromptSubmit` | 工作中 |
 | `PreToolUse` / `PostToolUse` | 工作中 |
-| `PermissionRequest` | 目标 agent 明确在等用户处理 |
-| `Stop` | 本轮结束，等待用户 |
+| `PermissionRequest` | 明确等待用户处理 |
+| `Stop` / `StopFailure` | 本轮结束，等待用户 |
+| `sessionEnd` | 按本轮结束处理 |
 
-还可传 `prompt`、`replyPreview`、`title`、`turns`、`tool`、`agentId`。
-`turns` 是按时间顺序排列的 `{ role: "user" | "assistant", text: string }[]`，
-供外部会话通知显示双方对话；插件可从目标 harness 的会话记录读取。
-带 `agentId` 的子 agent
-事件不会改变主卡片状态。不要把普通工具启动当作 `PermissionRequest`。
-参见 [完整信号契约](hook-api.zh-CN.md)。
+其他信号字段包括 `prompt`、`replyPreview`、`firstPrompt`、`title`、`turns`、`tool`、`agentId` 和 `workspaceRoot`。`turns` 是按时间顺序排列的 `{ role: 'user' | 'assistant', text: string }` 数组。外部通知需要稳定的 `sessionId` 或 `workspaceRoot`，以便 Que 识别会话。会话 ID 须以字母或数字开头，其余字符可以是字母、数字、下划线或连字符，最长 128 字符。带 `agentId` 的子 Agent 事件不会改变主卡片状态。仅在 CLI 确实需要用户操作时上报 `PermissionRequest`。参见[完整信号契约](hook-api.zh-CN.md)。
 
-## 远程与诊断
+直接加载到目标 CLI 进程的扩展文件，也可从 `pluginDir` 上级目录的 `extension-host.cjs` 导入 `emit(kind, signal)`。Que 在本机设置 `QUE_HARNESS_KIND` 和 `QUE_HARNESS_SIGNAL_DIR`，在远端设置 `QUE_HARNESS_CHANNEL` 和 `QUE_HARNESS_TTY`。Qwen 则使用命令式 hook 和 `ctx.emit`。
 
-SSH 会话启动前，Que 上传扩展文件，在远端执行 `installHooks`。远端通过
-`QUE_HARNESS_TTY` 的 OSC 通道发回信号；若目标 agent 的 hook 无法写 TTY，
-当前接口不能保证远端送达，需要在真实远端会话中检查。
+## 捕获 Que 外启动的会话
 
-启动后查看 `GET /api/harness/<terminal-id>/debug`：分别确认 hook 事件已到达、
-`sessionId` 已绑定、卡片状态已变化。文件存在或安装命令成功都不是接入成功的证明。
-只有注册 `externalHooks` 且启用外部通知，扩展才会捕获 Que 外启动的本机会话。
-目前外部 hook 只安装在本机，不捕获 Que 外启动的 SSH 会话。
+`externalHooks` 可选，但使用时必须同时实现 `install(ctx)` 与 `uninstall(ctx)`。它负责本机 Que 外启动的会话。外部通知默认关闭，需要在 Que 的外部会话设置中同时启用通知和该 Harness。两个回调都在本机运行；`ctx` 含 `home`、`pluginDir`、`externalSignalDir` 和 `hookCommand(event)`。
+
+Qwen 的 `installExternal` 将命令式 hook 合并到 `~/.qwen/settings.json`。hook 名称包含由 `ctx.pluginDir` 派生的稳定哈希，因此 `.que` 和 `.que-dev` 可以共存。`uninstallExternal` 只移除同一 Que 实例拥有的条目，保留其他设置和 hook。Que 在启用时安装、关闭或移除扩展时撤销。生成的外部 hook 会跳过 Que 启动的会话，所以卡片仍需自行安装 hook。Que 外的事件以 `scope: 'external'` 进入 `onHook`；是否投递外部通知仍由 Que 设置控制。
+
+两种作用范围共用 `eventHooks` 辅助函数。`installExternal` 为每个事件提供 `ctx.hookCommand(event)` 和带实例标识的名称；`uninstallExternal` 则通过 `removeOwned(settings, ctx)` 仅移除这些条目。具体实现见 [Qwen 源码](../../examples/harness-extensions/qwen-code/index.mjs)。
+
+外部 hook 目前只安装在本机，不捕获在 SSH 主机上由 Que 外启动的会话。若扩展文件直接加载到 CLI 进程，也可在没有卡片信号环境时调用 `emit(kind, signal, { externalSignalDir: ctx.externalSignalDir })` 投递到外部通知目录。
+
+## SSH 与诊断
+
+SSH 卡片启动前，Que 上传 UTF-8 扩展文件并在远端运行 `installHooks`。信号通过 `QUE_HARNESS_TTY` 上的 OSC 通道送回；若 hook 无法写入该 TTY，当前接口无法保证送达。开发远端适配时需检查真实会话。
+
+诊断时可在 Que 设置中开启“详细调试日志”并查看 `~/.que/logs`，或点击卡片的“日志”保存并打开报告。确认 hook 事件已经到达、`sessionId` 已绑定、卡片状态已变化。仅有文件安装成功不足以证明 hook 已工作。

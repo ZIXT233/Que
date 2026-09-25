@@ -5,7 +5,7 @@
 这是 Que 随发布包提供的 Harness 扩展。发布包把此目录作为应用资源打包，启动时
 自动加载；开发版直接读取这里的源码。无需复制到 `~/.que/extensions/`。
 该目录仍保留给用户扩展；已有的同名 Qwen 副本不会被删除，但随包版本优先。
-运行中可通过 `POST /api/extensions/harnesses` 重新加载。目标机器需要 Node.js，
+修改扩展文件后重启 Que。目标机器需要 Node.js，
 运行 Qwen Code 会话还需要安装 `qwen` CLI。`qwen-color.svg` 随扩展一起打包。
 
 启用 Que 的“外部会话”通知后，扩展在 `~/.qwen/settings.json` 中加入自己命名的

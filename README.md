@@ -67,6 +67,10 @@ Que supports mainstream CLI harnesses through terminal cards, so you can handle 
 
 Use your existing CLIs, accounts and model settings. Que sets up the integration when launching a card. A plain Shell card is also available. Enable external-session notices per tool in Settings. [Integration docs →](docs/harness/hook-api.md)
 
+### Harness extensions
+
+Que can add CLI harnesses through Node.js extensions. The Qwen Code extension ships with Que; you can place your own in `~/.que/extensions/<id>/`. The CLI and Node.js still need to be installed on the user's machine. See the [extension guide](docs/harness/extensions.md) and [Qwen Code example](examples/harness-extensions/qwen-code/README.md).
+
 ## Quick start
 
 1. Download the build for your OS and architecture from [Releases](https://github.com/ZIXT233/Que/releases/latest).
@@ -86,7 +90,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-App data lives in `~/.que`. See the [harness hook contract](docs/harness/hook-api.md), [custom harness extension guide](docs/harness/extensions.md), and [bundled Qwen Code extension](examples/harness-extensions/qwen-code/README.md).
+App data lives in `~/.que`. See the [harness hook contract](docs/harness/hook-api.md).
 
 ## License
 

@@ -5,7 +5,7 @@
 Que ships this extension as an application resource and loads it at startup. Development
 builds read this source directory directly. No copy to `~/.que/extensions/` is needed.
 That directory remains for user extensions; an existing Qwen copy is preserved, but the
-bundled version takes precedence. Reload running Que through `POST /api/extensions/harnesses`.
+bundled version takes precedence. Restart Que after changing extension files.
 Node.js and the `qwen` CLI must be available on the target machine.
 
 The extension supplies its own `qwen-color.svg` icon. Its external hooks register in

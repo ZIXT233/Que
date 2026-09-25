@@ -1,192 +1,117 @@
-# Que Harness Extensions (API v1)
+# Que harness extensions (API v1)
 
 **English** | [简体中文](extensions.zh-CN.md)
 
-Place a user extension in `~/.que/extensions/<id>/` with an `index.mjs` entry point.
-Development builds use `~/.que-dev/extensions/`; `QUE_DATA_DIR` overrides the data
-directory. The directory name must match the registered `id`. Extensions are
-trusted, user supplied Node.js code. Que does not install them from the network.
-The target machine needs Node.js.
-Que ships its own extensions as application resources and loads them automatically.
-They update with Que and take precedence over a same-id user extension without deleting it.
-The [Qwen Code extension](../../examples/harness-extensions/qwen-code/README.md) shows a
-complete bundled extension with an icon, per-card hooks, and external session hooks.
+The bundled [Qwen Code extension](../../examples/harness-extensions/qwen-code/index.mjs) is a complete API v1 example. This guide follows its code from registration to a Que card and then to an external session. Its [example README](../../examples/harness-extensions/qwen-code/README.md) covers Qwen-specific setup.
 
-The current uploader copies UTF-8 text files from the extension directory. Keep
-the entry point and required scripts there; symlinks and binary assets are not
-supported. Install or configure any other remote dependencies separately.
+## Where the files go
 
-Que loads extensions at startup. Call `POST /api/extensions/harnesses` to reload
-them while Que is running. `GET /api/extensions/harnesses` returns the loaded
-harnesses and the most recent load errors without scanning the directory. A registered harness
-appears in the new session picker. Leave Que's generated `harness-plugins/`
-directory alone; it is separate from the extension source directory.
-An optional `icon` names a regular `.svg` file beside `index.mjs` (up to 64 KiB).
-Que carries it with the extension and displays it in the picker, cards, and
-external-session settings. Extensions without one keep the default icon.
+Place a user extension at `~/.que/extensions/<id>/index.mjs`. Development builds use `~/.que-dev/extensions/`; `QUE_DATA_DIR` overrides the data directory. The folder name must match the registered `id`. Que ships its own extensions as application resources: Qwen is available after installing Que and takes precedence over a user copy with the same ID without deleting that copy. Restart Que after changing extension files.
 
-An extension can also opt into notices for local sessions launched outside Que
-with `externalHooks`. External notices are disabled by default. Enable them in
-Que's existing external sessions settings after registering the extension.
+Extensions are trusted Node.js code. Que does not download them. The machine running an extension needs Node.js and the target CLI, such as `qwen`, installed separately. Que copies the extension's UTF-8 text files for each card; symlinks and binary files are unsupported. Keep the entry point and required scripts together. Que's generated `harness-plugins/` copies are separate from the source directory and should not be edited.
+
+## Register the harness
+
+`index.mjs` must default-export a function that calls `que.register(...)` exactly once. Qwen's registration has this shape (the helper functions are defined in its [source](../../examples/harness-extensions/qwen-code/index.mjs)):
 
 ```js
-// ~/.que/extensions/example/index.mjs
-import fs from 'node:fs';
-import path from 'node:path';
-
 export default function activate(que) {
   que.register({
     type: 'harness',
     apiVersion: 1,
-    id: 'example',
-    name: 'Example Agent',
-    description: 'Example Agent CLI',
-    // icon: 'icon.svg', // Optional SVG beside index.mjs, at most 64 KiB.
-
-    launch({ pluginDir }) {
-      return { command: 'example-agent', args: [] };
+    id: 'qwen-code',
+    name: 'Qwen Code',
+    description: 'Qwen Code CLI and external sessions',
+    icon: 'qwen-color.svg',
+    launch({ pluginDir, remote }) {
+      return launchCommand(pluginDir, remote);
     },
-
-    async installHooks(ctx) {
-      // This can run repeatedly. Preserve configuration owned by the user.
-      const stopCommand = ctx.hookCommand('Stop');
-      const config = path.join(ctx.home, '.example-agent', 'config.json');
-      const current = fs.existsSync(config) ? JSON.parse(fs.readFileSync(config, 'utf8')) : {};
-      current.hooks ??= {};
-      current.hooks.Stop = [
-        ...(current.hooks.Stop || []).filter(item => item.queOwner !== 'example'),
-        { queOwner: 'example', command: stopCommand },
-      ];
-      fs.mkdirSync(path.dirname(config), { recursive: true });
-      fs.writeFileSync(config, JSON.stringify(current, null, 2));
+    resume({ pluginDir, remote, sessionId }) {
+      return launchCommand(pluginDir, remote, ['--resume', sessionId]);
     },
-
-    onHook({ event, input }, ctx) {
-      ctx.emit({ event, sessionId: input.session_id });
-      // Return a string or { stdout: string } if the agent needs a stdout reply.
-    },
-
-    resume({ sessionId }) {
-      return { command: 'example-agent', args: ['--resume', sessionId] };
+    installHooks: installCard,
+    externalHooks: { install: installExternal, uninstall: uninstallExternal },
+    onHook({ event, input, scope }, ctx) {
+      // Interpret the CLI event, then call ctx.emit(signal).
     },
   });
 }
 ```
 
-## Callbacks
+`type`, `apiVersion`, `id`, `name`, and `launch` are required. The other fields are optional, except that `externalHooks` must contain both `install` and `uninstall`. An ID starts with a lowercase letter, contains only lowercase letters, digits, and hyphens, is at most 64 characters, and cannot conflict with a built-in harness. `icon` names a regular SVG beside `index.mjs`, at most 64 KiB; Que displays it in the picker, cards, and external-session settings.
 
-- `launch(ctx)` returns `{ command, args }`. Que supplies the working directory,
-  terminal, and signal environment. `ctx` contains `cwd`, `remote`, and
-  `pluginDir`. Use `pluginDir` for extension files instead of hardcoding a path
-  on the local machine.
-- `installHooks(ctx)` runs on the target machine before the terminal starts.
-  `ctx` contains `home`, `remote`, `pluginDir`, and `hookCommand(event)`. It may
-  edit the target agent's configuration or install a Pi style extension. Que
-  can call it on every launch, so make it idempotent and preserve user hooks.
-- For command based hooks, `ctx.hookCommand(event)` returns the full command.
-  When the agent invokes it, Que passes its stdin JSON to
-  `onHook({event,input},ctx)`. Call `ctx.emit(signal)` to report a signal. Return
-  `undefined` when no stdout reply is needed. Return a reply only when the
-  target agent requires one; Que observes permission requests and does not
-  make authorization decisions for the user.
-- An in-process extension, such as Pi's, can install its files in `installHooks`
-  and use `pluginDir` in `launch` to add its load arguments. Such files can send
-  signals directly through `emit(kind, signal)`, exported by the
-  `extension-host.cjs` file in `pluginDir`'s parent directory. Que sets
-  `QUE_HARNESS_KIND` and `QUE_HARNESS_SIGNAL_DIR` locally, or
-  `QUE_HARNESS_CHANNEL` and `QUE_HARNESS_TTY` remotely.
-- `resume({sessionId,cwd,remote,pluginDir})` returns the resume command. Que
-  stores the hook reported `sessionId` and passes it back unchanged; the target
-  CLI decides whether the session still exists. For more complex recovery,
-  return `node` with the path of a script in the extension directory. You may
-  omit `resume` if the CLI cannot resume, but attempting to resume a recorded
-  session will then return an explicit error.
+The host imports `index.mjs` and calls its default export during discovery and each action. Do not rely on module globals to retain state between callbacks. The [host implementation](../../src-tauri/resources/bin/extension-host.cjs) defines and validates this API.
 
-## External session hooks
+## Start and resume a card
 
-Add `externalHooks` to the same `type: 'harness'` registration when the target
-agent has user-level hooks. Both callbacks are required:
+`launch(ctx)` returns `{ command, args }`. `command` and each item in `args` must be strings. Que passes them as process arguments and supplies the working directory, terminal, and signal environment. `ctx` contains `cwd`, `remote`, and `pluginDir`; `pluginDir` is the location of this card's copied extension files on the target machine. Use it instead of hardcoding a path on the developer's machine.
+
+Qwen's `launchCommand` uses `node <pluginDir>/launch.cjs` for local Windows cards and `sh <pluginDir>/launch.sh` for macOS, Linux, and SSH cards. The launcher runs `card-settings.cjs`, merges existing Qwen system defaults with the card's hooks, and points `QWEN_CODE_SYSTEM_DEFAULTS_PATH` at the merged file. This keeps card hooks separate from the user's global settings. The Windows launcher hides its child process windows.
+
+`resume(ctx)` receives the same fields plus `sessionId` and returns another `{ command, args }`. Qwen validates the ID and adds `--resume <sessionId>`. Que passes along the ID previously reported by a hook; the CLI decides whether the session still exists. If `resume` is omitted, trying to resume a recorded session returns an error.
+
+## Install hooks for a Que card
+
+`installHooks(ctx)` runs on the target machine before every card start, including SSH hosts. Que has already copied the extension files. `ctx` contains `home`, `remote`, `pluginDir`, and `hookCommand(event)`. This callback may be asynchronous. It can run repeatedly, so preserve user configuration and make writes idempotent.
+
+Qwen's `installCard` writes `<pluginDir>/card-hooks.json`. Its `eventHooks` helper registers `ctx.hookCommand(event)` for each Qwen event. Que provides the complete platform-specific command, including Windows quoting; extension code should not construct the runner command itself. Qwen's launcher then makes Qwen load this card-specific file. For a CLI that loads extension files into its own process, `installHooks` can install those files and `launch` can pass their load arguments using `pluginDir`.
 
 ```js
-externalHooks: {
-  install(ctx) {
-    const command = ctx.hookCommand('Stop');
-    // Add a hook owned by this extension to the agent's user-level config.
-    // Keep the user's entries and make repeated installs safe.
-  },
-  uninstall(ctx) {
-    // Remove only this extension's user-level hook entries.
-  },
-},
-onHook({ event, input, scope }, ctx) {
-  ctx.emit({ event, sessionId: input.session_id, workspaceRoot: input.cwd });
-},
+function installCard(ctx) {
+  const file = path.join(ctx.pluginDir, 'card-hooks.json');
+  const hooks = eventHooks(
+    event => ctx.hookCommand(event),
+    event => `que-qwen-code-card-${event}`,
+  );
+  writeSettings(file, { hooks });
+}
 ```
 
-`install(ctx)` and `uninstall(ctx)` run locally. Their context contains `home`,
-`pluginDir`, `externalSignalDir`, and `hookCommand(event)`. Que copies the
-extension to `harness-plugins/<id>/global/` and runs `install` when external
-notices and this harness are enabled. It runs `uninstall` when either is
-disabled or the extension is removed. `POST /api/extensions/harnesses` reloads
-extensions and reconciles their external hooks; install errors appear in its
-`errors` response. Settings updates return any `extensionErrors`.
+## Handle hook input and report signals
 
-More than one Que data directory can run on the same machine, such as `.que`
-and `.que-dev`. Use `ctx.pluginDir` to identify the owning instance in the
-agent's user-level config. `install` should replace only that instance's
-entries, and `uninstall` should remove only those entries. If the agent keys
-hooks by name or filename, derive a stable instance suffix from `ctx.pluginDir`
-for the name or filename as well.
+A generated hook command calls `onHook({ event, input, scope }, ctx)`. `input` is the target CLI's stdin JSON, so its fields depend on that CLI. `scope` is `'card'` or `'external'`. `ctx` contains `pluginDir` and `emit(signal)`. `ctx.emit` supplies the harness ID as `kind` and the timestamp as `at`; provide at least `event`. Return nothing when the CLI needs no stdout reply, or return a string or `{ stdout: string }` when it does. Console logging is redirected to stderr to keep stdout available for replies.
 
-A command returned by the global `hookCommand` reports to the external notice
-sink when it runs without a Que card's signal environment. The generated
-global hook skips sessions launched by Que; `installHooks` or `launch` should
-register the card's own hooks. `onHook` receives `scope: 'card' | 'external'`.
-For external notices, emit a stable `sessionId` or a `workspaceRoot` so Que can
-identify the session. Que's external notice settings still gate delivery.
-For an in-process adapter, the exported `emit(kind, signal,
-{ externalSignalDir: ctx.externalSignalDir })` can explicitly send an external
-signal when no card environment is present.
+Qwen validates the event and scope, copies `session_id` and `cwd` to `sessionId` and `workspaceRoot`, and calls `ctx.emit(signal)`. It maps Qwen's `SessionEnd` to Que's `sessionEnd`. On start, prompt, and stop events it reads Qwen's JSONL transcript when available to add `title`, `firstPrompt`, and recent `turns`. It takes the new user message from `submitted_prompt` and the reply preview from `last_assistant_message`. `tool_name` and `agent_id` become `tool` and `agentId`. Reading that transcript is Qwen-specific code in [index.mjs](../../examples/harness-extensions/qwen-code/index.mjs), not a Que API.
 
-`command` and every item in `args` must be strings. Que does not join them
-through the user's shell. An `id` must start with a lowercase letter and
-contain only lowercase letters, digits, and hyphens, with a maximum length of
-64 characters. It cannot conflict with a built-in harness.
+The essential signal path in Qwen's `onHook` is:
 
-## Signals
+```js
+const signal = { event: event === 'SessionEnd' ? 'sessionEnd' : event };
+if (typeof input?.session_id === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(input.session_id)) {
+  signal.sessionId = input.session_id;
+}
+if (typeof input?.cwd === 'string' && input.cwd) signal.workspaceRoot = input.cwd;
+if (!signal.sessionId && !signal.workspaceRoot) return;
+// Qwen also enriches the signal with transcript data when available.
+ctx.emit(signal);
+```
 
-`ctx.emit` accepts the existing `HookSignal` fields. Que fills in `kind` and
-the timestamp. Supply at least `event`, and report `sessionId` as early as
-possible. Session IDs may contain letters, digits, underscores, and hyphens,
-must start with a letter or digit, and have a maximum length of 128 characters.
-Common events are:
-
-| Event | Card behavior |
+| Signal event | Card effect |
 | --- | --- |
 | `SessionStart` | Startup finished; waiting for the user |
 | `UserPromptSubmit` | Working |
 | `PreToolUse` / `PostToolUse` | Working |
-| `PermissionRequest` | The target agent is explicitly waiting for the user |
-| `Stop` | Turn finished; waiting for the user |
+| `PermissionRequest` | Waiting for an explicit user action |
+| `Stop` / `StopFailure` | Turn finished; waiting for the user |
+| `sessionEnd` | Treated as a finished turn |
 
-You can also provide `prompt`, `replyPreview`, `title`, `turns`, `tool`, and `agentId`.
-`turns` is a chronological array of `{ role: "user" | "assistant", text: string }`
-read from the harness's own conversation record for external session notices.
-Subagent events carrying `agentId` do not change the main card's state. Do not
-report an ordinary tool start as `PermissionRequest`. See the
-[full signal contract](hook-api.md).
+Other fields include `prompt`, `replyPreview`, `firstPrompt`, `title`, `turns`, `tool`, `agentId`, and `workspaceRoot`. `turns` is a chronological array of `{ role: 'user' | 'assistant', text: string }`. For external notices, provide a stable `sessionId` or `workspaceRoot` so Que can identify the session. A session ID starts with a letter or digit, may then contain letters, digits, underscores, or hyphens, and is at most 128 characters. Subagent events with `agentId` do not change the main card's state. Use `PermissionRequest` only when the CLI actually needs user action. See the [full signal contract](hook-api.md).
 
-## Remote use and debugging
+An extension file loaded inside the target CLI can import `emit(kind, signal)` from `extension-host.cjs` in `pluginDir`'s parent directory. Que sets `QUE_HARNESS_KIND` and `QUE_HARNESS_SIGNAL_DIR` locally, or `QUE_HARNESS_CHANNEL` and `QUE_HARNESS_TTY` remotely. Qwen uses command hooks and `ctx.emit` instead.
 
-Before an SSH session starts, Que uploads the extension files and runs
-`installHooks` remotely. The remote side sends signals through an OSC channel
-on `QUE_HARNESS_TTY`. If the target agent's hook cannot write to that TTY,
-delivery is not guaranteed by this interface; check a real remote session.
+## Capture sessions started outside Que
 
-After startup, inspect `GET /api/harness/<terminal-id>/debug`. Confirm that
-Que received hook events, bound the `sessionId`, and changed the card state.
-The presence of files or a successful install command alone does not prove the
-integration works. API v1 manages sessions launched by Que; it does not
-automatically capture sessions started outside Que unless `externalHooks` is
-registered and external notices are enabled. External hooks currently install
-on the local machine; SSH sessions outside Que are not captured.
+`externalHooks` is optional and requires both `install(ctx)` and `uninstall(ctx)`. It handles local sessions started outside Que. External notices are off by default; enable them and the harness in Que's external-session settings. These callbacks run locally. `ctx` contains `home`, `pluginDir`, `externalSignalDir`, and `hookCommand(event)`.
+
+Qwen's `installExternal` merges its command hooks into `~/.qwen/settings.json`. Its hook names include a stable hash derived from `ctx.pluginDir`, allowing `.que` and `.que-dev` to coexist. `uninstallExternal` removes only entries owned by the same Que instance, preserving other settings and hooks. Que installs when enabled and uninstalls when disabled or the extension is removed. The generated external hook skips sessions launched by Que, so those cards still need their own hooks. Outside sessions reach `onHook` with `scope: 'external'`. External notices still depend on Que's settings.
+
+The same `eventHooks` helper registers Qwen events for either scope. `installExternal` supplies `ctx.hookCommand(event)` and an instance-specific name, while `uninstallExternal` uses `removeOwned(settings, ctx)` to remove just those entries. See both functions in [Qwen's source](../../examples/harness-extensions/qwen-code/index.mjs).
+
+External hooks currently install only on the local machine; sessions started outside Que on an SSH host are not captured. An extension file loaded inside a CLI can use `emit(kind, signal, { externalSignalDir: ctx.externalSignalDir })` to reach the external sink when no card signal environment exists.
+
+## SSH and diagnosis
+
+Before an SSH card starts, Que uploads the UTF-8 extension files and runs `installHooks` remotely. Signals use an OSC channel through `QUE_HARNESS_TTY`; if a hook cannot write to that TTY, delivery is not guaranteed. Check a real remote session while developing remote support.
+
+For diagnosis, enable Detailed debug logging in Que's settings and inspect `~/.que/logs`, or use the card's Logs button to save and open its report. Check that hook events arrived, `sessionId` was bound, and the card state changed. Successful file installation alone does not prove that hooks are working.
