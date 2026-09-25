@@ -138,16 +138,16 @@ fn parent_tmp(path: &Path) -> PathBuf {
 
 pub fn resolve_bin_dir(resource_dir: Option<PathBuf>) -> PathBuf {
     if let Ok(path) = std::env::var("QUE_BIN_DIR") {
-        return PathBuf::from(path);
+        return ordinary_windows_path(PathBuf::from(path));
     }
     if let Some(dir) = resource_dir {
         let candidate = dir.join("resources").join("bin");
         if candidate.exists() {
-            return candidate;
+            return ordinary_windows_path(candidate);
         }
         let candidate = dir.join("bin");
         if candidate.exists() {
-            return candidate;
+            return ordinary_windows_path(candidate);
         }
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -158,7 +158,42 @@ pub fn resolve_bin_dir(resource_dir: Option<PathBuf>) -> PathBuf {
         .join("harness-hook.cjs")
         .exists()
     {
-        return cwd.join("src-tauri").join("resources").join("bin");
+        return ordinary_windows_path(cwd.join("src-tauri").join("resources").join("bin"));
     }
-    cwd.join("bin")
+    ordinary_windows_path(cwd.join("bin"))
+}
+
+// Tauri and canonicalize can return a Windows verbatim path. Node rejects it as
+// an entry script path, and the directory picker should not expose it to users.
+pub(crate) fn ordinary_windows_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(value) = path.to_str() {
+        if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = value.strip_prefix(r"\\?\") {
+            if rest.as_bytes().get(1) == Some(&b':') && rest.as_bytes().get(2) == Some(&b'\\') {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    path
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::ordinary_windows_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn verbatim_paths_use_ordinary_windows_spelling() {
+        assert_eq!(
+            ordinary_windows_path(PathBuf::from(r"\\?\C:\Que\resources\bin")),
+            PathBuf::from(r"C:\Que\resources\bin")
+        );
+        assert_eq!(
+            ordinary_windows_path(PathBuf::from(r"\\?\UNC\server\share\bin")),
+            PathBuf::from(r"\\server\share\bin")
+        );
+    }
 }

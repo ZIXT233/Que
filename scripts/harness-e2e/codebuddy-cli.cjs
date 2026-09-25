@@ -2,7 +2,7 @@
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), http = require('node:http');
 const { spawn } = require('node:child_process'); const assert = require('node:assert/strict');
 const entry = process.argv[2]; assert(entry, 'Usage: node codebuddy-cli.cjs PATH_TO_CODEBUDDY_JS');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'que-codebuddy-cli-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'que-codebuddy-中文-'));
 const home = path.join(root, 'home'), config = path.join(home, '.codebuddy'), sink = path.join(root, 'signals'), plugin = path.join(root, 'harness-plugins', 'codebuddy');
 for (const dir of [config, sink, plugin]) fs.mkdirSync(dir, { recursive: true });
 fs.copyFileSync(path.resolve(__dirname, '../../src-tauri/resources/bin/harness-hook.cjs'), path.join(plugin, 'hook.cjs'));

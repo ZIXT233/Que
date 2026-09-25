@@ -14,8 +14,34 @@ pub fn machine_key(workspace: &QueueWorkspace) -> String {
     }
 }
 
+#[cfg(all(test, windows))]
+mod windows_path_tests {
+    use super::effective_workspace;
+
+    #[test]
+    fn saved_chinese_workspace_with_verbatim_prefix_launches_with_ordinary_path() {
+        let workspace: crate::models::QueueWorkspace = serde_json::from_value(serde_json::json!({
+            "id": "unicode", "name": "中文", "kind": "local",
+            "cwd": r"\\?\C:\中文\项目", "runtimeCwd": r"\\?\C:\中文\项目"
+        }))
+        .unwrap();
+        let result = effective_workspace(&crate::models::CardQueue::empty(), &workspace);
+        assert_eq!(result.cwd, r"C:\中文\项目");
+        assert_eq!(result.runtime_cwd, r"C:\中文\项目");
+    }
+}
+
 pub fn effective_workspace(queue: &CardQueue, workspace: &QueueWorkspace) -> QueueWorkspace {
     let mut effective = workspace.clone();
+    #[cfg(windows)]
+    if effective.kind == "local" {
+        effective.cwd = crate::paths::ordinary_windows_path(effective.cwd.into())
+            .to_string_lossy()
+            .into_owned();
+        effective.runtime_cwd = crate::paths::ordinary_windows_path(effective.runtime_cwd.into())
+            .to_string_lossy()
+            .into_owned();
+    }
     let settings = queue.machine_settings.get(&machine_key(workspace));
     effective.terminal_rc = settings.and_then(|settings| settings.terminal_rc.clone());
     effective.session_env = settings

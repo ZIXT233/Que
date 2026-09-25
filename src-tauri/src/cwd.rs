@@ -44,7 +44,7 @@ pub fn browse(requested: Option<String>) -> AppResult<BrowseResponse> {
     if !start.is_dir() {
         return Err(AppError::msg("Directory does not exist"));
     }
-    let resolved = start.canonicalize().unwrap_or(start);
+    let resolved = crate::paths::ordinary_windows_path(start.canonicalize().unwrap_or(start));
     Ok(BrowseResponse {
         path: resolved.to_string_lossy().into_owned(),
         parent_path: resolved.parent().map(|p| p.to_string_lossy().into_owned()),
@@ -143,5 +143,21 @@ pub async fn pick_local_folder(locale: Option<String>) -> AppResult<Option<Strin
         }
         Ok(_) => Ok(None),
         Err(_) => Err(AppError::machine("LOCAL_PICKER")),
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::browse;
+
+    #[test]
+    fn browsing_chinese_directory_returns_ordinary_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("中文目录");
+        std::fs::create_dir(&folder).unwrap();
+        let result = browse(Some(folder.to_string_lossy().into_owned())).unwrap();
+        assert_eq!(result.path, folder.to_string_lossy());
+        assert_eq!(result.parent_path.as_deref(), root.path().to_str());
+        assert!(!result.path.starts_with(r"\\?\"));
     }
 }

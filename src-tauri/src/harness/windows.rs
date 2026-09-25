@@ -244,4 +244,30 @@ mod tests {
         );
         assert_eq!(std::path::Path::new(value["node"].as_str().unwrap()), node);
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn pty_launches_cmd_shim_from_chinese_directory() {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("中文 空格 & % 路径");
+        std::fs::create_dir(&dir).unwrap();
+        let shim = dir.join("fixture.cmd");
+        std::fs::write(&shim, "@echo off\r\nexit /b 23\r\n").unwrap();
+        let launch = windows_command(shim.to_str().unwrap(), &[]);
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut command = CommandBuilder::new(launch.executable);
+        command.args(launch.args);
+        command.cwd(&dir);
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        assert_eq!(child.wait().unwrap().exit_code(), 23);
+    }
 }

@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),http
 const {pathToFileURL}=require('node:url');const {spawn}=require('node:child_process');const assert=require('node:assert/strict');
 const args=process.argv.slice(2),opt=k=>args[args.indexOf(k)+1];
 assert(args.includes('--pi-entry')&&args.includes('--omp'),'Required --pi-entry PATH --omp EXE');
-const root=fs.mkdtempSync(path.join(os.tmpdir(),'que-extension-cli-'));
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'que-extension-中文-'));
 const observer=pathToFileURL(path.join(__dirname,'../../src-tauri/resources/bin/harness-pi.mjs')).href;
 const server=http.createServer(async(req,res)=>{
   for await(const chunk of req){};

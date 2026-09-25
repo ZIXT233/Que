@@ -75,7 +75,7 @@ fn open_devtools(window: tauri::WebviewWindow) {
 
 /// Reveal the file in Finder/Explorer and open it in the default editor.
 #[tauri::command]
-fn reveal_log(path: String) -> Result<(), String> {
+fn reveal_log(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let path = std::path::PathBuf::from(path);
     if !path.exists() {
         if let Some(parent) = path.parent() {
@@ -102,13 +102,12 @@ fn reveal_log(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .status()
+        use tauri_plugin_opener::OpenerExt;
+        app.opener()
+            .reveal_item_in_dir(&path)
             .map_err(|e| e.to_string())?;
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", path.to_str().unwrap_or("")])
-            .status()
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
             .map_err(|e| e.to_string())?;
         return Ok(());
     }

@@ -809,7 +809,7 @@ fn apply_action(
                 return Err(AppError::msg("请选择工作区位置"));
             }
             let (cwd, ssh_host, runtime_cwd, id) = if kind == "local" {
-                let cwd = crate::paths::expand_user(&cwd_in);
+                let cwd = crate::paths::ordinary_windows_path(crate::paths::expand_user(&cwd_in));
                 if !cwd.is_dir() {
                     return Err(AppError::msg("工作目录不存在"));
                 }
@@ -1915,11 +1915,13 @@ fn valid_ssh_host(host: &str) -> bool {
 fn resolve_terminal_cwd(cwd: &str) -> PathBuf {
     let path = PathBuf::from(cwd);
     if path.is_absolute() {
-        path
+        crate::paths::ordinary_windows_path(path)
     } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
+        crate::paths::ordinary_windows_path(
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path),
+        )
     }
 }
 
