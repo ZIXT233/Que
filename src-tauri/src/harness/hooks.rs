@@ -3,6 +3,7 @@ use super::registry::{self, Ctx, Plan};
 use crate::error::{AppError, AppResult};
 use crate::models::{AppSettings, QueueWorkspace};
 use crate::paths::{atomic_write, signal_dir};
+use crate::winproc::NoWindow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -46,6 +47,7 @@ impl HookLaunch {
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
+                .no_window()
                 .spawn()?;
             if let Some(mut stdin) = child.stdin.take() {
                 stdin.write_all(input.as_bytes()).await?;

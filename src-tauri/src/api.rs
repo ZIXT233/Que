@@ -1477,9 +1477,11 @@ async fn harness_debug(State(state): State<AppState>, Path(id): Path<String>) ->
     Json(state.harness.debug_snapshot(&id, &state.terminals)).into_response()
 }
 
-async fn extension_harnesses(State(state): State<AppState>) -> impl IntoResponse {
-    let errors = crate::harness::refresh_extensions(&state.bin_dir);
-    Json(json!({ "harnesses": crate::harness::extension_harnesses(), "errors": errors }))
+async fn extension_harnesses() -> impl IntoResponse {
+    Json(json!({
+        "harnesses": crate::harness::extension_harnesses(),
+        "errors": crate::harness::extension_errors(),
+    }))
 }
 
 async fn reload_extensions(State(state): State<AppState>) -> impl IntoResponse {

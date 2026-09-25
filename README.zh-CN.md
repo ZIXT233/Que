@@ -61,7 +61,8 @@ Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方�
   <img src="docs/assets/harness/omp.svg" width="20" height="20" align="absmiddle" alt="" /> Oh My Pi &nbsp;
   <img src="docs/assets/harness/codebuddy.svg" width="20" height="20" align="absmiddle" alt="" /> CodeBuddy &nbsp;
   <img src="docs/assets/harness/grok.svg" width="20" height="20" align="absmiddle" alt="" /> Grok Build &nbsp;
-  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin
+  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin &nbsp;
+  <img src="examples/harness-extensions/qwen-code/qwen-color.svg" width="20" height="20" align="absmiddle" alt="" /> Qwen Code
 </p>
 
 使用已有的 CLI、账号和模型配置，从卡片启动时自动完成接入。另提供普通 Shell 卡片。外部会话通知在设置中按工具开启。[接入文档 →](docs/harness/hook-api.zh-CN.md)
@@ -85,7 +86,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-应用数据在 `~/.que`。参见 [Harness Hook 协议](docs/harness/hook-api.zh-CN.md)、[自定义 Harness 扩展指南](docs/harness/extensions.zh-CN.md)与[Qwen Code 扩展示例](examples/harness-extensions/qwen-code/README.zh-CN.md)。
+应用数据在 `~/.que`。参见 [Harness Hook 协议](docs/harness/hook-api.zh-CN.md)、[自定义 Harness 扩展指南](docs/harness/extensions.zh-CN.md)与[随包提供的 Qwen Code 扩展](examples/harness-extensions/qwen-code/README.zh-CN.md)。
 
 ## 协议
 

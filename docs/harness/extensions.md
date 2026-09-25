@@ -2,21 +2,23 @@
 
 **English** | [简体中文](extensions.zh-CN.md)
 
-Place an extension in `~/.que/extensions/<id>/` with an `index.mjs` entry point.
+Place a user extension in `~/.que/extensions/<id>/` with an `index.mjs` entry point.
 Development builds use `~/.que-dev/extensions/`; `QUE_DATA_DIR` overrides the data
 directory. The directory name must match the registered `id`. Extensions are
 trusted, user supplied Node.js code. Que does not install them from the network.
 The target machine needs Node.js.
-The [Qwen Code example](../../examples/harness-extensions/qwen-code/README.md) shows a
-complete extension with an icon, per-card hooks, and external session hooks.
+Que ships its own extensions as application resources and loads them automatically.
+They update with Que and take precedence over a same-id user extension without deleting it.
+The [Qwen Code extension](../../examples/harness-extensions/qwen-code/README.md) shows a
+complete bundled extension with an icon, per-card hooks, and external session hooks.
 
 The current uploader copies UTF-8 text files from the extension directory. Keep
 the entry point and required scripts there; symlinks and binary assets are not
 supported. Install or configure any other remote dependencies separately.
 
 Que loads extensions at startup. Call `POST /api/extensions/harnesses` to reload
-them while Que is running. `GET /api/extensions/harnesses` also refreshes the
-directory and returns registered harnesses and load errors. A registered harness
+them while Que is running. `GET /api/extensions/harnesses` returns the loaded
+harnesses and the most recent load errors without scanning the directory. A registered harness
 appears in the new session picker. Leave Que's generated `harness-plugins/`
 directory alone; it is separate from the extension source directory.
 An optional `icon` names a regular `.svg` file beside `index.mjs` (up to 64 KiB).

@@ -3,11 +3,12 @@
   "bundle": {
     "targets": ["msi", "nsis"],
     "icon": ["icons/windows/icon.ico"],
-    "resources": [
-      "resources/bin/**/*",
-      "resources/conpty/**/*",
-      "resources/terminal-palettes-LICENSE.txt"
-    ],
+    "resources": {
+      "resources/bin/": "resources/bin/",
+      "resources/conpty/": "resources/conpty/",
+      "resources/terminal-palettes-LICENSE.txt": "resources/terminal-palettes-LICENSE.txt",
+      "../examples/harness-extensions/qwen-code/": "resources/extensions/qwen-code/"
+    },
     "windows": {
       "nsis": {
         "installerHooks": "windows/installer-hooks.nsh"

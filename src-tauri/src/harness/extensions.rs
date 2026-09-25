@@ -1,6 +1,7 @@
 //! User-owned Node modules registered at runtime as harness extensions.
 use super::registry::{Adapter, Ctx, Harness, Plan};
 use crate::error::{AppError, AppResult};
+use crate::winproc::NoWindow;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -14,6 +15,7 @@ use std::time::{Duration, Instant};
 
 static REGISTERED: LazyLock<RwLock<HashMap<String, &'static ExtensionHarness>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+static LAST_ERRORS: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::new(Vec::new()));
 static NODE: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn node_binary() -> AppResult<PathBuf> {
@@ -148,71 +150,103 @@ pub fn list() -> Vec<ExtensionInfo> {
     values
 }
 
+pub fn errors() -> Vec<String> {
+    LAST_ERRORS.read().map(|errors| errors.clone()).unwrap_or_default()
+}
+
+fn record_errors(errors: Vec<String>) -> Vec<String> {
+    if let Ok(mut last) = LAST_ERRORS.write() {
+        *last = errors.clone();
+    }
+    errors
+}
+
+fn bundled_root(bin_dir: &Path) -> PathBuf {
+    #[cfg(debug_assertions)]
+    {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/harness-extensions");
+        if source.is_dir() {
+            return source;
+        }
+    }
+    bin_dir.parent().unwrap_or(bin_dir).join("extensions")
+}
+
 pub fn refresh(bin_dir: &Path) -> Vec<String> {
-    let root = crate::paths::data_dir().join("extensions");
     let runner = bin_dir.join("extension-host.cjs");
     let mut found = HashMap::new();
     let mut errors = Vec::new();
-    let entries = match std::fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            *REGISTERED.write().unwrap() = found;
-            return errors;
-        }
-        Err(error) => return vec![format!("{}: {error}", root.display())],
-    };
     let node = match node_binary() {
         Ok(node) => node,
-        Err(error) => return vec![error.to_string()],
+        Err(error) => return record_errors(vec![error.to_string()]),
     };
-    for entry in entries.flatten() {
-        let Ok(ty) = entry.file_type() else { continue };
-        if !ty.is_dir() {
-            continue;
-        }
-        let source = entry.path();
-        let index = source.join("index.mjs");
-        if !index.is_file() {
-            continue;
-        }
-        let output = discover(&node, &runner, &index);
-        let result: Result<ExtensionInfo, String> = match output {
-            Ok(output) if output.status.success() => {
-                serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())
+    // Bundled extensions take precedence so app updates cannot be shadowed by
+    // a stale copy left in the user's extension directory.
+    for (bundled, root) in [
+        (true, bundled_root(bin_dir)),
+        (false, crate::paths::data_dir().join("extensions")),
+    ] {
+        let entries = match std::fs::read_dir(&root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && !bundled => continue,
+            Err(error) => {
+                errors.push(format!("{}: {error}", root.display()));
+                continue;
             }
-            Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-            Err(error) => Err(error.to_string()),
         };
-        match result {
-            Ok(info)
-                if info.id == entry.file_name().to_string_lossy()
-                    && super::registry::builtin(&info.id).is_none()
-                    && !found.contains_key(&info.id) =>
-            {
-                let previous = REGISTERED
-                    .read()
-                    .ok()
-                    .and_then(|map| map.get(&info.id).copied());
-                let harness: &'static ExtensionHarness = if let Some(old) =
-                    previous.filter(|old| old.info == info && old.source == source)
-                {
-                    old
-                } else {
-                    let id: &'static str = Box::leak(info.id.clone().into_boxed_str());
-                    Box::leak(Box::new(ExtensionHarness { id, info, source }))
-                };
-                found.insert(harness.id.to_string(), harness);
+        for entry in entries.flatten() {
+            let Ok(ty) = entry.file_type() else { continue };
+            if !ty.is_dir() {
+                continue;
             }
-            Ok(info) => errors.push(format!(
-                "{}: invalid or duplicate id {}",
-                index.display(),
-                info.id
-            )),
-            Err(error) => errors.push(format!("{}: {error}", index.display())),
+            let directory_id = entry.file_name().to_string_lossy().into_owned();
+            if found.contains_key(&directory_id) {
+                continue;
+            }
+            let source = entry.path();
+            let index = source.join("index.mjs");
+            if !index.is_file() {
+                continue;
+            }
+            let output = discover(&node, &runner, &index);
+            let result: Result<ExtensionInfo, String> = match output {
+                Ok(output) if output.status.success() => {
+                    serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())
+                }
+                Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            match result {
+                Ok(info)
+                    if info.id == directory_id
+                        && super::registry::builtin(&info.id).is_none()
+                        && !found.contains_key(&info.id) =>
+                {
+                    let previous = REGISTERED
+                        .read()
+                        .ok()
+                        .and_then(|map| map.get(&info.id).copied());
+                    let harness: &'static ExtensionHarness = if let Some(old) =
+                        previous.filter(|old| old.info == info && old.source == source)
+                    {
+                        old
+                    } else {
+                        let id: &'static str = Box::leak(info.id.clone().into_boxed_str());
+                        Box::leak(Box::new(ExtensionHarness { id, info, source }))
+                    };
+                    found.insert(harness.id.to_string(), harness);
+                }
+                Ok(info) => errors.push(format!(
+                    "{}: invalid or duplicate id {}",
+                    index.display(),
+                    info.id
+                )),
+                Err(error) => errors.push(format!("{}: {error}", index.display())),
+            }
         }
     }
     *REGISTERED.write().unwrap() = found;
-    errors
+    record_errors(errors)
 }
 
 fn discover(node: &Path, runner: &Path, index: &Path) -> std::io::Result<std::process::Output> {
@@ -225,6 +259,7 @@ fn bounded_output(
     mut command: std::process::Command,
     timeout: Duration,
 ) -> std::io::Result<std::process::Output> {
+    command.no_window();
     let child = command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -385,6 +420,7 @@ fn external_callback(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .no_window()
         .spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(input.as_bytes())?;
@@ -423,6 +459,7 @@ pub async fn command(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .no_window()
         .spawn()?;
     use tokio::io::AsyncWriteExt;
     if let Some(mut stdin) = child.stdin.take() {

@@ -7,7 +7,9 @@ if (!pluginDir) throw Error('Missing Qwen Code plugin directory');
 
 const defaultPath = process.platform === 'darwin'
   ? '/Library/Application Support/QwenCode/system-defaults.json'
-  : path.join('/etc', 'qwen-code', 'system-defaults.json');
+  : process.platform === 'win32'
+    ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'qwen-code', 'system-defaults.json')
+    : path.join('/etc', 'qwen-code', 'system-defaults.json');
 const originalPath = process.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH || defaultPath;
 const original = fs.existsSync(originalPath)
   ? JSON.parse(fs.readFileSync(originalPath, 'utf8'))

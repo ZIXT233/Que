@@ -134,8 +134,9 @@ function CardQueueShellContent() {
       } catch { /* The built-in harnesses remain available. */ }
     };
     void load();
-    window.addEventListener("focus", load);
-    return () => { mounted = false; window.removeEventListener("focus", load); };
+    // Extension discovery starts a Node helper; focus can recur when its
+    // console closes on Windows, so do not use focus as a refresh trigger.
+    return () => { mounted = false; };
   }, []);
   const { t, locale, setLocale, supportedLocales } = useI18n();
   const router = useRouter();

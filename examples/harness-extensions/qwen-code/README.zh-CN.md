@@ -2,14 +2,11 @@
 
 [English](README.md) | **简体中文**
 
-这是独立安装的示例扩展。仓库中的副本不会被 Que 自动加载，也不需要放进 Que
-本体的运行目录。
-
-在仓库根目录执行 `mkdir -p ~/.que/extensions && cp -R examples/harness-extensions/qwen-code ~/.que/extensions/`；
-Que 开发版将目标路径改为 `~/.que-dev/extensions/`。复制后启动 Que，或通过
-`POST /api/extensions/harnesses` 重新加载。目标机器需要 Node.js，运行 Qwen Code 会话
-还需要安装 `qwen` CLI。
-`qwen-color.svg` 是扩展自己提供的图标，随扩展复制，不放入 Que 本体目录。
+这是 Que 随发布包提供的 Harness 扩展。发布包把此目录作为应用资源打包，启动时
+自动加载；开发版直接读取这里的源码。无需复制到 `~/.que/extensions/`。
+该目录仍保留给用户扩展；已有的同名 Qwen 副本不会被删除，但随包版本优先。
+运行中可通过 `POST /api/extensions/harnesses` 重新加载。目标机器需要 Node.js，
+运行 Qwen Code 会话还需要安装 `qwen` CLI。`qwen-color.svg` 随扩展一起打包。
 
 启用 Que 的“外部会话”通知后，扩展在 `~/.qwen/settings.json` 中加入自己命名的
 命令式 hook，捕获 Que 外启动的 Qwen Code 会话。关闭通知或移除扩展时，只删除
@@ -22,9 +19,10 @@ Que 开发版将目标路径改为 `~/.que-dev/extensions/`。复制后启动 Qu
 Qwen Code 在启动会话时加载 hook。若会话已经打开，可在其中打开 `/hooks`
 菜单重新加载；`disableAllHooks`、`--safe-mode` 和 `--bare` 会禁用 hook。
 
-Que 卡片会通过 `launch.sh` 启动 `qwen`，在该进程的系统默认设置中加载
+Que 卡片在 macOS/Linux 和 SSH 远端通过 `launch.sh` 启动 `qwen`；Windows 本机通过
+`launch.cjs` 启动。启动器会在该进程的系统默认设置中加载
 `card-hooks.json`；扩展通过 `installHooks` 生成每张卡片自己的命令，事件只进入
 对应卡片的信号目录。恢复会话使用 `qwen --resume <session-id>`。现有的 Qwen
-系统默认设置会合并保留，不修改全局系统设置文件。此启动脚本面向 macOS/Linux。
+系统默认设置会合并保留，不修改全局系统设置文件。
 
 官方协议：[Qwen Code Hooks](https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/)。

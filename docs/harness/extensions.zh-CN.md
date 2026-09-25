@@ -2,15 +2,17 @@
 
 [English](extensions.md) | **简体中文**
 
-将一个目录放在 `~/.que/extensions/<id>/`，入口为 `index.mjs`。开发版使用
+用户扩展放在 `~/.que/extensions/<id>/`，入口为 `index.mjs`。开发版使用
 `~/.que-dev/extensions/`；`QUE_DATA_DIR` 可覆盖根目录。目录名必须与注册的 `id`
 相同。扩展是用户信任的 Node.js 代码，Que 不从网络自动安装。目标机器需要 Node.js。
-可参考[Qwen Code 扩展示例](../../examples/harness-extensions/qwen-code/README.zh-CN.md)，其中包含图标、卡片 hook 和外部会话 hook。
+Que 自带的扩展随应用资源发布并自动加载，更新时跟随 Que 更新；同名用户扩展保留在
+用户目录，但由随包版本优先。[Qwen Code 扩展](../../examples/harness-extensions/qwen-code/README.zh-CN.md)
+包含图标、卡片 hook 和外部会话 hook。
 当前上传器复制扩展目录中的 UTF-8 文本文件；请将入口和所需脚本放在该目录内，
 不要依赖符号链接或二进制附件。远端所需的其他依赖由扩展自行安装或预先配置。
 
 Que 启动时加载扩展；运行中可调用 `POST /api/extensions/harnesses` 重新加载。
-`GET /api/extensions/harnesses` 返回已注册扩展及加载错误，并刷新目录。
+`GET /api/extensions/harnesses` 返回已加载扩展和最近一次加载错误，不扫描目录。
 注册成功的 harness 会出现在新会话选择器中。扩展目录与 Que 自动生成的
 `harness-plugins/` 分开，后者不要手工编辑。
 可选 `icon` 指向 `index.mjs` 同目录下最大 64 KiB 的普通 `.svg` 文件；

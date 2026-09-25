@@ -160,7 +160,18 @@ function externalName(event, ctx) {
 function ownedHook(hook, event, ctx) {
   if (hook?.name !== externalName(event, ctx) && hook?.name !== `${OWNER}-${event}`) return false;
   const runner = path.join(path.dirname(ctx.pluginDir), 'hook.cjs');
-  if (typeof hook.command !== 'string' || !hook.command.includes(runner)) {
+  let command = hook.command;
+  if (typeof command === 'string' && !command.includes(runner)) {
+    const encoded = command.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/i)?.[1];
+    if (encoded) {
+      try { command += Buffer.from(encoded, 'base64').toString('utf16le'); } catch {}
+    }
+  }
+  const normalizedCommand = typeof command === 'string' && process.platform === 'win32'
+    ? command.replaceAll('\\', '/').toLowerCase()
+    : command;
+  const normalizedRunner = process.platform === 'win32' ? runner.replaceAll('\\', '/').toLowerCase() : runner;
+  if (typeof command !== 'string' || !normalizedCommand.includes(normalizedRunner)) {
     if (hook.name === `${OWNER}-${event}`) return false;
     throw new Error(`Qwen hook name is already used by another command: ${hook.name}`);
   }
@@ -227,6 +238,9 @@ function installCard(ctx) {
 }
 
 function launchCommand(pluginDir, remote, extraArgs = []) {
+  if (!remote && process.platform === 'win32') {
+    return { command: 'node', args: [path.join(pluginDir, 'launch.cjs'), ...extraArgs] };
+  }
   const script = remote
     ? path.posix.join(pluginDir, 'launch.sh')
     : path.join(pluginDir, 'launch.sh');

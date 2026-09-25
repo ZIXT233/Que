@@ -61,7 +61,8 @@ Que supports mainstream CLI harnesses through terminal cards, so you can handle 
   <img src="docs/assets/harness/omp.svg" width="20" height="20" align="absmiddle" alt="" /> Oh My Pi &nbsp;
   <img src="docs/assets/harness/codebuddy.svg" width="20" height="20" align="absmiddle" alt="" /> CodeBuddy &nbsp;
   <img src="docs/assets/harness/grok.svg" width="20" height="20" align="absmiddle" alt="" /> Grok Build &nbsp;
-  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin
+  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin &nbsp;
+  <img src="examples/harness-extensions/qwen-code/qwen-color.svg" width="20" height="20" align="absmiddle" alt="" /> Qwen Code
 </p>
 
 Use your existing CLIs, accounts and model settings. Que sets up the integration when launching a card. A plain Shell card is also available. Enable external-session notices per tool in Settings. [Integration docs →](docs/harness/hook-api.md)
@@ -85,7 +86,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-App data lives in `~/.que`. See the [harness hook contract](docs/harness/hook-api.md), [custom harness extension guide](docs/harness/extensions.md), and [Qwen Code extension example](examples/harness-extensions/qwen-code/README.md).
+App data lives in `~/.que`. See the [harness hook contract](docs/harness/hook-api.md), [custom harness extension guide](docs/harness/extensions.md), and [bundled Qwen Code extension](examples/harness-extensions/qwen-code/README.md).
 
 ## License
 

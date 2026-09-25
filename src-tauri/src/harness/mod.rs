@@ -19,7 +19,9 @@ use crate::winproc::NoWindow;
 
 pub use debug::HarnessDebugSnapshot;
 pub use env::local_environment;
-pub use extensions::{list as extension_harnesses, refresh as refresh_extensions};
+pub use extensions::{
+    errors as extension_errors, list as extension_harnesses, refresh as refresh_extensions,
+};
 pub use external::ExternalRuntime;
 pub use hooks::{prepare_hook_launch, sync_external_hooks, sync_installed_hooks};
 pub use osc::HookOscProbe;
