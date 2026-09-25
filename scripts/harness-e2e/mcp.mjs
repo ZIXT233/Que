@@ -90,12 +90,23 @@ try {
   const rpc = bridge(script);
   assert.equal((await rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } })).result.serverInfo.name, 'que');
   const listed = (await rpc('tools/list')).result.tools;
-  assert.equal(listed.length, 7); assert(listed.find(t => t.name === 'read_terminal').annotations.readOnlyHint);
+  assert.equal(listed.length, 8); assert(listed.find(t => t.name === 'read_terminal').annotations.readOnlyHint);
+  assert.equal(listed.find(t => t.name === 'set_card_nickname').annotations.readOnlyHint, false);
   assert.equal((await tool(rpc, 'list_cards')).cards.length, 0); // No helper session required.
   const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace);
   let queue = await ok(server, { action: 'workspace_create', kind: 'local', name: 'MCP test', cwd: workspace, createCard: true });
   const card = queue.cards.find(c => c.cwd === workspace);
-  assert.equal((await tool(rpc, 'list_cards')).cards[0].state, 'not_started');
+  const blank = (await tool(rpc, 'list_cards')).cards[0];
+  assert.equal(blank.state, 'not_started');
+  assert.equal(blank.title, '新会话');
+  assert.equal(blank.nickname, null);
+  const nicknamePending = await tool(rpc, 'set_card_nickname', { cardId: card.id, nickname: '待启动', requestId: 'nickname-blank' });
+  assert.equal(nicknamePending.delivery, 'approval-required');
+  assert.equal((await server.control('mcp_pending'))[0].nickname, '待启动');
+  await assert.rejects(server.control('mcp_decide', { id: nicknamePending.approvalId, approve: true, allCards: true }));
+  await server.control('mcp_decide', { id: nicknamePending.approvalId, approve: true });
+  assert.equal((await tool(rpc, 'set_card_nickname', { cardId: card.id, nickname: '待启动', requestId: 'nickname-blank' })).delivery, 'updated');
+  assert.equal((await tool(rpc, 'list_cards')).cards[0].nickname, '待启动');
   const starter = bridge(script);
   const startAction = { cardId: card.id, kind: 'shell', requestId: 'start-denied' };
   const deniedStart = await tool(starter, 'start_card', startAction);
@@ -114,7 +125,10 @@ try {
   assert((await tool(starter, 'read_terminal', { cardId: card.id, terminalId })).readToken);
   assert.deepEqual(await tool(starter, 'start_card', approvedAction), started);
   assert.equal((await tool(starter, 'start_card', { ...approvedAction, requestId: 'already-running' })).delivery, 'already-running');
-  assert.equal((await tool(rpc, 'list_cards')).cards.find(c => c.cardId === card.id).terminalId, terminalId);
+  const running = (await tool(rpc, 'list_cards')).cards.find(c => c.cardId === card.id);
+  assert.equal(running.terminalId, terminalId);
+  assert.equal(running.title, 'MCP test');
+  assert.equal(running.nickname, '待启动');
   const target = { cardId: card.id, terminalId };
   const pending = await tool(rpc, 'read_terminal', target);
   assert.equal(pending.delivery, 'approval-required');
@@ -124,6 +138,10 @@ try {
   assert.equal((await fetch(server.base + '/api/mcp/decide', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + initial.token }, body: JSON.stringify({ id: pending.approvalId, approve: true }) })).status, 404);
   await server.control('mcp_decide', { id: pending.approvalId, approve: true });
   assert.equal((await tool(rpc, 'get_request_status', { requestId: pending.requestId })).delivery, 'authorized');
+  const rename = { cardId: card.id, nickname: '运行中', requestId: 'nickname-running' };
+  assert.equal((await tool(rpc, 'set_card_nickname', rename)).delivery, 'updated');
+  assert.deepEqual(await tool(rpc, 'set_card_nickname', rename), await tool(rpc, 'get_request_status', { requestId: rename.requestId }));
+  assert.equal((await tool(rpc, 'list_cards')).cards.find(c => c.cardId === card.id).nickname, '运行中');
   assert.equal(await fs.readFile(path.join(workspace, 'result.txt'), 'utf8').catch(() => ''), '');
   const before = await tool(rpc, 'read_terminal', target);
   const action = { ...target, requestId: 'once', readToken: before.readToken, text: 'printf mcp-ok >> result.txt' };
@@ -177,10 +195,19 @@ try {
   const sibling = bridge(script, sourceEnv);
   assert.deepEqual(await tool(sibling, 'read_terminal', target), sourcePending);
   assert.equal((await server.control('mcp_pending')).length, 1);
-  await server.control('mcp_decide', { id: sourcePending.approvalId, approve: true });
+  await server.control('mcp_decide', { id: sourcePending.approvalId, approve: true, allCards: true });
   assert.equal((await tool(sibling, 'get_request_status', { requestId: sourcePending.requestId })).delivery, 'authorized');
   assert((await tool(sourceRpc, 'read_terminal', target)).readToken);
   assert((await tool(sibling, 'read_terminal', target)).readToken);
+  const extraWorkspace = path.join(root, 'extra'); await fs.mkdir(extraWorkspace);
+  queue = await ok(server, { action: 'workspace_create', kind: 'local', name: 'Extra', cwd: extraWorkspace, createCard: true });
+  const extraCard = queue.cards.find(c => c.cwd === extraWorkspace);
+  assert.equal((await tool(sourceRpc, 'set_card_nickname', { cardId: extraCard.id, nickname: '跨卡昵称', requestId: 'extra-nickname' })).delivery, 'updated');
+  assert.equal((await tool(rpc, 'list_cards')).cards.find(c => c.cardId === extraCard.id).nickname, '跨卡昵称');
+  const extraStarted = await tool(sourceRpc, 'start_card', { cardId: extraCard.id, kind: 'shell', requestId: 'extra-start' });
+  assert.equal(extraStarted.delivery, 'started');
+  assert((await tool(sibling, 'read_terminal', { cardId: extraCard.id, terminalId: extraStarted.terminalId })).readToken);
+  assert.equal((await server.control('mcp_pending')).length, 0);
   const reverse = bridge(script, { QUE_HARNESS_SIGNAL_DIR: '/signals/' + terminalId });
   const reversePending = await tool(reverse, 'read_terminal', { cardId: sourceCard.id, terminalId: sourceTerminal });
   assert.equal(reversePending.delivery, 'approval-required'); // A -> B never grants B -> A.
@@ -188,6 +215,7 @@ try {
   await ok(server, { type: 'input', human: true, data: 'exit\r' }, `/api/terminal/${sourceTerminal}`);
   await waitFor(async () => !(await tool(rpc, 'list_cards')).cards.find(c => c.cardId === sourceCard.id).controllable);
   assert((await call(sourceRpc, 'read_terminal', target)).isError);
+  assert((await call(sourceRpc, 'set_card_nickname', { cardId: extraCard.id, nickname: '应拒绝', requestId: 'source-ended' })).isError);
   await ok(server, { action: 'archive', id: sourceCard.id });
   assert((await call(sourceRpc, 'read_terminal', target)).isError);
   // Target lifecycle change invalidates a pending approval as well as existing grants.
@@ -212,6 +240,7 @@ try {
   // Same running bridge discovers the new endpoint and reports the stopped card honestly.
   const restarted = (await tool(rpc, 'list_cards')).cards.find(c => c.cardId === card.id);
   assert.equal(restarted.state, 'not_running'); assert.equal(restarted.controllable, false);
+  assert.equal(restarted.nickname, '运行中');
   assert((await call(rpc, 'send_text', action)).isError); // Old read token cannot replay a write.
   assert.equal(await fs.readFile(path.join(workspace, 'result.txt'), 'utf8'), 'mcp-ok');
   const resumePending = await tool(starter, 'start_card', { cardId: card.id, requestId: 'start-stopped' });
@@ -221,7 +250,7 @@ try {
   assert.equal(resumed.delivery, 'started', JSON.stringify(resumed));
   assert.notEqual(resumed.terminalId, terminalId);
   assert((await tool(starter, 'read_terminal', { cardId: card.id, terminalId: resumed.terminalId })).readToken);
-  console.log('PASS: MCP start blank/stopped cards, denied start, start deduplication, no restart of live cards, run-scoped pair authorization, read gating, repeated input without prompts, source sharing, reverse-pair isolation, denial, lifecycle invalidation, real PTY execution, human takeover, profile isolation and restart recovery.');
+  console.log('PASS: MCP card titles and nicknames, nickname persistence, pair and all-card authorization, blank/stopped start, denial, source-run invalidation, real PTY input, human takeover, profile isolation and restart recovery.');
   if (process.argv.includes('--serve')) {
     const dist = path.resolve('dist');
     uiServer = createServer(async (req, res) => {

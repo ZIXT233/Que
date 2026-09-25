@@ -66,7 +66,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let result = handle.block_on(async {
                     if body["method"] == "mcp_pending" { return Ok(crate::mcp::pending(&state).await); }
                     if body["method"] == "mcp_decide" {
-                        return crate::mcp::decide(&state, body["id"].as_str().unwrap_or(""), body["approve"].as_bool().unwrap_or(false)).await;
+                        return crate::mcp::decide(&state, body["id"].as_str().unwrap_or(""), body["approve"].as_bool().unwrap_or(false), body["allCards"].as_bool().unwrap_or(false)).await;
                     }
                     Err(crate::error::AppError::msg("Unknown test control"))
                 });

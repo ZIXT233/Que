@@ -53,11 +53,12 @@ async fn mcp_decide(
     window: tauri::WebviewWindow,
     id: String,
     approve: bool,
+    all_cards: bool,
 ) -> Result<serde_json::Value, String> {
     if window.label() != "main" {
         return Err("Use the main Que window".into());
     }
-    mcp::decide(&state, &id, approve)
+    mcp::decide(&state, &id, approve, all_cards)
         .await
         .map_err(|e| e.to_string())
 }
