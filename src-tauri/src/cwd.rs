@@ -106,7 +106,7 @@ pub async fn pick_local_folder(locale: Option<String>) -> AppResult<Option<Strin
             .await
     } else if cfg!(windows) {
         tokio::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-STA", "-Command", "Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; if ($dialog.ShowDialog() -eq \"OK\") { $dialog.SelectedPath }"])
+            .args(["-NoProfile", "-STA", "-Command", "Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; if ($dialog.ShowDialog() -eq \"OK\") { [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($dialog.SelectedPath)) }"])
             .no_window()
             .output()
             .await
@@ -122,7 +122,23 @@ pub async fn pick_local_folder(locale: Option<String>) -> AppResult<Option<Strin
     };
     match output {
         Ok(result) if result.status.success() => {
-            let cwd = String::from_utf8_lossy(&result.stdout).trim().to_string();
+            let cwd = if cfg!(windows) {
+                // Windows PowerShell may encode redirected stdout using the active
+                // console code page. Only ASCII base64 crosses that boundary.
+                let encoded = String::from_utf8(result.stdout)
+                    .map_err(|_| AppError::machine("LOCAL_PICKER"))?;
+                if encoded.trim().is_empty() {
+                    return Ok(None);
+                }
+                let bytes = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    encoded.trim(),
+                )
+                .map_err(|_| AppError::machine("LOCAL_PICKER"))?;
+                String::from_utf8(bytes).map_err(|_| AppError::machine("LOCAL_PICKER"))?
+            } else {
+                String::from_utf8_lossy(&result.stdout).trim().to_string()
+            };
             Ok(if cwd.is_empty() { None } else { Some(cwd) })
         }
         Ok(_) => Ok(None),

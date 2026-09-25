@@ -1,6 +1,6 @@
 [package]
 name = "que"
-version = "0.1.2"
+version = "0.2.0"
 description = "Queue of Agent Cues"
 authors = ["Que"]
 edition = "2021"
