@@ -15,19 +15,11 @@
   <a href="https://github.com/ZIXT233/Que/issues">Issues</a>
 </p>
 
+<h3 align="center"><a href="https://github.com/ZIXT233/Que/releases/latest">Download Que</a></h3>
+
 Que schedules your attention with a unified queue of waiting Agent sessions, so you can just handle the one at the front instead of chasing notification badges.
 
 Que supports mainstream CLI harnesses through terminal cards, so you can handle multiple harness workflows in one place.
-
-<p align="center">
-  <a href="https://github.com/ZIXT233/Que/releases/latest/download/Que-windows-x64.exe"><img src="https://flat.badgen.net/badge/Download/Windows%20x64/3b82f6?icon=windows&amp;scale=1.4" alt="Download for Windows x64" /></a>
-  <a href="https://github.com/ZIXT233/Que/releases/latest/download/Que-macos-arm64.dmg"><img src="https://flat.badgen.net/badge/Download/macOS%20Apple%20Silicon/3b82f6?icon=apple&amp;scale=1.4" alt="Download for macOS Apple Silicon" /></a>
-</p>
-<p align="center">
-  <a href="https://github.com/ZIXT233/Que/releases/latest/download/Que-windows-arm64.exe">Windows Arm64</a> ·
-  <a href="https://github.com/ZIXT233/Que/releases/latest/download/Que-macos-x64.dmg">Mac Intel</a> ·
-  <a href="https://github.com/ZIXT233/Que/releases/latest">Linux, MSI and all downloads</a>
-</p>
 
 ## Features
 
