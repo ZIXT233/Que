@@ -15,6 +15,10 @@
   <a href="https://github.com/ZIXT233/Que/issues">反馈</a>
 </p>
 
+Que 通过统一的待处理 Agent 会话队列调度你的注意力，让你只需处理队首，而不用追着通知小红点跑。
+
+Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方处理多个 Harness 工作流。
+
 <p align="center">
   <a href="https://github.com/ZIXT233/Que/releases/latest/download/Que-windows-x64.exe"><img src="https://flat.badgen.net/badge/Download/Windows%20x64/3b82f6?icon=windows&amp;scale=1.4" alt="下载 Windows x64 版" /></a>
   <a href="https://github.com/ZIXT233/Que/releases/latest/download/Que-macos-arm64.dmg"><img src="https://flat.badgen.net/badge/Download/macOS%20Apple%20Silicon/3b82f6?icon=apple&amp;scale=1.4" alt="下载 macOS Apple 芯片版" /></a>
@@ -24,10 +28,6 @@
   <a href="https://github.com/ZIXT233/Que/releases/latest/download/Que-macos-x64.dmg">Mac Intel</a> ·
   <a href="https://github.com/ZIXT233/Que/releases/latest">Linux、MSI 与全部下载</a>
 </p>
-
-Que 通过统一的待处理 Agent 会话队列调度你的注意力，让你只需处理队首，而不用追着通知小红点跑。
-
-Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方处理多个 Harness 工作流。
 
 ## 功能
 
