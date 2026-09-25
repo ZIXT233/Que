@@ -26,7 +26,9 @@ fn external_entry(ctx: &GlobalCtx, kind: &str) -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|_| ctx.home.join(".pi/agent"))
     };
-    agent.join("extensions").join(EXTERNAL_FILE)
+    agent
+        .join("extensions")
+        .join(format!("que-pi-omp-external-{}.ts", ctx.profile_id()))
 }
 
 fn install_external(ctx: &GlobalCtx, kind: &str) -> AppResult<()> {
@@ -47,20 +49,25 @@ fn install_external(ctx: &GlobalCtx, kind: &str) -> AppResult<()> {
     let source = format!("{EXTERNAL_MARKER}\nimport observer from {};\nexport default function(api) {{ if (process.env.QUE_HARNESS_SIGNAL_DIR || process.env.QUE_HARNESS_CHANNEL) return; return observer(api, {options}); }}\n", serde_json::to_string(module.as_str())?);
     std::fs::create_dir_all(entry.parent().unwrap())?;
     crate::paths::atomic_write(&entry, &source)?;
-    remove_marked_file(&entry.with_file_name(LEGACY_EXTERNAL_FILE));
+    remove_profile_file(&entry.with_file_name(EXTERNAL_FILE), ctx, kind);
+    remove_profile_file(&entry.with_file_name(LEGACY_EXTERNAL_FILE), ctx, kind);
     Ok(())
 }
 
-fn remove_marked_file(path: &std::path::Path) {
-    if std::fs::read_to_string(path).is_ok_and(|source| source.starts_with(EXTERNAL_MARKER)) {
+fn remove_profile_file(path: &std::path::Path, ctx: &GlobalCtx, kind: &str) {
+    if std::fs::read_to_string(path).is_ok_and(|source| {
+        source.starts_with(EXTERNAL_MARKER)
+            && source.contains(&ctx.plugins.join(kind).to_string_lossy().to_string())
+    }) {
         let _ = std::fs::remove_file(path);
     }
 }
 
 fn remove_external(ctx: &GlobalCtx, kind: &str) {
     let entry = external_entry(ctx, kind);
-    remove_marked_file(&entry);
-    remove_marked_file(&entry.with_file_name(LEGACY_EXTERNAL_FILE));
+    remove_profile_file(&entry, ctx, kind);
+    remove_profile_file(&entry.with_file_name(EXTERNAL_FILE), ctx, kind);
+    remove_profile_file(&entry.with_file_name(LEGACY_EXTERNAL_FILE), ctx, kind);
 }
 
 async fn plan(ctx: Ctx<'_>) -> AppResult<Plan> {

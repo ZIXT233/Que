@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createShellProbe } from "@/lib/harness/shell-probe";
-import { harnessPicker, harnessName, providerIconId, terminalOptions } from "@/lib/harness/catalog";
+import { harnessPicker, harnessName, providerIconId, terminalOptions, type HarnessCatalogEntry } from "@/lib/harness/catalog";
 import { harnessErrorText } from "@/lib/harness/errors";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
@@ -15,10 +15,11 @@ import { ErrorDialog } from "./ErrorDialog";
 import { saveAndOpenCardLog } from "@/lib/card-log";
 import type { QueueCard } from "@/lib/card-queue";
 
-export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostName, children, onAction, onStartAll }: {
+export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostName, children, onAction, onStartAll, extensionHarnesses = [] }: {
   card: QueueCard; active: boolean; inQueue?: boolean; sshHost?: string; sshHostName?: string; children?: ReactNode;
   onAction: (action: string, data: Record<string, unknown>) => Promise<boolean>;
   onStartAll?: () => Promise<void>;
+  extensionHarnesses?: HarnessCatalogEntry[];
 }) {
   const { t } = useI18n();
   const labels = { not_running:t("harness.processNotStarted"), starting:t("harness.starting"), working:t("harness.working"), attention:t("harness.waiting"), unknown:t("harness.unknown"), exited:t("harness.processNotStarted"), error:t("harness.disconnected") };
@@ -244,11 +245,11 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
         </div>
       )}
       <div className="cq-harness-options">
-      {harnessPicker.map(item => <button key={item.id} type="button" className="cq-harness-option" disabled={busy} onClick={() => {
+      {[...harnessPicker, ...extensionHarnesses].map(item => <button key={item.id} type="button" className="cq-harness-option" disabled={busy} onClick={() => {
         void startHarness(item.id);
       }}>
         <span className="cq-harness-option-icon" aria-hidden="true"><ProviderIcon id={providerIconId(item.id)} size={28} /></span>
-        <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
+        <span className="cq-harness-option-copy"><span className="cq-harness-option-title"><strong>{item.name}</strong>{item.extension && <span className="cq-extension-badge">{t("harness.extensionBadge")}</span>}</span><small>{busy ? t("harness.checking") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
       </button>)}
       </div>
     </div></div> : children}

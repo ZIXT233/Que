@@ -85,8 +85,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-App data lives in `~/.que`.
-
+App data lives in `~/.que`. See the [harness hook contract](docs/harness/hook-api.md), [custom harness extension guide](docs/harness/extensions.md), and [Qwen Code extension example](examples/harness-extensions/qwen-code/README.md).
 
 ## License
 

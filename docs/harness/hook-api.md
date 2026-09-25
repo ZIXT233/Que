@@ -55,6 +55,7 @@ The ingress reads a superset of every harness's field names and emits one shape
 | `tool` | From `toolCall.name` / `tool_name` / `toolName` / `name`. |
 | `prompt` | Only on submit-shaped events. |
 | `firstPrompt`, `title` | Session naming hints. |
+| `turns` | Optional conversation snapshot from an extension: chronological `{ role: "user" | "assistant", text: string }[]`. External notices display both sides from it. |
 | `replyPreview` | Turn-end reply clip. Cards get 160 chars; the external sink keeps up to 2000. |
 | `notification` | From `notification_type` / `notificationType` / `type`. |
 | `fullyIdle` | Antigravity only: whether a `Stop` really ended the turn. A fact the contract has no event name for, reported as a field instead of by renaming an event. |

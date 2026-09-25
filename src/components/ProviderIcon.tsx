@@ -1,3 +1,5 @@
+import { extensionIconDataUrl } from "@/lib/harness/catalog";
+
 const PROVIDER_ICONS: Record<string, { symbol: string; color: boolean }> = {
   anthropic: { symbol: "anthropic", color: false },
   openai: { symbol: "openai", color: false },
@@ -88,7 +90,11 @@ export function SpritePaintDefs({ id }: { id: string }) {
   return content ? <defs>{content}</defs> : null;
 }
 
-export function ProviderIcon({ id, size }: { id: string; size: number }) {
+export function ProviderIcon({ id, size, iconDataUrl }: { id: string; size: number; iconDataUrl?: string }) {
+  const extensionIcon = iconDataUrl ?? extensionIconDataUrl(id);
+  if (extensionIcon) {
+    return <img aria-hidden="true" src={extensionIcon} width={size} height={size} style={{ width: size, height: size, objectFit: "contain", flexShrink: 0 }} />;
+  }
   const icon = PROVIDER_ICONS[id];
   if (icon) {
     return (

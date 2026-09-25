@@ -95,6 +95,12 @@ fn owned(existing: Option<&str>) -> AppResult<()> {
     }
 }
 
+fn profile_owned(body: &str, ctx: &GlobalCtx) -> bool {
+    body.replace("\\\\", "/")
+        .replace('\\', "/")
+        .contains(&ctx.hook_path("grok").replace('\\', "/"))
+}
+
 pub struct Grok;
 
 pub static GROK: Grok = Grok;
@@ -212,11 +218,11 @@ impl Harness for Grok {
         let command = crate::harness::windows::windows_hook_command(
             &ctx.node,
             &ctx.hook_path("grok"),
-            None,
+            Some("--que-ambient"),
         );
         #[cfg(not(windows))]
         let command = format!(
-            "{} {}",
+            "{} {} --que-ambient",
             crate::ssh::shell_quote(&ctx.node),
             crate::ssh::shell_quote(&ctx.hook_path("grok"))
         );
@@ -225,25 +231,40 @@ impl Harness for Grok {
             hooks.insert(event.into(), serde_json::json!([{ "hooks": [{"type":"command", "command":command, "timeout":2}] }]));
         }
         let dir = grok_home().join("hooks");
-        let existing = std::fs::read_to_string(dir.join("que-session-state.json")).ok();
+        let file = dir.join(format!("que-session-state-{}.json", ctx.profile_id()));
+        let existing = std::fs::read_to_string(&file).ok();
         if let Err(error) = owned(existing.as_deref()) {
             crate::debuglog::log_error("install external Grok hooks", &error);
             return;
         }
         let _ = std::fs::create_dir_all(&dir);
+        let legacy = dir.join("que-session-state.json");
+        if std::fs::read_to_string(&legacy)
+            .is_ok_and(|body| owned(Some(&body)).is_ok() && profile_owned(&body, ctx))
+        {
+            let _ = std::fs::remove_file(&legacy);
+        }
         let _ = atomic_write(
-            &dir.join("que-session-state.json"),
+            &file,
             &serde_json::json!({ "queManaged": true, "hooks": hooks }).to_string(),
         );
     }
 
     /// The bundle file is wholly Que-owned (`queManaged`), so removal is deletion.
-    fn unglobal(&self, _ctx: &GlobalCtx) {
-        let file = grok_home().join("hooks/que-session-state.json");
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let file = grok_home()
+            .join("hooks")
+            .join(format!("que-session-state-{}.json", ctx.profile_id()));
         if let Ok(existing) = std::fs::read_to_string(&file) {
-            if owned(Some(&existing)).is_ok() {
-                let _ = std::fs::remove_file(file);
+            if owned(Some(&existing)).is_ok() && profile_owned(&existing, ctx) {
+                let _ = std::fs::remove_file(&file);
             }
+        }
+        let legacy = grok_home().join("hooks/que-session-state.json");
+        if std::fs::read_to_string(&legacy)
+            .is_ok_and(|body| owned(Some(&body)).is_ok() && profile_owned(&body, ctx))
+        {
+            let _ = std::fs::remove_file(legacy);
         }
     }
 

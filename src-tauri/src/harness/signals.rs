@@ -1,3 +1,4 @@
+use crate::models::ExternalTurn;
 use serde::{Deserialize, Serialize};
 
 /// How long a guessed ask is held before it is raised as one.
@@ -23,6 +24,8 @@ pub struct HookSignal {
     pub prompt: Option<String>,
     pub first_prompt: Option<String>,
     pub title: Option<String>,
+    /// Optional conversation snapshot supplied by a harness extension hook.
+    pub turns: Option<Vec<ExternalTurn>>,
     pub notification: Option<String>,
     /// Antigravity says whether a `Stop` really ended the turn; `false` means the CLI
     /// paused mid-turn. Reported as the fact it is — the ingress does not rename the

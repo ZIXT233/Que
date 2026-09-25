@@ -48,18 +48,6 @@ fn resume_args(session_id: &str) -> AppResult<Vec<String>> {
     Ok(vec!["resume".into(), id.into()])
 }
 
-/// Que's entries in the CLI's own config are recognised by the ingress path they run.
-/// That is how an earlier install is told apart from hooks the user wrote themselves.
-/// The third form is what actually lands in the file: TOML escapes backslashes inside
-/// "strings", so the written block only matches the doubled-backslash marker — missing
-/// it made every app start append a duplicate block.
-const MARKER: [&str; 4] = [
-    "# Que session state hook",
-    "harness-plugins/codex/hook.cjs",
-    "harness-plugins\\codex\\hook.cjs",
-    "harness-plugins\\\\codex\\\\hook.cjs",
-];
-
 async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
     plan.files.insert(
@@ -103,6 +91,10 @@ fn mcp_server(node: &str, script: &str) -> String {
 const MCP_ENV: &str = r#"["QUE_HARNESS_SIGNAL_DIR","QUE_HARNESS_CHANNEL","QUE_HARNESS_KIND","QUE_HARNESS_TTY","QUE_HARNESS_TMUX_SESSION","TMUX","QUE_EXTERNAL_SIGNAL_DIR","QUE_HOOK_DEBUG","QUE_HOOK_DEBUG_FILE"]"#;
 
 fn mcp_handler(event: &str) -> String {
+    mcp_handler_for(event, "que_session_state")
+}
+
+fn mcp_handler_for(event: &str, server: &str) -> String {
     // Event-specific fields avoid unresolved templates on events lacking them.
     let mut fields = String::from(r#"session_id="${session_id}",cwd="${cwd}""#);
     if event == "UserPromptSubmit" {
@@ -115,12 +107,73 @@ fn mcp_handler(event: &str) -> String {
         fields.push_str(r#",last_assistant_message="${last_assistant_message}""#);
     }
     format!(
-        r#"{{ type = "mcp_tool", server = "que_session_state", tool = "session_state", input = {{hook_event_name="{event}",{fields}}}, timeout = 5 }}"#
+        r#"{{ type = "mcp_tool", server = "{server}", tool = "session_state", input = {{hook_event_name="{event}",{fields}}}, timeout = 5 }}"#
     )
 }
 
 fn scoped_mcp_handler(event: &str, scope: &str) -> String {
     mcp_handler(event).replace("input = {", &format!("input = {{que_scope=\"{scope}\","))
+}
+
+fn profile_registration(owner: &str, server: &str) -> String {
+    let mut block = format!("\n# Que session state hook {owner}\n");
+    for event in EVENTS {
+        let handler =
+            mcp_handler_for(event, server).replace("input = {", "input = {que_scope=\"external\",");
+        block.push_str(&format!("[[hooks.{event}]]\nhooks = [{handler}]\n"));
+    }
+    block
+}
+
+fn profile_transport(ctx: &GlobalCtx, owner: &str, server: &str) -> String {
+    let script = ctx.plugins.join("codex/codex-mcp.cjs");
+    format!("\n# Que persistent Codex hook transport {owner}\n[mcp_servers.{server}]\ncommand = {}\nargs = [{}]\nenv_vars = {MCP_ENV}\n# End Que persistent Codex hook transport {owner}\n",
+        serde_json::to_string(&ctx.node).unwrap(),
+        serde_json::to_string(&script.to_string_lossy()).unwrap())
+}
+
+fn legacy_transport_owned(config: &str, ctx: &GlobalCtx) -> bool {
+    let Some(start) = config.find(&format!("{MCP_MARKER}\n")) else {
+        return false;
+    };
+    let Some(end) = config[start..].find(MCP_END).map(|at| start + at) else {
+        return false;
+    };
+    let block = config[start..end].replace("\\\\", "/").replace('\\', "/");
+    block.contains("[mcp_servers.que_session_state]")
+        && block.contains(
+            &ctx.plugins
+                .join("codex/codex-mcp.cjs")
+                .to_string_lossy()
+                .replace('\\', "/"),
+        )
+}
+
+fn legacy_direct_owned(config: &str, ctx: &GlobalCtx) -> bool {
+    let lines: Vec<&str> = config.lines().collect();
+    let Some(start) = lines.iter().position(|line| {
+        matches!(
+            line.trim(),
+            "# Que session state hook" | "# Cue session state hook"
+        )
+    }) else {
+        return false;
+    };
+    let block = lines[start + 1..]
+        .iter()
+        .take_while(|line| {
+            let line = line.trim();
+            line.is_empty()
+                || line.starts_with("[[hooks.")
+                || line.starts_with("[hooks.")
+                || line.starts_with("hooks = [")
+        })
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace("\\\\", "/")
+        .replace('\\', "/");
+    block.contains(&ctx.hook_path("codex").replace('\\', "/"))
 }
 
 const MCP_MARKER: &str = "# Que persistent Codex hook transport";
@@ -211,21 +264,33 @@ impl Harness for Codex {
         }
         let config = dir.join("config.toml");
         let mut existing = std::fs::read_to_string(&config).unwrap_or_default();
-        existing = strip_mcp_server(&existing);
-        if MARKER.iter().any(|marker| existing.contains(marker)) {
-            // Already registered by an earlier run: appending again would double every
-            // event. It can still be the *shape* an earlier Que wrote, though — that one
-            // has to be rewritten in place, or Codex keeps refusing to load the file and
-            // the user cannot even reach the prompt that would trust these hooks.
+        let owner = ctx.profile_id();
+        let server = format!("que_session_state_{owner}");
+        let registration = profile_registration(&owner, &server);
+        let transport = profile_transport(ctx, &owner, &server);
+        // A changed block may contain user edits. Do not replace it by matching a
+        // generic Que marker, which might belong to another running profile.
+        if (existing.contains(&format!("# Que session state hook {owner}"))
+            && !existing.contains(&registration))
+            || (existing.contains(&format!("# Que persistent Codex hook transport {owner}"))
+                && !existing.contains(&transport))
+        {
+            return;
+        }
+        existing = existing.replace(&registration, "").replace(&transport, "");
+        // Migrate the old single-server registration only when its script belongs
+        // to this data directory. A second Que profile may still own that name.
+        if legacy_transport_owned(&existing, ctx) || legacy_direct_owned(&existing, ctx) {
             let repaired = repair_headers(&existing, self.events());
             let stripped = strip_registration(&repaired, self.events());
             if stripped == repaired {
-                if repaired != existing {
-                    let _ = atomic_write(&config, &repaired);
-                }
-                return; // Not a complete owned block: never replace user hooks.
+                return;
             }
-            existing = stripped;
+            existing = if legacy_transport_owned(&existing, ctx) {
+                strip_mcp_server(&stripped)
+            } else {
+                stripped
+            };
         }
         // Rebuild only the complete owned block so quoting/runtime fixes also
         // reach previously registered external sessions.
@@ -241,22 +306,13 @@ impl Harness for Codex {
             to_append.push_str("\n[features]\nhooks = true\n");
             existing
         };
-        let use_mcp = !existing.contains("[mcp_servers.que_session_state]")
+        let use_mcp = !existing.contains(&format!("[mcp_servers.{server}]"))
             && ctx
                 .install_plugin("codex", "harness-codex-mcp.cjs", "codex-mcp.cjs")
                 .is_ok();
         if use_mcp {
-            to_append.push_str("\n# Que session state hook\n");
-            for event in self.events() {
-                to_append.push_str(&format!(
-                    "[[hooks.{event}]]\nhooks = [{}]\n",
-                    scoped_mcp_handler(event, "external")
-                ));
-            }
-            let script = ctx.plugins.join("codex/codex-mcp.cjs");
-            let command = ctx.node.clone();
-            let argument = script.to_string_lossy().into_owned();
-            to_append.push_str(&format!("\n{MCP_MARKER}\n[mcp_servers.que_session_state]\ncommand = {}\nargs = [{}]\nenv_vars = {MCP_ENV}\n{MCP_END}\n", serde_json::to_string(&command).unwrap(), serde_json::to_string(&argument).unwrap()));
+            to_append.push_str(&registration);
+            to_append.push_str(&transport);
         } else {
             return; // Preserve a conflicting user server or a failed installation.
         }
@@ -288,10 +344,21 @@ impl Harness for Codex {
         let Ok(existing) = std::fs::read_to_string(&config) else {
             return;
         };
-        if !MARKER.iter().any(|marker| existing.contains(marker)) {
-            return;
+        let owner = ctx.profile_id();
+        let server = format!("que_session_state_{owner}");
+        let mut cleaned = existing
+            .replace(&profile_registration(&owner, &server), "")
+            .replace(&profile_transport(ctx, &owner, &server), "");
+        if legacy_transport_owned(&cleaned, ctx) || legacy_direct_owned(&cleaned, ctx) {
+            let stripped = strip_registration(&cleaned, self.events());
+            if stripped != cleaned {
+                cleaned = if legacy_transport_owned(&cleaned, ctx) {
+                    strip_mcp_server(&stripped)
+                } else {
+                    stripped
+                };
+            }
         }
-        let cleaned = strip_mcp_server(&strip_registration(&existing, self.events()));
         if cleaned != existing {
             let _ = atomic_write(&config, &cleaned);
         }
@@ -701,16 +768,28 @@ fn valid_codex_session_id(id: &str) -> bool {
         .is_match(id)
 }
 
-pub(crate) fn session_label_in(id: &str, env: &std::collections::HashMap<String, String>) -> SessionLabel {
-    let Some(home) = env.get("CODEX_HOME") else { return session_label(id, true); };
-    if !safe_name_id(id) { return SessionLabel::default(); }
+pub(crate) fn session_label_in(
+    id: &str,
+    env: &std::collections::HashMap<String, String>,
+) -> SessionLabel {
+    let Some(home) = env.get("CODEX_HOME") else {
+        return session_label(id, true);
+    };
+    if !safe_name_id(id) {
+        return SessionLabel::default();
+    }
     let home = PathBuf::from(home);
-    let name = std::fs::read_to_string(home.join("session_index.jsonl")).ok()
+    let name = std::fs::read_to_string(home.join("session_index.jsonl"))
+        .ok()
         .and_then(|body| parse_index(&body).0.remove(id));
-    let first_prompt = find_all(&[home.join("sessions"), home.join("archived_sessions")], &format!("*{id}.jsonl"))
-        .into_iter().next()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|body| first_user_from_rollout(&body));
+    let first_prompt = find_all(
+        &[home.join("sessions"), home.join("archived_sessions")],
+        &format!("*{id}.jsonl"),
+    )
+    .into_iter()
+    .next()
+    .and_then(|path| std::fs::read_to_string(path).ok())
+    .and_then(|body| first_user_from_rollout(&body));
     SessionLabel { name, first_prompt }
 }
 
@@ -894,10 +973,12 @@ fn enable_hooks_feature(config: &str) -> String {
 /// scan and is kept, and an incomplete block is left completely untouched.
 fn strip_registration(config: &str, events: &[&str]) -> String {
     let lines: Vec<&str> = config.split_inclusive('\n').collect();
-    let Some(marker) = lines
-        .iter()
-        .position(|line| line.trim() == "# Que session state hook")
-    else {
+    let Some(marker) = lines.iter().position(|line| {
+        matches!(
+            line.trim(),
+            "# Que session state hook" | "# Cue session state hook"
+        )
+    }) else {
         return config.to_string();
     };
     let mut seen: Vec<&str> = Vec::new();
@@ -1130,7 +1211,7 @@ mod tests {
             None,
         );
         let block = registration_block(&command, EVENTS, 15);
-        assert!(MARKER.iter().any(|marker| block.contains(marker)));
+        assert!(block.contains("# Que session state hook"));
         assert_eq!(strip_registration(&block, EVENTS), "");
         let edited = block.replacen(
             &serde_json::to_string(&command).unwrap(),

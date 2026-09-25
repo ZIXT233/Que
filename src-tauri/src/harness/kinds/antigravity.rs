@@ -187,18 +187,34 @@ impl Harness for Antigravity {
         }
         let path = ctx.home.join(".gemini/config/hooks.json");
         let raw = std::fs::read_to_string(&path).ok();
-        let existing = match guard(raw.as_deref(), &command_for) {
-            Ok(value) => value,
+        let existing = match raw
+            .as_deref()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .transpose()
+        {
+            Ok(Some(value)) if value.is_object() => value,
+            Ok(None) => serde_json::json!({}),
             Err(error) => {
-                crate::debuglog::log_error("install Antigravity hooks", &error);
+                crate::debuglog::log_error("install Antigravity hooks", &error.into());
                 return;
             }
+            _ => return,
         };
         if let Some(mut obj) = existing.as_object().cloned() {
-            obj.insert(
-                "que-session-state".into(),
-                serde_json::Value::Object(bundle),
-            );
+            let key = format!("que-session-state-{}", ctx.profile_id());
+            if obj
+                .get(&key)
+                .is_some_and(|value| !is_profile_owned(value, ctx))
+            {
+                return;
+            }
+            if obj
+                .get("que-session-state")
+                .is_some_and(|value| is_owned(value, &command_for) && is_profile_owned(value, ctx))
+            {
+                obj.remove("que-session-state");
+            }
+            obj.insert(key, serde_json::Value::Object(bundle));
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -216,13 +232,29 @@ impl Harness for Antigravity {
         let Ok(existing) = std::fs::read_to_string(&path) else {
             return;
         };
-        let Ok(mut value) = guard(Some(&existing), &|event| {
-            global_hook_command(ctx, &ctx.hook_path("antigravity"), event)
-        }) else {
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&existing) else {
             return;
         };
         if let Some(obj) = value.as_object_mut() {
-            if obj.remove("que-session-state").is_some() {
+            let key = format!("que-session-state-{}", ctx.profile_id());
+            let mut changed = false;
+            if obj
+                .get(&key)
+                .is_some_and(|value| is_profile_owned(value, ctx))
+            {
+                obj.remove(&key);
+                changed = true;
+            }
+            let command_for =
+                |event: &str| global_hook_command(ctx, &ctx.hook_path("antigravity"), event);
+            if obj
+                .get("que-session-state")
+                .is_some_and(|value| is_owned(value, &command_for) && is_profile_owned(value, ctx))
+            {
+                obj.remove("que-session-state");
+                changed = true;
+            }
+            if changed {
                 let _ = atomic_write(
                     &path,
                     &serde_json::to_string_pretty(&value).unwrap_or_default(),
@@ -468,6 +500,19 @@ fn is_owned(existing: &serde_json::Value, command_for: &dyn Fn(&str) -> String) 
         })
 }
 
+fn is_profile_owned(existing: &serde_json::Value, ctx: &GlobalCtx) -> bool {
+    existing
+        .to_string()
+        .replace("\\\\", "/")
+        .replace('\\', "/")
+        .contains(
+            &ctx.plugins
+                .join("antigravity")
+                .to_string_lossy()
+                .replace('\\', "/"),
+        )
+}
+
 fn owned_ingress_command(command: &str) -> bool {
     let decoded = command
         .split_once("-EncodedCommand ")
@@ -485,7 +530,7 @@ fn owned_ingress_command(command: &str) -> bool {
                     .collect::<Vec<_>>(),
             )
             .ok()
-    });
+        });
     let text = decoded.as_deref().unwrap_or(command).replace('\\', "/");
     let native_pushd = regex::Regex::new(
         r#"(?i)\bpushd\s+[^&]+/harness-plugins/antigravity\s+&&\s+(?:que-hook\.exe\s+antigravity|node(?:\.exe)?\s+hook\.cjs)\s+(?:PreInvocation|PostInvocation|PreToolUse|PostToolUse|Stop)\b"#,
@@ -516,10 +561,13 @@ fn shell_hook_command(dir: &std::path::Path, event: Option<&str>) -> String {
 
 fn global_hook_command(ctx: &GlobalCtx, hook_path: &str, event: &str) -> String {
     if cfg!(windows) {
-        shell_hook_command(&ctx.plugins.join("antigravity"), Some(event))
+        shell_hook_command(
+            &ctx.plugins.join("antigravity"),
+            Some(&format!("--que-ambient:{event}")),
+        )
     } else {
         format!(
-            "{} {} {}",
+            "{} {} --que-ambient:{}",
             crate::ssh::shell_quote(&ctx.node),
             crate::ssh::shell_quote(hook_path),
             event

@@ -85,8 +85,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-应用数据位于 `~/.que`。
-
+应用数据在 `~/.que`。参见 [Harness Hook 协议](docs/harness/hook-api.zh-CN.md)、[自定义 Harness 扩展指南](docs/harness/extensions.zh-CN.md)与[Qwen Code 扩展示例](examples/harness-extensions/qwen-code/README.zh-CN.md)。
 
 ## 协议
 

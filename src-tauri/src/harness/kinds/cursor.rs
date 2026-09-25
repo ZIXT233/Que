@@ -145,10 +145,14 @@ impl Harness for Cursor {
         let mut hooks = serde_json::Map::new();
         for &event in self.events() {
             #[cfg(windows)]
-            let cmd = crate::harness::windows::windows_hook_command(&ctx.node, &hook_path, Some(event));
+            let cmd = crate::harness::windows::windows_hook_command(
+                &ctx.node,
+                &hook_path,
+                Some(&format!("--que-ambient:{event}")),
+            );
             #[cfg(not(windows))]
             let cmd = format!(
-                "QUE_HARNESS_KIND=cursor {} {} {}",
+                "QUE_HARNESS_KIND=cursor {} {} --que-ambient:{}",
                 crate::ssh::shell_quote(&ctx.node),
                 crate::ssh::shell_quote(&hook_path),
                 event
@@ -724,14 +728,18 @@ fn hook_pattern() -> &'static Regex {
 /// A command is Que's when it names this hook, or when it carries a PowerShell
 /// `-EncodedCommand` that does.
 fn is_owned_command(command: &str, hook_path: &str) -> bool {
-    if Regex::new(r#"[\\/]harness-plugins[\\/]cursor[\\/]que-cursor-hook\.exe(?:['"\s]|$)"#)
-        .unwrap()
-        .is_match(command)
-    {
-        return true;
-    }
     let pattern = hook_pattern();
-    if command.contains(hook_path) || pattern.is_match(command) {
+    let owned = |text: &str| {
+        let text = text.replace('\\', "/");
+        let hook = hook_path.replace('\\', "/");
+        if hook.contains("/harness-plugins/cursor/") {
+            let root = hook.trim_end_matches("hook.cjs");
+            text.contains(&hook) || text.contains(&format!("{root}que-cursor-hook.exe"))
+        } else {
+            text.contains(&hook) || pattern.is_match(&text)
+        }
+    };
+    if owned(command) {
         return true;
     }
     let Some(encoded) = command
@@ -752,7 +760,7 @@ fn is_owned_command(command: &str, hook_path: &str) -> bool {
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect();
     let script = String::from_utf16_lossy(&units);
-    script.contains(hook_path) || pattern.is_match(&script)
+    owned(&script)
 }
 
 /// Drop every group whose command belongs to Que's hook; events left empty come

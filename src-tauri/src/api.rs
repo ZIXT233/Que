@@ -75,6 +75,7 @@ pub fn router(state: AppState) -> Router {
             get(get_log_report).post(export_log_report),
         )
         .route("/api/harness/{id}/debug", get(harness_debug))
+        .route("/api/extensions/harnesses", get(extension_harnesses).post(reload_extensions))
         .route(
             "/api/terminal-theme",
             get(get_terminal_theme).post(set_terminal_theme),
@@ -1433,12 +1434,14 @@ async fn put_tools(
         let settings = state.settings.set_external_notices(enabled).await?;
         // The toggle's other half: disabled kinds get their Que entries stripped
         // from the CLIs' own configs; enabled ones are (re)installed.
-        crate::harness::sync_external_hooks(
+        let errors = crate::harness::sync_external_hooks(
             &state.bin_dir,
             &crate::paths::plugins_dir(),
             &settings,
         );
-        return Ok(Json(tools_json(&settings)));
+        let mut response = tools_json(&settings);
+        response["extensionErrors"] = json!(errors);
+        return Ok(Json(response));
     }
     if let Some(harness) = body.get("externalHarness").and_then(|v| v.as_str()) {
         let enabled = body
@@ -1449,12 +1452,14 @@ async fn put_tools(
             .settings
             .set_external_ingress(harness, enabled)
             .await?;
-        crate::harness::sync_external_hooks(
+        let errors = crate::harness::sync_external_hooks(
             &state.bin_dir,
             &crate::paths::plugins_dir(),
             &settings,
         );
-        return Ok(Json(tools_json(&settings)));
+        let mut response = tools_json(&settings);
+        response["extensionErrors"] = json!(errors);
+        return Ok(Json(response));
     }
     if let Some(enabled) = body.get("debugLogging").and_then(|v| v.as_bool()) {
         let settings = state.settings.set_debug_logging(enabled).await?;
@@ -1470,6 +1475,24 @@ async fn put_tools(
 
 async fn harness_debug(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     Json(state.harness.debug_snapshot(&id, &state.terminals)).into_response()
+}
+
+async fn extension_harnesses(State(state): State<AppState>) -> impl IntoResponse {
+    let errors = crate::harness::refresh_extensions(&state.bin_dir);
+    Json(json!({ "harnesses": crate::harness::extension_harnesses(), "errors": errors }))
+}
+
+async fn reload_extensions(State(state): State<AppState>) -> impl IntoResponse {
+    let mut errors = crate::harness::refresh_extensions(&state.bin_dir);
+    if let Ok(settings) = state.settings.read() {
+        errors.extend(crate::harness::sync_external_hooks(
+            &state.bin_dir,
+            &crate::paths::plugins_dir(),
+            &settings,
+        ));
+    }
+    state.live.notify("queue");
+    Json(json!({ "harnesses": crate::harness::extension_harnesses(), "errors": errors }))
 }
 
 #[derive(Deserialize)]
@@ -2237,6 +2260,10 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
     // Built before the runtime so the signal watcher can stamp hook latency
     // straight onto the PTY probe (see `TerminalHub::record_first_hook`).
     let terminals = TerminalHub::new(live.clone());
+    let bin_dir = resolve_bin_dir(resource_dir);
+    for error in crate::harness::refresh_extensions(&bin_dir) {
+        crate::debuglog::log(&format!("extension: {error}"));
+    }
     AppState {
         queue: Arc::new(QueueStore::new(live.clone())),
         terminals: terminals.clone(),
@@ -2245,7 +2272,7 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
         hosts: Arc::new(HostStore::new()),
         settings,
         live,
-        bin_dir: resolve_bin_dir(resource_dir),
+        bin_dir,
         default_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         launches: Arc::new(Mutex::new(HashSet::new())),
         mcp: Arc::new(crate::mcp::McpControl::default()),

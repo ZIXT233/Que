@@ -3,7 +3,7 @@
 import { persistentStorage } from "../lib/persistent-storage.ts";
 
 import { cardTitle as harnessCardTitle } from "@/lib/harness/card-title";
-import { harnessName } from "@/lib/harness/catalog";
+import { harnessName, setExtensionCatalog, type HarnessCatalogEntry } from "@/lib/harness/catalog";
 import { harnessErrorText } from "@/lib/harness/errors";
 import { ScoreChipTooltip } from "./ScoreChipTooltip";
 import { useI18n } from "@/hooks/useI18n";
@@ -18,13 +18,14 @@ import { DEFAULT_TURN_TAGS, scoreCard, sortedQueue, resolveQueueFocus } from "@/
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { HarnessCard } from "./HarnessCard";
 import { CardNicknameEditor } from "./CardNicknameEditor";
 import { nicknameHue } from "@/lib/card-nickname";
 import { VSCodeButton } from "./VSCodeButton";
 import { PersistentTerminalProvider } from "./PersistentTerminalViews";
 import { SettingsPanel } from "./SettingsPanel";
+import { QUE_REPO_URL, releaseUrl, useAppUpdate } from "@/hooks/useAppUpdate";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { McpApprovals } from "./McpApprovals";
 import { useQueueScoreClock } from "@/hooks/useQueueScoreClock";
 import { completedCards } from "@/lib/card-completion";
@@ -118,10 +119,29 @@ export function CardQueueShell() {
 }
 
 function CardQueueShellContent() {
+  const [extensionHarnesses, setExtensionHarnesses] = useState<HarnessCatalogEntry[]>([]);
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/extensions/harnesses");
+        if (!response.ok) return;
+        const body = await response.json() as { harnesses?: Array<{ id: string; name: string; description?: string; iconDataUrl?: string }> };
+        if (!mounted) return;
+        const entries = (body.harnesses ?? []).map(item => ({ id: item.id, name: item.name, description: item.description || "", iconId: item.id, iconDataUrl: item.iconDataUrl, extension: true }));
+        setExtensionCatalog(entries);
+        setExtensionHarnesses(entries);
+      } catch { /* The built-in harnesses remain available. */ }
+    };
+    void load();
+    window.addEventListener("focus", load);
+    return () => { mounted = false; window.removeEventListener("focus", load); };
+  }, []);
   const { t, locale, setLocale, supportedLocales } = useI18n();
   const router = useRouter();
   const params = useSearchParams();
   const detachedId = params.get("card");
+  const appUpdate = useAppUpdate(!detachedId);
   const requestedSessionId = params.get("session");
   const requestedAttentionId = params.get("attention");
   const { queue, defaultCwd, error: connectionError, refresh, act } = useCardQueue();
@@ -913,7 +933,7 @@ function CardQueueShellContent() {
       </button> : null;
     const showHeaderMeta = visibleCard.phase !== "attention" || hasUrgentCall(visibleCard) || visibleCard.remindAt !== undefined || !(visibleCard.session || visibleCard.harness);
     const harness = (
-              <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} sshHost={workspace?.kind === "ssh" ? workspace.sshHost : undefined} sshHostName={remoteHost?.name ?? workspace?.sshHost} onStartAll={startable.length > 1 ? startAllHarnesses : undefined} onAction={async (action, data) => {
+              <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} sshHost={workspace?.kind === "ssh" ? workspace.sshHost : undefined} sshHostName={remoteHost?.name ?? workspace?.sshHost} extensionHarnesses={extensionHarnesses} onStartAll={startable.length > 1 ? startAllHarnesses : undefined} onAction={async (action, data) => {
                 const result = await act(action, data);
                 if (result && action === "harness_start") {
                   setInspecting(null); setFocus({ id: visibleCard.id, index: 0 }); setDeckReset(key => key + 1);
@@ -1004,7 +1024,7 @@ function CardQueueShellContent() {
     >
     <div className="cq-layout" inert={!!inspected && !detachedId}>
       {!detachedId && <aside className="cq-sidebar">
-        <div className="cq-sidebar-brand"><Link className="cq-brand" href="/" aria-label={t("queue.Card Queue 主页")}><span className="cq-logo"><QueLogo /></span>Que</Link><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
+        <div className="cq-sidebar-brand"><a className="cq-brand" href={QUE_REPO_URL} aria-label="Que GitHub" title="GitHub" onClick={(event) => { event.preventDefault(); void openUrl(QUE_REPO_URL).catch(() => showQueueToast(t("settings.aboutOpenFailed"))); }}><span className="cq-logo"><QueLogo /></span>Que</a><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
         <button className="cq-new" onClick={showNew}><Icon name="plus" /> {t("queue.新会话")}</button>
         <button className="cq-mobile-settings" onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" /></button>
 
@@ -1058,7 +1078,15 @@ function CardQueueShellContent() {
             <span className="cq-small-session-title">{titleOf(card)}</span>
           </> : <strong>{titleOf(card)}</strong>}
         </button>)}</div></>}
-        <div className="cq-sidebar-bottom"><button onClick={openHistory}><Icon name="history" />{t("queue.历史对话")}<span>↗</span></button></div>
+        <div className="cq-sidebar-bottom">
+          <button onClick={openHistory}><Icon name="history" />{t("queue.历史对话")}</button>
+          <div className="cq-sidebar-meta">
+            <span>v{appUpdate.version}</span>
+            {(import.meta.env.DEV || appUpdate.result?.newer) && <>
+              <a className="cq-sidebar-update" href={import.meta.env.DEV ? `${QUE_REPO_URL}/releases/latest` : appUpdate.result ? releaseUrl(appUpdate.result.tag) : `${QUE_REPO_URL}/releases/latest`} title={appUpdate.result?.newer ? t("settings.aboutUpdateAvailable", { version: appUpdate.result.version }) : t("settings.aboutViewRelease")} onClick={(event) => { event.preventDefault(); void openUrl(event.currentTarget.href).catch(() => showQueueToast(t("settings.aboutOpenFailed"))); }}>{t("settings.aboutUpdateLink")}</a>
+            </>}
+          </div>
+        </div>
       </aside>}
       <div className="cq-content" ref={contentRef}>
         {!detachedId && <div className="cq-content-drag" data-tauri-drag-region aria-hidden="true" />}
@@ -1181,6 +1209,6 @@ function CardQueueShellContent() {
     }} />}
     {archiveConfirm && <div className="cq-overlay" onClick={() => !busy && setArchiveConfirm(null)}><section className="cq-dialog cq-archive-confirm" role="dialog" aria-modal="true" aria-label={t("queue.确认归档")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="archive" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setArchiveConfirm(null)}><Icon name="close" /></button></div><h2>{t("queue.确认归档")}</h2><p>{t("queue.归档后会话将移到历史对话，之后仍可重新打开。")}</p><label className="cq-archive-skip"><input type="checkbox" checked={skipArchiveChecked} disabled={busy} onChange={event => setSkipArchiveChecked(event.target.checked)} /><span>{t("queue.skipArchiveThisPage")}<small>{t("queue.skipArchiveThisPageHint")}</small></span></label><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setArchiveConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { setBusy(true); const result = await run("archive", { id: archiveConfirm.id }); setBusy(false); if (result) { if (skipArchiveChecked) setSkipArchiveConfirmation(true); advanceToNextCard(archiveConfirm.id); setArchiveConfirm(null); } }}>{t("queue.归档")}</button></div></section></div>}
     {history && <div className="cq-overlay" onClick={() => setHistory(null)}><section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div><h2>{t("queue.历史对话")}</h2><p>{t("queue.已收起的卡片和未在当前队列中的会话，点击即可继续。")}</p><input aria-label="搜索会话" placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><div className="cq-history-list">{historyMatches.map(card => <button key={card.id} onClick={() => { setHistory(null); setInspecting(card.id); }}><span>{harnessName(card.harness!.kind)} · {card.nickname ? <strong className="cq-history-nickname" style={{ "--cq-nickname-hue": nicknameHue(card.id) } as CSSProperties}>{card.nickname}</strong> : titleOf(card)}</span>{card.nickname && <small className="cq-history-session-title">{titleOf(card)}</small>}<small>{projectOf(card.cwd)} · {new Date(card.archivedAt!).toLocaleDateString()}</small></button>)}{!historyMatches.length && <p>{historySearch ? t("queue.没有匹配的历史对话。") : t("queue.暂无未在队列中的历史对话。")}</p>}</div></section></div>}
-    {settings && <SettingsPanel cwd={active?.cwd || defaultCwd || null} sessionId={active?.session?.id || null} initialSection={settingsSection} onClose={() => { setSettings(false); setModelsRefreshKey((key) => key + 1); void refreshRemoteHosts(); }} onSessionReloaded={() => { setSessionRefreshKey((key) => key + 1); void refresh(); }} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={setQuoteSelectionEnabled} />}
+    {settings && <SettingsPanel cwd={active?.cwd || defaultCwd || null} sessionId={active?.session?.id || null} initialSection={settingsSection} onClose={() => { setSettings(false); setModelsRefreshKey((key) => key + 1); void refreshRemoteHosts(); }} onSessionReloaded={() => { setSessionRefreshKey((key) => key + 1); void refresh(); }} appUpdate={appUpdate} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={setQuoteSelectionEnabled} />}
   </div>;
 }

@@ -5,6 +5,7 @@ export const SETTINGS_SECTION_VALUES = [
   "terminal",
   "external-sessions",
   "remote-hosts",
+  "about",
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTION_VALUES)[number];

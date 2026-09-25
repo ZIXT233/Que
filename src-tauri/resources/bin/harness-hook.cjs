@@ -39,8 +39,11 @@ const { execFileSync } = require('node:child_process');
 // Ambient registrations pass --que-ambient so a wild CLI session launched inside
 // a Que card terminal does not report into the card's own signal directory —
 // the same early exit the unix external-hook.sh shim performs on Que env vars.
-const ambientIngress = process.argv[2] === '--que-ambient';
-const explicitEvent = ambientIngress ? undefined : process.argv[2];
+const ambientArg = process.argv[2] || '';
+const ambientIngress = ambientArg === '--que-ambient' || ambientArg.startsWith('--que-ambient:');
+const explicitEvent = ambientIngress
+  ? (ambientArg.startsWith('--que-ambient:') ? ambientArg.slice('--que-ambient:'.length) : process.argv[3])
+  : process.argv[2];
 const commandMode = require.main === module;
 const cursorEvents = new Set(['sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse', 'stop', 'sessionEnd']);
 function cursorReply(event) {
@@ -193,11 +196,15 @@ function deliver(payload) {
     const externalReply = value => typeof value === 'string'
       ? value.replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trim().slice(0, 2000)
       : undefined;
+    const externalPrompt = value => typeof value === 'string'
+      ? value.replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trim().slice(0, 16000)
+      : undefined;
     const completion = eventName === 'afterAgentResponse' || ['Stop', 'stop', 'AfterAgent'].includes(eventName);
     const event = { kind: effectiveKind, at, event: eventName, fullyIdle: typeof fullyIdle === 'boolean' ? fullyIdle : undefined, replyPreview: completion ? (external ? externalReply(replyText(payload)) : text(replyText(payload))) : undefined, sessionId: payload.conversationId || payload.conversation_id || payload.session_id || payload.sessionId,
       agentId: payload.agent_id || payload.agentId, tool: payload.toolCall?.name ?? payload.tool_name ?? payload.toolName ?? payload.name,
       notification: payload.notification_type ?? payload.notificationType ?? payload.type,
-      prompt: ['UserPromptSubmit', 'beforeSubmitPrompt', 'BeforeAgent'].includes(eventName) ? text(payload.prompt) : undefined };
+      prompt: ['UserPromptSubmit', 'beforeSubmitPrompt', 'BeforeAgent'].includes(eventName)
+        ? (external ? externalPrompt(payload.prompt) : text(payload.prompt)) : undefined };
     if (external) { event.workspaceRoot = workspaceRootOf(payload); event.external = true; }
     const debug = process.env.QUE_HARNESS_DEBUG === '1';
     // Keep only field metadata, never prompt/reply text, to diagnose missing previews.

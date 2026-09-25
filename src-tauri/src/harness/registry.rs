@@ -59,8 +59,12 @@ mod unknown {
 }
 
 /// The launchable harness a kind string names, or `None` for anything else.
-pub fn find(kind: &str) -> Option<&'static dyn Harness> {
+pub fn builtin(kind: &str) -> Option<&'static dyn Harness> {
     ALL.iter().copied().find(|harness| harness.id() == kind)
+}
+
+pub fn find(kind: &str) -> Option<&'static dyn Harness> {
+    builtin(kind).or_else(|| super::extensions::find(kind).map(|h| h as &dyn Harness))
 }
 
 /// Like [`find`], but never fails: an unknown kind observes through [`UNKNOWN`].

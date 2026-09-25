@@ -18,6 +18,10 @@ export interface HarnessCatalogEntry {
   /** Vendor line, shown in the external-sessions settings. */
   vendor?: string;
   iconId?: string;
+  /** SVG supplied by an installed harness extension. */
+  iconDataUrl?: string;
+  /** Registered from the user extension directory rather than the built-in catalog. */
+  extension?: boolean;
   forms?: HarnessForms;
   /** The terminal theme palette this harness paints itself in. */
   themeProfile?: "grok";
@@ -28,9 +32,8 @@ export interface HarnessCatalogEntry {
 }
 
 /**
- * The one harness registry on the frontend. The picker, the external-sessions settings,
- * the icon mapping and the terminal quirks all read from here — adding a harness means
- * adding one entry, mirroring the backend `kinds/<kind>.rs` registry.
+ * Built-in harness metadata. User extensions are loaded separately at runtime and
+ * added to the new-session picker.
  */
 export const harnessCatalog: HarnessCatalogEntry[] = [
   { id: "codex", name: "Codex", description: "OpenAI · CLI", vendor: "OpenAI", iconId: "openai", forms: { cli: "supported", desktop: "supported", vscode: "supported" }, conptyCursorHide: false },
@@ -46,11 +49,16 @@ export const harnessCatalog: HarnessCatalogEntry[] = [
   { id: "shell", name: "Shell", description: "纯终端，不响应 Agent 事件", focusReporting: false, hidden: true },
 ];
 
-const harnessMeta = (id: HarnessId | string) => harnessCatalog.find(item => item.id === id);
+let extensionCatalog: HarnessCatalogEntry[] = [];
+export function setExtensionCatalog(entries: HarnessCatalogEntry[]) {
+  extensionCatalog = entries;
+}
+const harnessMeta = (id: HarnessId | string) => [...harnessCatalog, ...extensionCatalog].find(item => item.id === id);
 
 export const harnessPicker = harnessCatalog.filter(item => !item.hidden);
 /** Accepts any id, so an external notice can name a CLI that is not in the picker. */
 export const harnessName = (id: HarnessId | string) => harnessMeta(id)?.name ?? id;
+export const isExtensionHarness = (id: HarnessId | string) => extensionCatalog.some(item => item.id === id);
 
 /**
  * The external-ingress toggles, in settings order. OMP reports through Pi's extension
@@ -63,6 +71,8 @@ export interface ExternalHarnessEntry {
   name: string;
   vendor: string;
   iconId: string;
+  iconDataUrl?: string;
+  extension?: boolean;
   forms: HarnessForms;
 }
 export const externalHarnesses: ExternalHarnessEntry[] = EXTERNAL_ORDER.map(id => {
@@ -72,6 +82,7 @@ export const externalHarnesses: ExternalHarnessEntry[] = EXTERNAL_ORDER.map(id =
 
 const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "claudecode", gemini: "google" };
 export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? harnessMeta(id)?.iconId ?? id;
+export const extensionIconDataUrl = (id: string) => harnessMeta(id)?.iconDataUrl;
 
 /** Terminal options for one harness, with the component defaults filled in. */
 export const terminalOptions = (id: HarnessId | string) => {

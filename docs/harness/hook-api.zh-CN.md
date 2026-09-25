@@ -45,6 +45,7 @@ ingress 读取所有 Harness 字段名的并集，统一输出一种结构（`Ho
 | `tool` | 取自 `toolCall.name` / `tool_name` / `toolName` / `name`。 |
 | `prompt` | 仅出现在提交形态的事件上。 |
 | `firstPrompt`、`title` | 会话命名线索。 |
+| `turns` | 扩展可选提供的会话记录快照：按时间顺序排列的 `{ role: "user" | "assistant", text: string }[]`。外部通知用它显示双方对话。 |
 | `replyPreview` | 回合结束的回复摘要。卡片保留 160 字符；外部 sink 最多 2000 字符。 |
 | `notification` | 取自 `notification_type` / `notificationType` / `type`。 |
 | `fullyIdle` | 仅 Antigravity：这次 `Stop` 是否真的结束了回合。契约里没有对应事件名的事实，以字段上报，而不是改写成另一个事件。 |

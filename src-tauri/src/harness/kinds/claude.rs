@@ -71,7 +71,12 @@ pub(super) async fn family_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -
 
 // Match parsed command/argv strings, not serialized JSON (which doubles Windows
 // backslashes). Remove only our hook, preserving other hooks in a shared group.
-fn remove_owned_hooks(entries: &mut Vec<serde_json::Value>) -> bool {
+fn remove_owned_hooks(entries: &mut Vec<serde_json::Value>, ctx: &GlobalCtx) -> bool {
+    let root = ctx
+        .plugins
+        .join("claude")
+        .to_string_lossy()
+        .replace('\\', "/");
     let mut changed = false;
     entries.retain_mut(|group| {
         let Some(hooks) = group.get_mut("hooks").and_then(|v| v.as_array_mut()) else {
@@ -81,13 +86,9 @@ fn remove_owned_hooks(entries: &mut Vec<serde_json::Value>) -> bool {
         hooks.retain(|hook| {
             let owned = |text: &str| {
                 let text = text.replace('\\', "/");
-                [
-                    "harness-plugins/claude/hook.cjs",
-                    "harness-plugins/claude/external-hook.exe",
-                    "harness-plugins/claude/external-hook.sh",
-                ]
-                .iter()
-                .any(|marker| text.contains(marker))
+                ["hook.cjs", "external-hook.exe", "external-hook.sh"]
+                    .iter()
+                    .any(|name| text.contains(&format!("{root}/{name}")))
             };
             !hook
                 .get("command")
@@ -215,7 +216,7 @@ impl Harness for Claude {
                     .and_then(|v| v.as_array())
                     .cloned()
                     .unwrap_or_default();
-                remove_owned_hooks(&mut entries);
+                remove_owned_hooks(&mut entries, ctx);
                 entries.push(serde_json::json!({ "hooks": [launcher] }));
                 hooks.insert(event.into(), serde_json::Value::Array(entries));
             }
@@ -243,7 +244,7 @@ impl Harness for Claude {
             if let Some(hooks) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) {
                 for &event in self.events() {
                     if let Some(entries) = hooks.get_mut(event).and_then(|v| v.as_array_mut()) {
-                        changed |= remove_owned_hooks(entries);
+                        changed |= remove_owned_hooks(entries, ctx);
                         if entries.is_empty() {
                             hooks.remove(event);
                         }
@@ -314,7 +315,10 @@ pub(super) fn session_exists(session_id: &str) -> bool {
     session_exists_in(session_id, None)
 }
 
-pub(crate) fn session_exists_in(session_id: &str, env: Option<&std::collections::HashMap<String, String>>) -> bool {
+pub(crate) fn session_exists_in(
+    session_id: &str,
+    env: Option<&std::collections::HashMap<String, String>>,
+) -> bool {
     if !safe_name_id(session_id) {
         return false;
     }
@@ -327,7 +331,10 @@ pub(super) fn session_label(session_id: &str) -> SessionLabel {
     session_label_in(session_id, None)
 }
 
-pub(crate) fn session_label_in(session_id: &str, env: Option<&std::collections::HashMap<String, String>>) -> SessionLabel {
+pub(crate) fn session_label_in(
+    session_id: &str,
+    env: Option<&std::collections::HashMap<String, String>>,
+) -> SessionLabel {
     if !safe_name_id(session_id) {
         return SessionLabel::default();
     }

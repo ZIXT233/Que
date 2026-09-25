@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
 import { ConfigSwitch } from "./SettingsUi";
-import { externalHarnesses, providerIconId, type FormSupportStatus } from "@/lib/harness/catalog";
+import { externalHarnesses, providerIconId, type ExternalHarnessEntry, type FormSupportStatus } from "@/lib/harness/catalog";
 
 function FormCapsule({
   formLabel,
@@ -29,6 +29,8 @@ export function ExternalSessionsSettings() {
   const [masterLoading, setMasterLoading] = useState(false);
   const [ingress, setIngress] = useState<Record<string, boolean>>({});
   const [loadingHarness, setLoadingHarness] = useState<string | null>(null);
+  const [extensionHarnesses, setExtensionHarnesses] = useState<ExternalHarnessEntry[]>([]);
+  const [extensionErrors, setExtensionErrors] = useState<string[]>([]);
 
   useEffect(() => {
     void fetch("/api/tools/settings")
@@ -45,6 +47,20 @@ export function ExternalSessionsSettings() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    void fetch("/api/extensions/harnesses")
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json() as { harnesses?: Array<{ id: string; name: string; description?: string; external?: boolean; iconDataUrl?: string }> };
+        setExtensionHarnesses((data.harnesses ?? []).filter(item => item.external).map(item => ({
+          id: item.id, name: item.name, vendor: item.description || "Extension", iconId: item.id, iconDataUrl: item.iconDataUrl,
+          extension: true,
+          forms: { cli: "supported" },
+        })));
+      })
+      .catch(() => {});
+  }, []);
+
   const handleMasterToggle = async (nextChecked: boolean) => {
     setMasterLoading(true);
     setMaster(nextChecked);
@@ -56,10 +72,11 @@ export function ExternalSessionsSettings() {
       });
       if (!res.ok) throw new Error(`Settings update failed: ${res.status}`);
       if (res.ok) {
-        const data = (await res.json()) as { externalNoticesEnabled?: boolean };
+        const data = (await res.json()) as { externalNoticesEnabled?: boolean; extensionErrors?: string[] };
         if (typeof data.externalNoticesEnabled === "boolean") {
           setMaster(data.externalNoticesEnabled);
         }
+        setExtensionErrors(data.extensionErrors ?? []);
       }
     } catch {
       setMaster((prev) => !nextChecked);
@@ -80,10 +97,11 @@ export function ExternalSessionsSettings() {
       });
       if (!res.ok) throw new Error(`Settings update failed: ${res.status}`);
       if (res.ok) {
-        const data = (await res.json()) as { externalIngress?: Record<string, boolean> };
+        const data = (await res.json()) as { externalIngress?: Record<string, boolean>; extensionErrors?: string[] };
         if (data.externalIngress) {
           setIngress(data.externalIngress);
         }
+        setExtensionErrors(data.extensionErrors ?? []);
       }
     } catch {
       // Revert on error
@@ -127,7 +145,7 @@ export function ExternalSessionsSettings() {
       </div>
 
       <div className={`external-sessions-list${master ? "" : " is-gated"}`}>
-        {externalHarnesses.map((harness) => {
+        {[...externalHarnesses, ...extensionHarnesses].map((harness) => {
           const isEnabled = master && ingress[harness.id] !== false;
           const isLoading = loadingHarness === harness.id;
 
@@ -136,10 +154,10 @@ export function ExternalSessionsSettings() {
               <div className="external-harness-card-header">
                 <div className="external-harness-brand">
                   <span className="external-harness-icon-wrap">
-                    <ProviderIcon id={providerIconId(harness.iconId)} size={20} />
+                    <ProviderIcon id={providerIconId(harness.iconId)} size={20} iconDataUrl={harness.iconDataUrl} />
                   </span>
                   <div className="external-harness-info">
-                    <span className="external-harness-name">{harness.name}</span>
+                    <span className="external-harness-name-row"><span className="external-harness-name">{harness.name}</span>{harness.extension && <span className="cq-extension-badge">{t("harness.extensionBadge")}</span>}</span>
                     <span className="external-harness-vendor">{harness.vendor}</span>
                   </div>
                 </div>
@@ -180,6 +198,7 @@ export function ExternalSessionsSettings() {
           );
         })}
       </div>
+      {extensionErrors.length > 0 && <p role="alert">{extensionErrors.join("; ")}</p>}
     </div>
   );
 }

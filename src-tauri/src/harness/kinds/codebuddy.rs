@@ -21,12 +21,16 @@ impl Harness for CodeBuddy {
         // CodeBuddy's default command-hook executor is Git Bash on Windows.
         // Forward slashes retain drive paths; POSIX quoting handles spaces and $.
         if host.windows {
-            return [Some(host.node.as_str()), Some(host.hook_path.as_str()), event]
-                .into_iter()
-                .flatten()
-                .map(|value| crate::ssh::shell_quote(&value.replace('\\', "/")))
-                .collect::<Vec<_>>()
-                .join(" ");
+            return [
+                Some(host.node.as_str()),
+                Some(host.hook_path.as_str()),
+                event,
+            ]
+            .into_iter()
+            .flatten()
+            .map(|value| crate::ssh::shell_quote(&value.replace('\\', "/")))
+            .collect::<Vec<_>>()
+            .join(" ");
         }
         host.generic_hook_command(event)
     }
@@ -78,10 +82,15 @@ impl Harness for CodeBuddy {
                 .into_iter()
                 .map(|s| crate::ssh::shell_quote(&s.replace('\\', "/")))
                 .collect::<Vec<_>>()
-                .join(" ");
+                .join(" ")
+                + " --que-ambient";
             let path = codebuddy_home().join("settings.json");
             let existing = std::fs::read_to_string(&path).ok();
-            let merged = merge_settings(existing.as_deref(), &hook_config(&command))?;
+            let merged = merge_settings_scoped(
+                existing.as_deref(),
+                &hook_config(&command),
+                Some(&ctx.plugins.join("codebuddy").to_string_lossy()),
+            )?;
             std::fs::create_dir_all(path.parent().unwrap())?;
             crate::paths::atomic_write(&path, &merged)?;
             Ok(())
@@ -92,10 +101,14 @@ impl Harness for CodeBuddy {
     }
 
     /// Remove only Que handlers, preserving unrelated settings.
-    fn unglobal(&self, _ctx: &GlobalCtx) {
+    fn unglobal(&self, ctx: &GlobalCtx) {
         let path = codebuddy_home().join("settings.json");
         if let Ok(existing) = std::fs::read_to_string(&path) {
-            if let Ok(merged) = merge_settings(Some(&existing), &serde_json::json!({"hooks":{}})) {
+            if let Ok(merged) = merge_settings_scoped(
+                Some(&existing),
+                &serde_json::json!({"hooks":{}}),
+                Some(&ctx.plugins.join("codebuddy").to_string_lossy()),
+            ) {
                 let _ = crate::paths::atomic_write(&path, &merged);
             }
         }
@@ -134,12 +147,19 @@ fn hook_config(command: &str) -> serde_json::Value {
 fn merge_local(
     existing: Option<&str>,
     payload: &str,
-    _host: &super::install::Host,
+    host: &super::install::Host,
 ) -> AppResult<String> {
-    merge_settings(existing, &serde_json::from_str(payload)?)
+    let owner = std::path::Path::new(&host.hook_path)
+        .parent()
+        .map(|path| path.to_string_lossy().into_owned());
+    merge_settings_scoped(existing, &serde_json::from_str(payload)?, owner.as_deref())
 }
 
-fn merge_settings(existing: Option<&str>, incoming: &serde_json::Value) -> AppResult<String> {
+fn merge_settings_scoped(
+    existing: Option<&str>,
+    incoming: &serde_json::Value,
+    owner: Option<&str>,
+) -> AppResult<String> {
     let mut value: serde_json::Value = serde_json::from_str(existing.unwrap_or("{}"))?;
     let object = value
         .as_object_mut()
@@ -165,10 +185,15 @@ fn merge_settings(existing: Option<&str>, incoming: &serde_json::Value) -> AppRe
                     .get("command")
                     .and_then(|v| v.as_str())
                     .is_some_and(|c| {
-                        c.replace('\\', "/")
-                            .contains("/harness-plugins/codebuddy/hook.cjs")
-                            || c.replace('\\', "/")
-                                .contains("/harness-plugins/codebuddy/que-hook.exe")
+                        let command = c.replace('\\', "/");
+                        if let Some(root) = owner {
+                            let root = root.replace('\\', "/");
+                            command.contains(&format!("{root}/hook.cjs"))
+                                || command.contains(&format!("{root}/que-hook.exe"))
+                        } else {
+                            command.contains("/harness-plugins/codebuddy/hook.cjs")
+                                || command.contains("/harness-plugins/codebuddy/que-hook.exe")
+                        }
                     })
             });
             before == handlers.len() || !handlers.is_empty()

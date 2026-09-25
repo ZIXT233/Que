@@ -24,7 +24,10 @@ fn global_directory(ctx: &GlobalCtx) -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| ctx.home.join(".config"))
-        .join("opencode/plugins/que-opencode-external-v2")
+        .join(format!(
+            "opencode/plugins/que-opencode-external-v2-{}",
+            ctx.profile_id()
+        ))
 }
 
 fn legacy_global_directory(ctx: &GlobalCtx) -> PathBuf {
@@ -34,21 +37,37 @@ fn legacy_global_directory(ctx: &GlobalCtx) -> PathBuf {
         .join("opencode/plugins/que-external-v2")
 }
 
-fn remove_owned_external_directory(dir: &std::path::Path) {
-    if std::fs::read_to_string(dir.join(".que-owned"))
-        .ok()
-        .as_deref()
-        == Some(GLOBAL_OWNER)
-    {
+fn remove_owned_external_directory(dir: &std::path::Path, ctx: &GlobalCtx) {
+    if owned_directory(dir, ctx) {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
 
+fn owned_directory(dir: &std::path::Path, ctx: &GlobalCtx) -> bool {
+    let marker = std::fs::read_to_string(dir.join(".que-owned")).ok();
+    if marker.as_deref() == Some(&format!("{GLOBAL_OWNER}:{}", ctx.profile_id())) {
+        return true;
+    }
+    marker.as_deref() == Some(GLOBAL_OWNER)
+        && std::fs::read_to_string(dir.join("tui.mjs")).is_ok_and(|body| {
+            url::Url::from_file_path(ctx.plugins.join("opencode/external-v2.mjs"))
+                .ok()
+                .is_some_and(|url| body.contains(url.as_str()))
+        })
+}
+
 fn install_external_v2(ctx: &GlobalCtx) -> AppResult<()> {
-    remove_owned_external_directory(&legacy_global_directory(ctx));
+    remove_owned_external_directory(&legacy_global_directory(ctx), ctx);
+    remove_owned_external_directory(
+        &std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| ctx.home.join(".config"))
+            .join("opencode/plugins/que-opencode-external-v2"),
+        ctx,
+    );
     let dir = global_directory(ctx);
     let marker = dir.join(".que-owned");
-    if dir.exists() && std::fs::read_to_string(&marker).ok().as_deref() != Some(GLOBAL_OWNER) {
+    if dir.exists() && !owned_directory(&dir, ctx) {
         return Err(crate::error::AppError::msg(
             "OpenCode 外部插件目录已被其他文件占用",
         ));
@@ -57,16 +76,20 @@ fn install_external_v2(ctx: &GlobalCtx) -> AppResult<()> {
     let source = url::Url::from_file_path(ctx.plugins.join("opencode/external-v2.mjs"))
         .map_err(|_| crate::error::AppError::msg("OpenCode 外部插件路径无效"))?;
     let wrapper = format!(
-        "import plugin from {};\nexport default {{ id: 'que.opencode.external.status', setup(ctx) {{\nif (process.env.QUE_HARNESS_SIGNAL_DIR || process.env.QUE_HARNESS_CHANNEL) return;\nreturn plugin.setup({{ ...ctx, options: {{ ...ctx.options, queExternalEnabledFile: {}, queExternalSignalDir: {} }} }});\n}} }};\n",
-        serde_json::to_string(source.as_str())?, serde_json::to_string(&marker.to_string_lossy())?,
+        "import plugin from {};\nexport default {{ id: 'que.opencode.external.status.{}', setup(ctx) {{\nif (process.env.QUE_HARNESS_SIGNAL_DIR || process.env.QUE_HARNESS_CHANNEL) return;\nreturn plugin.setup({{ ...ctx, options: {{ ...ctx.options, queExternalEnabledFile: {}, queExternalSignalDir: {} }} }});\n}} }};\n",
+        serde_json::to_string(source.as_str())?, ctx.profile_id(),
+        serde_json::to_string(&marker.to_string_lossy())?,
         serde_json::to_string(&crate::paths::external_signal_dir().to_string_lossy())?);
-    crate::paths::atomic_write(&marker, GLOBAL_OWNER)?;
+    crate::paths::atomic_write(&marker, &format!("{GLOBAL_OWNER}:{}", ctx.profile_id()))?;
     crate::paths::atomic_write(&dir.join("tui.mjs"), &wrapper)?;
     // The discovery directory contains a CLI entrypoint and an inert server entrypoint.
-    crate::paths::atomic_write(&dir.join("index.mjs"), "export default { id: 'que.opencode.external.status', setup() {}, async server() { return {}; } };\n")?;
+    crate::paths::atomic_write(&dir.join("index.mjs"), &format!("export default {{ id: 'que.opencode.external.status.{}', setup() {{}}, async server() {{ return {{}}; }} }};\n", ctx.profile_id()))?;
     crate::paths::atomic_write(
         &dir.join("package.json"),
-        r#"{"name":"que-opencode-external-v2","type":"module","exports":{".":"./index.mjs","./tui":"./tui.mjs"}}"#,
+        &format!(
+            r#"{{"name":"que-opencode-external-v2-{}","type":"module","exports":{{".":"./index.mjs","./tui":"./tui.mjs"}}}}"#,
+            ctx.profile_id()
+        ),
     )?;
     Ok(())
 }
@@ -195,8 +218,15 @@ impl Harness for OpenCode {
         remove_legacy_v1(ctx);
         let _ = std::fs::remove_file(ctx.plugins.join("opencode").join("external-v2.mjs"));
         let dir = global_directory(ctx);
-        remove_owned_external_directory(&dir);
-        remove_owned_external_directory(&legacy_global_directory(ctx));
+        remove_owned_external_directory(&dir, ctx);
+        remove_owned_external_directory(&legacy_global_directory(ctx), ctx);
+        remove_owned_external_directory(
+            &std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| ctx.home.join(".config"))
+                .join("opencode/plugins/que-opencode-external-v2"),
+            ctx,
+        );
     }
 
     fn extra_search_dirs(&self) -> &'static [&'static str] {

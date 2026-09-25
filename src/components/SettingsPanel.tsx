@@ -22,6 +22,8 @@ import { saveAndOpenAppLog } from "@/lib/card-log";
 import { invoke } from "@tauri-apps/api/core";
 import { setDeveloperProbesEnabled } from "@/lib/developer-probes";
 import { QueLogo } from "./QueLogo";
+import { AboutSettings } from "./AboutSettings";
+import type { AppUpdateState } from "@/hooks/useAppUpdate";
 
 interface Props {
   cwd: string | null;
@@ -29,6 +31,7 @@ interface Props {
   initialSection: SettingsSection;
   onClose: () => void;
   onSessionReloaded: () => void;
+  appUpdate: AppUpdateState;
   quoteSelectionEnabled: boolean;
   onQuoteSelectionChange: (enabled: boolean) => void;
 }
@@ -48,6 +51,7 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
   };
   if (section === "remote-hosts") return <svg {...common}><rect x="4" y="3" width="16" height="7" rx="2" /><rect x="4" y="14" width="16" height="7" rx="2" /><path d="M8 6h.01M8 17h.01M12 6h5M12 17h5" /></svg>;
   if (section === "terminal") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></svg>;
+  if (section === "about") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>;
   if (section === "external-sessions") {
     return (
       <svg {...common}>
@@ -238,7 +242,7 @@ function GeneralSettings() {
   );
 }
 
-export function SettingsPanel({ initialSection, onClose }: Props) {
+export function SettingsPanel({ initialSection, onClose, appUpdate }: Props) {
   const { t } = useI18n();
   const [section, setSection] = useState<SettingsSection>(
     SETTINGS_SECTION_VALUES.includes(initialSection as SettingsSection) ? initialSection : "general"
@@ -249,6 +253,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
     { id: "terminal", label: t("settings.terminal") },
     { id: "remote-hosts", label: t("machines.settings") },
     { id: "external-sessions", label: t("settings.externalSessions") },
+    { id: "about", label: t("settings.about") },
   ];
 
   useEffect(() => setLastSettingsSection(section), [section]);
@@ -301,6 +306,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
           {sectionHost("external-sessions", <ExternalSessionsSettings />)}
           {sectionHost("general", <GeneralSettings />)}
           {sectionHost("terminal", <TerminalSettings />)}
+          {sectionHost("about", <AboutSettings update={appUpdate} />)}
         </main>
       </div>
     </div>

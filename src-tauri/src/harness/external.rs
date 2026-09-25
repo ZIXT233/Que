@@ -6,7 +6,7 @@
 //! attention, so instead of dropping their events they are collected here and
 //! surfaced as a transient notice that disappears the moment the session works again.
 
-use super::session_label::{self, clean_text, SessionFacts};
+use super::session_label::{self, clean_text, SessionFacts, TURN_MAX_CHARS};
 use super::signals::{observe_hook, settle_held, HookSignal, ProbeState};
 use crate::live::LiveBus;
 use crate::models::ExternalNotice;
@@ -30,6 +30,26 @@ const POLL_MS: u64 = 500;
 /// Preview limit for notification signals and fallbacks.
 const PREVIEW_MAX_CHARS: usize = 16_000;
 const PROMPT_MAX_CHARS: usize = 4_000;
+const HOOK_TURNS_MAX: usize = 80;
+
+fn hook_turns(signal: &HookSignal) -> Option<Vec<crate::models::ExternalTurn>> {
+    let turns = signal.turns.as_ref()?;
+    let filtered = turns
+        .iter()
+        .rev()
+        .take(HOOK_TURNS_MAX)
+        .filter_map(|turn| {
+            if turn.role != "user" && turn.role != "assistant" {
+                return None;
+            }
+            clean_text(&turn.text, TURN_MAX_CHARS).map(|text| crate::models::ExternalTurn {
+                role: turn.role.clone(),
+                text,
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(filtered.into_iter().rev().collect())
+}
 
 /// The kind a signal without one is filed under. Cursor is the only harness whose
 /// user-level `hooks.json` is global, so its ingress is the one that can fire from a
@@ -285,7 +305,12 @@ fn apply_with_settings(
     // Going back to work is not a retraction: the session keeps a background entry, so
     // the sidebar can show what is running out there as well as who wants the user.
     if state == "working" {
-        return set_working(notices, &key, &signal, &kind, now);
+        // One read at a turn boundary fills gaps in hooks that report no text and
+        // recovers full messages when their hook payload is only a short clip.
+        let facts = (signal.turns.is_none()
+            && matches!(signal.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt" | "BeforeAgent" | "PreInvocation"))
+            .then(|| session_facts(&kind, signal.session_id.as_deref()));
+        return set_working(notices, &key, &signal, &kind, facts, now);
     }
     if state != "attention" {
         let mut map = notices.lock();
@@ -324,8 +349,13 @@ fn apply_with_settings(
         session_id: signal.session_id.clone(),
         project: cwd.as_deref().and_then(project_name),
         cwd,
-        session_name: facts.name,
-        prompt: notice_prompt(&signal, facts.prompt),
+        session_name: facts.name
+            .or_else(|| signal.title.as_deref().and_then(|title| clean_text(title, 160)))
+            .or_else(|| map.get(&key).and_then(|tracked| tracked.notice.session_name.clone())),
+        prompt: notice_prompt(&signal, facts.prompt).or_else(|| {
+            map.get(&key)
+                .and_then(|tracked| tracked.notice.prompt.clone())
+        }),
         state,
         // The session's own store has the reply in full; the hook only ever has a clip.
         // Grok also sends Stop during shutdown, sometimes without the answer.
@@ -339,7 +369,13 @@ fn apply_with_settings(
                 map.get(&key)
                     .and_then(|tracked| tracked.notice.preview.clone())
             }),
-        turns: facts.turns,
+        turns: if !facts.turns.is_empty() {
+            facts.turns
+        } else {
+            hook_turns(&signal)
+                .or_else(|| map.get(&key).map(|tracked| tracked.notice.turns.clone()))
+                .unwrap_or_default()
+        },
         notification: signal.notification.clone(),
         tool: signal.tool.clone(),
         priority_weight,
@@ -413,6 +449,7 @@ fn set_working(
     key: &str,
     signal: &HookSignal,
     kind: &str,
+    facts: Option<SessionFacts>,
     now: i64,
 ) -> bool {
     let mut map = notices.lock();
@@ -439,6 +476,43 @@ fn set_working(
     notice.kind = kind.to_string();
     notice.state = "working".into();
     notice.at = signal.at;
+    let mut file_prompt = None;
+    if let Some(facts) = facts {
+        if let Some(cwd) = facts.cwd {
+            notice.project = project_name(&cwd);
+            notice.cwd = Some(cwd);
+        }
+        if let Some(name) = facts.name {
+            notice.session_name = clean_text(&name, 160);
+        }
+        if let Some(prompt) = facts.prompt.and_then(|text| clean_text(&text, PROMPT_MAX_CHARS)) {
+            file_prompt = Some(prompt);
+        }
+        if !facts.turns.is_empty() {
+            notice.turns = facts.turns;
+        }
+    }
+    if let Some(prompt) = notice_prompt(signal, None) {
+        notice.prompt = file_prompt.filter(|full| full.starts_with(&prompt)).or(Some(prompt));
+    } else if let Some(prompt) = file_prompt {
+        notice.prompt = Some(prompt);
+    }
+    if let Some(title) = signal.title.as_deref().and_then(|title| clean_text(title, 160)) {
+        notice.session_name = Some(title);
+    }
+    if let Some(turns) = hook_turns(signal) {
+        notice.turns = turns;
+    }
+    // During a new turn the provider may not have flushed its transcript yet.
+    // Keep the submitted user message visible beside earlier turns while working.
+    if let Some(prompt) = signal.prompt.as_deref().and_then(|text| clean_text(text, TURN_MAX_CHARS)) {
+        if notice.turns.last().is_none_or(|last| last.role != "user" || !last.text.starts_with(&prompt)) {
+            notice.turns.push(crate::models::ExternalTurn { role: "user".into(), text: prompt });
+            if notice.turns.len() > HOOK_TURNS_MAX {
+                notice.turns.remove(0);
+            }
+        }
+    }
     // The wait is over, so what described it goes. The ask and the conversation stay:
     // they are how this session is recognised while it works.
     notice.tool = None;
@@ -669,6 +743,119 @@ mod tests {
         // Nothing asked yet, so there is nothing to show but who it is.
         assert_eq!(entry.prompt, None);
         assert_eq!(entry.preview, None);
+    }
+
+    #[test]
+    fn external_prompt_survives_tool_events_and_stop_then_updates_next_turn() {
+        let (probes, notices) = store();
+        let at = now();
+        let mut submit = signal("UserPromptSubmit", at);
+        submit.kind = Some("qwen-code".into());
+        submit.prompt = Some("第一轮问题".into());
+        assert!(apply(&probes, &notices, submit.clone()));
+        assert_eq!(only(&notices).prompt.as_deref(), Some("第一轮问题"));
+
+        let mut tool = submit.clone();
+        tool.event = "PreToolUse".into();
+        tool.prompt = None;
+        tool.at += 1;
+        apply(&probes, &notices, tool);
+        assert_eq!(only(&notices).prompt.as_deref(), Some("第一轮问题"));
+
+        let mut stop = submit.clone();
+        stop.event = "Stop".into();
+        stop.prompt = None;
+        stop.at += 2;
+        apply(&probes, &notices, stop.clone());
+        assert_eq!(only(&notices).prompt.as_deref(), Some("第一轮问题"));
+
+        submit.at += 3;
+        submit.prompt = Some("第二轮问题".into());
+        apply(&probes, &notices, submit);
+        assert_eq!(only(&notices).prompt.as_deref(), Some("第二轮问题"));
+        stop.at += 2;
+        apply(&probes, &notices, stop);
+        assert_eq!(only(&notices).prompt.as_deref(), Some("第二轮问题"));
+    }
+
+    #[test]
+    fn extension_snapshot_supplies_title_and_both_sides_of_external_chat() {
+        let (probes, notices) = store();
+        let at = now();
+        let mut submit = signal("UserPromptSubmit", at);
+        submit.kind = Some("qwen-code".into());
+        submit.title = Some("会话标题".into());
+        submit.prompt = Some("第二个问题".into());
+        submit.turns = Some(vec![
+            crate::models::ExternalTurn { role: "user".into(), text: "第一个问题".into() },
+            crate::models::ExternalTurn { role: "assistant".into(), text: "第一个回答".into() },
+            crate::models::ExternalTurn { role: "user".into(), text: "第二个问题".into() },
+        ]);
+        apply(&probes, &notices, submit.clone());
+        assert_eq!(only(&notices).session_name.as_deref(), Some("会话标题"));
+        assert_eq!(only(&notices).turns.len(), 3);
+
+        let mut stop = submit;
+        stop.event = "Stop".into();
+        stop.at += 1;
+        stop.prompt = None;
+        stop.title = None;
+        stop.reply_preview = Some("第二个回答".into());
+        stop.turns.as_mut().unwrap().push(crate::models::ExternalTurn {
+            role: "assistant".into(), text: "第二个回答".into(),
+        });
+        apply(&probes, &notices, stop);
+        let notice = only(&notices);
+        assert_eq!(notice.session_name.as_deref(), Some("会话标题"));
+        assert_eq!(notice.prompt.as_deref(), Some("第二个问题"));
+        assert_eq!(notice.turns.len(), 4);
+        assert_eq!(notice.turns[3].text, "第二个回答");
+    }
+
+    #[test]
+    fn codex_working_notice_shows_the_new_prompt_after_earlier_turns() {
+        let (probes, notices) = store();
+        let at = now();
+        let mut previous = signal("Stop", at);
+        previous.kind = Some("codex".into());
+        previous.turns = Some(vec![
+            crate::models::ExternalTurn { role: "user".into(), text: "旧问题".into() },
+            crate::models::ExternalTurn { role: "assistant".into(), text: "旧回答".into() },
+        ]);
+        apply(&probes, &notices, previous);
+
+        let mut submit = signal("UserPromptSubmit", at + 1);
+        submit.kind = Some("codex".into());
+        submit.prompt = Some("本轮问题".into());
+        apply(&probes, &notices, submit);
+        let notice = only(&notices);
+        assert_eq!(notice.state, "working");
+        assert_eq!(notice.prompt.as_deref(), Some("本轮问题"));
+        assert_eq!(notice.turns.len(), 3);
+        assert_eq!(notice.turns[2].role, "user");
+        assert_eq!(notice.turns[2].text, "本轮问题");
+    }
+
+    #[test]
+    fn working_notice_uses_full_session_turn_without_duplicating_hook_clip() {
+        let notices = Mutex::new(HashMap::new());
+        let mut submit = signal("UserPromptSubmit", now());
+        submit.kind = Some("codex".into());
+        submit.prompt = Some("完整问题的前半段".into());
+        let facts = SessionFacts {
+            name: Some("会话名".into()),
+            prompt: Some("完整问题的前半段与后半段".into()),
+            turns: vec![crate::models::ExternalTurn {
+                role: "user".into(), text: "完整问题的前半段与后半段".into(),
+            }],
+            ..SessionFacts::default()
+        };
+        set_working(&notices, "session:codex-fixture", &submit, "codex", Some(facts), now());
+        let notice = only(&notices);
+        assert_eq!(notice.session_name.as_deref(), Some("会话名"));
+        assert_eq!(notice.prompt.as_deref(), Some("完整问题的前半段与后半段"));
+        assert_eq!(notice.turns.len(), 1);
+        assert_eq!(notice.turns[0].text, "完整问题的前半段与后半段");
     }
 
     #[test]

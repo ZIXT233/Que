@@ -34,7 +34,11 @@ fn config_file() -> PathBuf {
     }
     let root = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| crate::paths::user_home().unwrap_or_default().join(".config"));
+        .unwrap_or_else(|| {
+            crate::paths::user_home()
+                .unwrap_or_default()
+                .join(".config")
+        });
     root.join("devin").join("config.json")
 }
 
@@ -96,8 +100,9 @@ fn merge_hooks(config: &mut Map<String, Value>, command: &str, timeout: u32) {
 /// An entry Que installed is recognized by where its command points — every ambient
 /// and per-card spelling lands inside `harness-plugins/devin`. Commands with unsafe
 /// paths travel as a PowerShell `-EncodedCommand`, so decode that form too.
-fn is_que_command(command: &str) -> bool {
-    if command.replace('\\', "/").contains("harness-plugins/devin") {
+fn is_que_command(command: &str, root: &str) -> bool {
+    let root = root.replace('\\', "/");
+    if command.replace('\\', "/").contains(&root) {
         return true;
     }
     command
@@ -114,12 +119,12 @@ fn is_que_command(command: &str) -> bool {
             )
             .ok()
         })
-        .is_some_and(|decoded| decoded.replace('\\', "/").contains("harness-plugins/devin"))
+        .is_some_and(|decoded| decoded.replace('\\', "/").contains(&root))
 }
 
 /// Drop Que's groups from an event list, keeping user-written entries. Mirror of
 /// Claude's ownership rule; the config file may be shared with the user's own hooks.
-fn remove_owned_hooks(entries: &mut Vec<Value>) -> bool {
+fn remove_owned_hooks(entries: &mut Vec<Value>, root: &str) -> bool {
     let mut changed = false;
     entries.retain_mut(|group| {
         let Some(hooks) = group.get_mut("hooks").and_then(|v| v.as_array_mut()) else {
@@ -130,7 +135,7 @@ fn remove_owned_hooks(entries: &mut Vec<Value>) -> bool {
             !hook
                 .get("command")
                 .and_then(|v| v.as_str())
-                .is_some_and(is_que_command)
+                .is_some_and(|command| is_que_command(command, root))
         });
         changed |= hooks.len() != before;
         !hooks.is_empty() || before == 0
@@ -140,7 +145,7 @@ fn remove_owned_hooks(entries: &mut Vec<Value>) -> bool {
 
 /// Splice Que's entries into (or out of) a Devin `config.json` text, preserving the
 /// rest of the file. `command` is `None` when removing.
-fn merge_config(existing: Option<&str>, command: Option<(&str, u32)>) -> String {
+fn merge_config(existing: Option<&str>, command: Option<(&str, u32)>, root: &str) -> String {
     let mut config = serde_json::from_str::<Value>(existing.unwrap_or("{}"))
         .ok()
         .and_then(|value| value.as_object().cloned())
@@ -156,7 +161,7 @@ fn merge_config(existing: Option<&str>, command: Option<(&str, u32)>) -> String 
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        remove_owned_hooks(&mut entries);
+        remove_owned_hooks(&mut entries, root);
         if let Some((command, timeout)) = command {
             entries.push(serde_json::json!({ "hooks": [{ "type": "command", "command": command, "timeout": timeout }] }));
         }
@@ -216,10 +221,8 @@ impl Harness for Devin {
             // `--config` replaces the user config file for this session only, so the
             // merged copy carries both the user's settings and Que's hooks — ambient
             // sessions without the flag never see them.
-            plan.args.extend([
-                "--config".into(),
-                ctx.host.relative("devin-config.json"),
-            ]);
+            plan.args
+                .extend(["--config".into(), ctx.host.relative("devin-config.json")]);
             Ok(plan)
         })
     }
@@ -265,6 +268,7 @@ impl Harness for Devin {
             let merged = merge_config(
                 existing.as_deref(),
                 Some((&command, default_hook_timeout(cfg!(windows)))),
+                &ctx.plugins.join("devin").to_string_lossy(),
             );
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -279,15 +283,16 @@ impl Harness for Devin {
 
     /// Strip the entries `global` merged in; user-written hooks stay. Skip the write
     /// entirely when nothing of ours is there — the file keeps its own formatting.
-    fn unglobal(&self, _ctx: &GlobalCtx) {
+    fn unglobal(&self, ctx: &GlobalCtx) {
         let path = config_file();
         let Ok(existing) = std::fs::read_to_string(&path) else {
             return;
         };
-        if !is_que_command(&existing) {
+        let root = ctx.plugins.join("devin").to_string_lossy().into_owned();
+        if !is_que_command(&existing, &root) {
             return;
         }
-        let _ = atomic_write(&path, &merge_config(Some(&existing), None));
+        let _ = atomic_write(&path, &merge_config(Some(&existing), None, &root));
     }
 
     fn external_ingress(&self) -> bool {

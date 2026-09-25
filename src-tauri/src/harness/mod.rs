@@ -1,5 +1,6 @@
 mod debug;
 mod env;
+mod extensions;
 mod external;
 mod hooks;
 mod inherited;
@@ -18,6 +19,7 @@ use crate::winproc::NoWindow;
 
 pub use debug::HarnessDebugSnapshot;
 pub use env::local_environment;
+pub use extensions::{list as extension_harnesses, refresh as refresh_extensions};
 pub use external::ExternalRuntime;
 pub use hooks::{prepare_hook_launch, sync_external_hooks, sync_installed_hooks};
 pub use osc::HookOscProbe;
@@ -76,8 +78,15 @@ impl HarnessRuntime {
         debug::snapshot(&self.debug, &self.probes, terminals, terminal_id)
     }
 
-    pub fn snapshot(&self, session: &HarnessSession, terminals: &TerminalHub, workspace: Option<&QueueWorkspace>) -> HarnessSession {
-        let session_env = workspace.map(crate::workspace_rc::session_environment).unwrap_or_default();
+    pub fn snapshot(
+        &self,
+        session: &HarnessSession,
+        terminals: &TerminalHub,
+        workspace: Option<&QueueWorkspace>,
+    ) -> HarnessSession {
+        let session_env = workspace
+            .map(crate::workspace_rc::session_environment)
+            .unwrap_or_default();
         let harness = find(&session.kind);
         // A harness without an adapter is a shell card: its state comes off the PTY.
         let shell_card = harness.is_some_and(|h| h.adapter().is_none());
@@ -88,11 +97,18 @@ impl HarnessRuntime {
         }
         if !session_env.is_empty() {
             if let Some(state) = current.as_mut() {
-                if let (Some(kind), Some(id)) = (state.kind.as_deref(), state.session_id.as_deref()) {
+                if let (Some(kind), Some(id)) = (state.kind.as_deref(), state.session_id.as_deref())
+                {
                     if !state.remote {
-                        if let Some(label) = session_label::read_session_label_in(kind, id, &session_env) {
-                            if label.name.is_some() { state.session_name = label.name; }
-                            if state.first_prompt.is_none() { state.first_prompt = label.first_prompt; }
+                        if let Some(label) =
+                            session_label::read_session_label_in(kind, id, &session_env)
+                        {
+                            if label.name.is_some() {
+                                state.session_name = label.name;
+                            }
+                            if state.first_prompt.is_none() {
+                                state.first_prompt = label.first_prompt;
+                            }
                         }
                     }
                 }
@@ -112,8 +128,11 @@ impl HarnessRuntime {
             provider_session_id = provider_session_id
                 .filter(|id| id.to_lowercase().starts_with(&prefix))
                 .or_else(|| {
-                    if session.remote == Some(true) { None }
-                    else { harness.and_then(|h| h.resolve_session_prefix(&prefix)) }
+                    if session.remote == Some(true) {
+                        None
+                    } else {
+                        harness.and_then(|h| h.resolve_session_prefix(&prefix))
+                    }
                 });
         }
         let terminal = terminals.snapshot(&session.terminal_id);
@@ -211,6 +230,16 @@ impl HarnessRuntime {
     ) -> AppResult<HarnessSession> {
         let launch_started = std::time::Instant::now();
         let harness = find(kind).ok_or_else(|| AppError::machine("HARNESS_UNSUPPORTED"))?;
+        let is_extension = extensions::find(kind).is_some();
+        if is_extension {
+            if let Some(session_id) = resume
+                .as_ref()
+                .and_then(|s| s.provider_session_id.as_deref())
+            {
+                registry::checked_id(session_id)?;
+            }
+        }
+        let mut extension_command = None;
         let terminal_id = Uuid::new_v4().simple().to_string();
         let mark = |stage: &str| {
             crate::debuglog::info_term(
@@ -245,6 +274,7 @@ impl HarnessRuntime {
         // Probe once, through the same login shell the card will use, and fail before
         // anything opens.
         if !shell_card
+            && !is_extension
             && workspace.kind == "ssh"
             && crate::workspace_rc::script(workspace).is_none()
         {
@@ -299,7 +329,8 @@ impl HarnessRuntime {
             shell_notifications = shell.command_notifications;
         } else {
             let adapter = harness.adapter().expect("checked above");
-            let mut command_path = adapter.executable.to_string();
+            let executable = adapter.executable;
+            let mut command_path = executable.to_string();
             let mut command_prefix: Vec<String> = Vec::new();
             let tweaks: LaunchTweaks = harness.launch_tweaks();
             if workspace.kind == "local" && crate::workspace_rc::script(workspace).is_none() {
@@ -314,21 +345,21 @@ impl HarnessRuntime {
                     })
                     .unwrap_or_default();
                 if let Some(resolved) =
-                    env::resolve_local_command(&adapter.executable, &local, &extra_dirs)
+                    env::resolve_local_command(executable, &local, &extra_dirs)
                 {
                     command_path = resolved;
                     env = local;
                 } else {
                     local = local_environment(true).await.unwrap_or_default();
                     if let Some(resolved) =
-                        env::resolve_local_command(&adapter.executable, &local, &extra_dirs)
+                        env::resolve_local_command(executable, &local, &extra_dirs)
                     {
                         command_path = resolved;
                         env = local;
                     } else {
                         return Err(AppError::machine_detail(
                             "HARNESS_CLI_MISSING",
-                            adapter.executable,
+                            executable,
                         ));
                     }
                 }
@@ -369,7 +400,9 @@ impl HarnessRuntime {
             mark("environment-and-command-ready");
             // keep it off the connect path — a shim probe through cmd/PowerShell
             // costs seconds — and publish the answer via the snapshot overlay.
-            if kind == "opencode" {
+            if is_extension {
+                // The extension owns its version policy; do not probe the Node runner.
+            } else if kind == "opencode" {
                 // V1 server hooks and V2 CLI plugins have incompatible entrypoints.
                 version = detect_version(
                     workspace,
@@ -443,7 +476,7 @@ impl HarnessRuntime {
                 });
             }
             mark("hooks-begin");
-            let hooks = match prepare_hook_launch(
+            let mut hooks = match prepare_hook_launch(
                 kind,
                 &signals,
                 workspace,
@@ -453,14 +486,7 @@ impl HarnessRuntime {
             )
             .await
             {
-                Ok(hooks) => {
-                    crate::debuglog::info_term(
-                        "harness",
-                        &terminal_id,
-                        &format!("hooks installed kind={kind}"),
-                    );
-                    hooks
-                }
+                Ok(hooks) => hooks,
                 Err(error) => {
                     crate::debuglog::log_error(
                         &format!("harness hook install kind={kind}"),
@@ -469,8 +495,33 @@ impl HarnessRuntime {
                     return Err(error);
                 }
             };
-            env.extend(hooks.env);
-            mark("hooks-ready");
+            if is_extension {
+                // Upload the module before calling its install callback. The remote
+                // launch script is uploaded later, once launch/resume is resolved.
+                hooks.install(None).await?;
+                hooks.install_extension().await?;
+                let mode = if resume.is_some() { "resume" } else { "launch" };
+                let spec = extensions::command(
+                    kind,
+                    mode,
+                    workspace,
+                    resume.as_ref().and_then(|s| s.provider_session_id.as_deref()),
+                    &hooks.extension_dir(),
+                    bin_dir,
+                )
+                .await?;
+                command_path = if workspace.kind == "local"
+                    && crate::workspace_rc::script(workspace).is_none()
+                {
+                    env::resolve_local_command(&spec.command, &env, &[])
+                        .ok_or_else(|| AppError::machine_detail("HARNESS_CLI_MISSING", &spec.command))?
+                } else {
+                    spec.command.clone()
+                };
+                extension_command = Some(spec);
+            }
+            env.extend(std::mem::take(&mut hooks.env));
+            mark("hooks-planned");
             let canvas_dark = tweaks.dark_canvas || crate::terminal_theme::app_dark();
             env.insert(
                 "COLORFGBG".into(),
@@ -484,14 +535,22 @@ impl HarnessRuntime {
                 env.insert("QUE_HARNESS_SESSION_ID".into(), session_id);
             }
             let mut launch_args = command_prefix;
-            if let Some(session_id) = resume
-                .as_ref()
-                .and_then(|s| s.provider_session_id.as_deref())
-            {
-                launch_args.extend(adapter.resume_args(session_id)?);
+            if !is_extension {
+                if let Some(session_id) = resume
+                    .as_ref()
+                    .and_then(|s| s.provider_session_id.as_deref())
+                {
+                    launch_args.extend(adapter.resume_args(session_id)?);
+                }
             }
-            launch_args.extend(adapter.args.iter().map(|s| s.to_string()));
-            launch_args.extend(hooks.args);
+            if let Some(spec) = &extension_command {
+                launch_args.extend(spec.args.iter().cloned());
+            } else {
+                launch_args.extend(adapter.args.iter().map(|s| s.to_string()));
+            }
+            launch_args.extend(std::mem::take(&mut hooks.args));
+            let launch_executable = extension_command.as_ref().map(|spec| spec.command.as_str()).unwrap_or(adapter.executable);
+            let mut launch_script = None;
             if workspace.kind == "ssh" {
                 let host = workspace
                     .ssh_host
@@ -499,44 +558,59 @@ impl HarnessRuntime {
                     .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
                 let exports = env
                     .iter()
-                    .map(|(k, v)| format!("{k}={}", if workspace.session_env.contains_key(k) {
-                        crate::workspace_rc::remote_session_value(v)
-                    } else {
-                        crate::ssh::shell_quote(v)
-                    }))
+                    .map(|(k, v)| {
+                        format!(
+                            "{k}={}",
+                            if workspace.session_env.contains_key(k) {
+                                crate::workspace_rc::remote_session_value(v)
+                            } else {
+                                crate::ssh::shell_quote(v)
+                            }
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(" ");
-                let mut command = std::iter::once(adapter.executable.to_string())
+                let command = std::iter::once(launch_executable.to_string())
                     .chain(launch_args)
                     .map(|s| crate::ssh::shell_quote(&s))
                     .collect::<Vec<_>>()
                     .join(" ");
-                if crate::workspace_rc::script(workspace).is_some() {
-                    let quoted = crate::ssh::shell_quote(adapter.executable);
+                let rc_body = if crate::workspace_rc::script(workspace).is_some() {
+                    let quoted = crate::ssh::shell_quote(launch_executable);
                     let alias_command =
-                        format!("{}{}", adapter.executable, &command[quoted.len()..]);
-                    command = crate::workspace_rc::remote(workspace, &alias_command);
-                }
+                        format!("{}{}", launch_executable, &command[quoted.len()..]);
+                    Some(crate::workspace_rc::body(workspace, &alias_command))
+                } else {
+                    None
+                };
+                // Put the launch script on the remote host before opening the PTY.
+                // The SSH exec command and tmux pane now receive only a file path,
+                // so RC text, environment values, and hook overrides never expand
+                // through several nested shell -c arguments.
+                let script_path = hooks.remote_launch_path(&terminal_id)?;
+                let script = remote_launch_script(
+                    &script_path,
+                    &terminal_id,
+                    &exports,
+                    &command,
+                    rc_body.as_deref(),
+                );
+                let launch_command = format!(
+                    "exec /bin/sh {}",
+                    crate::ssh::shell_quote(&script_path.to_string_lossy())
+                );
+                launch_script = Some((script_path, script));
                 let unset = tweaks
                     .ssh_unset
                     .iter()
                     .map(|name| format!("unset {name} && "))
                     .collect::<String>();
                 let remote = if use_tmux {
-                    let inner_exec = format!(
-                        "{}QUE_HARNESS_TTY=$(tty) && export QUE_HARNESS_TTY && exec {}",
-                        if exports.is_empty() {
-                            String::new()
-                        } else {
-                            format!("export {exports} && ")
-                        },
-                        command
-                    );
                     let term_id = crate::ssh::card_tmux_session_id(card_id);
                     let wrapped = crate::ssh::wrap_remote_tmux_with_channel(
                         &term_id,
                         &workspace.cwd,
-                        &inner_exec,
+                        &launch_command,
                         Some(&terminal_id),
                     );
                     format!(
@@ -547,15 +621,10 @@ impl HarnessRuntime {
                     )
                 } else {
                     format!(
-                        "cd {} && {}{}QUE_HARNESS_TTY=$(tty) && export QUE_HARNESS_TTY && exec {}",
+                        "cd {} && {}{}",
                         crate::ssh::shell_quote(&workspace.cwd),
                         unset,
-                        if exports.is_empty() {
-                            String::new()
-                        } else {
-                            format!("export {exports} && ")
-                        },
-                        command
+                        launch_command
                     )
                 };
                 spawn = Spawn::Remote {
@@ -565,7 +634,7 @@ impl HarnessRuntime {
             } else if crate::workspace_rc::script(workspace).is_some() {
                 let (executable, args) = crate::workspace_rc::local_command(
                     workspace,
-                    adapter.executable,
+                    launch_executable,
                     &launch_args,
                 )?;
                 spawn = Spawn::Local {
@@ -587,6 +656,22 @@ impl HarnessRuntime {
                     env,
                 };
             }
+            if is_extension {
+                hooks.install_launch_script(launch_script.as_ref().map(|(path, body)| (path.as_path(), body.as_str()))).await?;
+            } else {
+                hooks.install(
+                    launch_script
+                        .as_ref()
+                        .map(|(path, body)| (path.as_path(), body.as_str())),
+                )
+                .await?;
+            }
+            crate::debuglog::info_term(
+                "harness",
+                &terminal_id,
+                &format!("hooks installed kind={kind}"),
+            );
+            mark("hooks-ready");
         }
 
         crate::debuglog::info_term(
@@ -938,6 +1023,43 @@ impl HarnessRuntime {
     }
 }
 
+fn remote_launch_script(
+    path: &std::path::Path,
+    terminal_id: &str,
+    exports: &str,
+    command: &str,
+    rc_body: Option<&str>,
+) -> String {
+    let quoted_path = crate::ssh::shell_quote(&path.to_string_lossy());
+    let mut script = String::new();
+    if rc_body.is_some() {
+        // The login shell must see the card environment while it reads its rc
+        // files. Source the same script after startup; the marker prevents a loop.
+        script.push_str(&format!(
+            "if [ \"${{QUE_HARNESS_LAUNCH_STAGE:-}}\" != {} ]; then\n",
+            crate::ssh::shell_quote(terminal_id)
+        ));
+    }
+    if !exports.is_empty() {
+        script.push_str(&format!("export {exports} || exit $?\n"));
+    }
+    script.push_str("QUE_HARNESS_TTY=$(tty) || exit $?\nexport QUE_HARNESS_TTY || exit $?\n");
+    if rc_body.is_some() {
+        script.push_str(&format!(
+            "QUE_HARNESS_LAUNCH_STAGE={}\nexport QUE_HARNESS_LAUNCH_STAGE\nexec \"${{SHELL:-/bin/bash}}\" -ilc {}\nfi\nunset QUE_HARNESS_LAUNCH_STAGE\n",
+            crate::ssh::shell_quote(terminal_id),
+            crate::ssh::shell_quote(&format!(". {quoted_path}"))
+        ));
+    }
+    script.push_str(&format!("rm -f -- {quoted_path} || :\n"));
+    if let Some(body) = rc_body {
+        script.push_str(body);
+    } else {
+        script.push_str(&format!("exec {command}\n"));
+    }
+    script
+}
+
 async fn detect_version(
     workspace: &QueueWorkspace,
     command_path: &str,
@@ -948,14 +1070,7 @@ async fn detect_version(
     if crate::workspace_rc::script(workspace).is_some() {
         let cmd = format!("{} {}", command_path, crate::ssh::shell_quote(flag));
         if workspace.kind == "ssh" {
-            let out = crate::ssh::ssh_exec(
-                workspace
-                    .ssh_host
-                    .as_deref()
-                    .ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?,
-                &crate::workspace_rc::remote(workspace, &cmd),
-            )
-            .await?;
+            let out = crate::workspace_rc::remote_exec(workspace, &cmd, "").await?;
             return Ok(String::from_utf8_lossy(&out).trim().into());
         }
         let (program, args) =
@@ -1205,6 +1320,57 @@ mod tests {
     use super::*;
     use crate::models::HarnessSession;
 
+    #[test]
+    #[cfg(unix)]
+    fn remote_launch_sources_rc_after_exporting_card_environment() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let tty = dir.path().join("tty");
+        std::fs::write(&tty, "#!/bin/sh\nprintf /dev/pts/test\n").unwrap();
+        std::fs::set_permissions(&tty, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(
+            dir.path().join(".bash_profile"),
+            "printf '%s|%s' \"$TEST_EXPORT\" \"$QUE_HARNESS_TTY\" > \"$HOME/login-marker\"\n",
+        )
+        .unwrap();
+        let path = dir.path().join("launch.sh");
+        let script = remote_launch_script(
+            &path,
+            "test-terminal",
+            "TEST_EXPORT='card-value'",
+            "ignored",
+            Some("printf '%s|%s|%s' \"$TEST_EXPORT\" \"$QUE_HARNESS_TTY\" \"${QUE_HARNESS_LAUNCH_STAGE-unset}\""),
+        );
+        std::fs::write(&path, script).unwrap();
+        let output = std::process::Command::new("/bin/sh")
+            .arg(&path)
+            .env("SHELL", "/bin/bash")
+            .env("HOME", dir.path())
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    dir.path().display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .env_remove("QUE_HARNESS_LAUNCH_STAGE")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"card-value|/dev/pts/test|unset");
+        assert_eq!(
+            std::fs::read(dir.path().join("login-marker")).unwrap(),
+            b"card-value|/dev/pts/test"
+        );
+        assert!(!path.exists());
+    }
+
     fn session(state: &str) -> HarnessSession {
         HarnessSession {
             kind: "codex".into(),
@@ -1276,12 +1442,19 @@ mod tests {
         let workspace: QueueWorkspace = serde_json::from_value(serde_json::json!({
             "id":"configured-store", "name":"Workspace", "kind":"local",
             "cwd":root.path(), "runtimeCwd":root.path()
-        })).unwrap();
+        }))
+        .unwrap();
         let mut queue = crate::models::CardQueue::empty();
-        queue.machine_settings.insert("local".into(), crate::models::MachineSessionSettings {
-            terminal_rc: None,
-            session_env: HashMap::from([("CLAUDE_CONFIG_DIR".into(), root.path().to_string_lossy().into_owned())]),
-        });
+        queue.machine_settings.insert(
+            "local".into(),
+            crate::models::MachineSessionSettings {
+                terminal_rc: None,
+                session_env: HashMap::from([(
+                    "CLAUDE_CONFIG_DIR".into(),
+                    root.path().to_string_lossy().into_owned(),
+                )]),
+            },
+        );
         let workspace = crate::workspace_rc::effective_workspace(&queue, &workspace);
         let live = LiveBus::new();
         let terminals = TerminalHub::new(live.clone());
@@ -1300,16 +1473,27 @@ mod tests {
         let id = "118fcbc2-ca87-4f0c-ba01-f3f2de9359cd";
         let sessions = root.path().join("sessions/2026/09/23");
         std::fs::create_dir_all(&sessions).unwrap();
-        std::fs::write(sessions.join(format!("rollout-2026-09-23T00-00-00-{id}.jsonl")), "").unwrap();
+        std::fs::write(
+            sessions.join(format!("rollout-2026-09-23T00-00-00-{id}.jsonl")),
+            "",
+        )
+        .unwrap();
         let workspace: QueueWorkspace = serde_json::from_value(serde_json::json!({
             "id":"configured-store", "name":"Workspace", "kind":"local",
             "cwd":root.path(), "runtimeCwd":root.path()
-        })).unwrap();
+        }))
+        .unwrap();
         let mut queue = crate::models::CardQueue::empty();
-        queue.machine_settings.insert("local".into(), crate::models::MachineSessionSettings {
-            terminal_rc: None,
-            session_env: HashMap::from([("CODEX_HOME".into(), root.path().to_string_lossy().into_owned())]),
-        });
+        queue.machine_settings.insert(
+            "local".into(),
+            crate::models::MachineSessionSettings {
+                terminal_rc: None,
+                session_env: HashMap::from([(
+                    "CODEX_HOME".into(),
+                    root.path().to_string_lossy().into_owned(),
+                )]),
+            },
+        );
         let workspace = crate::workspace_rc::effective_workspace(&queue, &workspace);
         let live = LiveBus::new();
         let terminals = TerminalHub::new(live.clone());

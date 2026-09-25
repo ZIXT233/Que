@@ -1,4 +1,4 @@
-export type HarnessId = "codex" | "claude" | "codebuddy" | "cursor" | "devin" | "pi" | "omp" | "grok" | "gemini" | "opencode" | "antigravity" | "shell";
+export type HarnessId = string;
 export type HarnessState = "starting" | "working" | "attention" | "unknown" | "exited" | "error" | "not_running";
 export interface HarnessSession {
   kind: HarnessId;

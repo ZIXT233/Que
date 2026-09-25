@@ -9,13 +9,14 @@ use super::registry::{self, Harness, Plan};
 use crate::error::{AppError, AppResult};
 use crate::models::QueueWorkspace;
 use crate::paths::{atomic_write, plugin_root};
-use crate::ssh::{shell_quote, ssh_exec, ssh_login_exec};
+use crate::ssh::{shell_quote, ssh_exec, ssh_exec_stdin, ssh_login_exec};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Writes a whole file map under the plugin root in one round trip.
-const PUSH: &str = r#"const fs=require("node:fs"),p=require("node:path"),root=process.argv[1];for(const [name,body] of Object.entries(JSON.parse(Buffer.from(process.argv[2],"base64")))){const f=p.join(root,name);fs.mkdirSync(p.dirname(f),{recursive:true,mode:448});const tmp=f+"."+require("node:crypto").randomUUID()+".tmp";fs.writeFileSync(tmp,body,{mode:384});fs.renameSync(tmp,f);}"#;
+/// Atomically writes hook files and the per-card launch script from SSH stdin.
+/// File contents never become a shell or process argument on the remote host.
+const PUSH: &str = r#"const fs=require("node:fs"),p=require("node:path");for(const [f,body] of Object.entries(JSON.parse(fs.readFileSync(0,"utf8")))){if(!p.isAbsolute(f))throw Error("absolute path required");fs.mkdirSync(p.dirname(f),{recursive:true,mode:448});const tmp=f+"."+require("node:crypto").randomUUID()+".tmp";fs.writeFileSync(tmp,body,{mode:384,flag:"wx"});fs.renameSync(tmp,f);}"#;
 
 /// The machine one harness install is going to.
 pub struct Host {
@@ -51,9 +52,17 @@ impl Host {
             return Err(AppError::machine("HARNESS_UNSUPPORTED"));
         };
         let mut root = plugin_root(kind);
+        if super::extensions::find(kind).is_some() {
+            root = root.join(token);
+        }
         let mut node = which::which("node")
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| "node".into());
+        if super::extensions::find(kind).is_some() && workspace.kind == "local" {
+            node = super::extensions::node_binary()?
+                .to_string_lossy()
+                .into_owned();
+        }
         let mut ssh_host = None;
         let mut home = None;
         if workspace.kind == "ssh" {
@@ -162,23 +171,31 @@ impl Host {
 
     /// Put the plugin's files in place, then update the config files it shares with the
     /// CLI's own settings.
-    pub async fn install(&self, plan: &Plan) -> AppResult<()> {
+    pub async fn install(
+        &self,
+        plan: &Plan,
+        launch_script: Option<(&Path, &str)>,
+    ) -> AppResult<()> {
         if self.remote {
             let host = self.host_name()?;
-            let payload = base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                serde_json::to_string(&plan.files)?,
-            );
-            ssh_exec(
+            let mut files: HashMap<String, &str> = plan
+                .files
+                .iter()
+                .map(|(name, body)| {
+                    (
+                        self.root.join(name).to_string_lossy().into_owned(),
+                        body.as_str(),
+                    )
+                })
+                .collect();
+            if let Some((path, body)) = launch_script {
+                files.insert(path.to_string_lossy().into_owned(), body);
+            }
+            let payload = serde_json::to_vec(&files)?;
+            ssh_exec_stdin(
                 host,
-                &[
-                    shell_quote(&self.node),
-                    "-e".into(),
-                    shell_quote(PUSH),
-                    shell_quote(&self.root.to_string_lossy()),
-                    shell_quote(&payload),
-                ]
-                .join(" "),
+                &[shell_quote(&self.node), "-e".into(), shell_quote(PUSH)].join(" "),
+                &payload,
             )
             .await?;
             for merge in &plan.user_config {
@@ -206,6 +223,11 @@ impl Host {
             }
             atomic_write(&path, body)?;
         }
+        let _config_lock = if plan.user_config.is_empty() {
+            None
+        } else {
+            Some(lock_shared_config()?)
+        };
         for merge in &plan.user_config {
             let existing = std::fs::read_to_string(&merge.path).ok();
             let payload = plan
@@ -249,6 +271,66 @@ impl Host {
     }
 }
 
+/// Serialize read/modify/write of agent user configs across Que data directories.
+pub fn lock_shared_config() -> AppResult<std::fs::File> {
+    let home = crate::paths::user_home().unwrap_or_else(|| PathBuf::from("."));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(home.join(".que-harness-hooks.lock"))?;
+    file.lock()?;
+    Ok(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn one_stdin_upload_writes_hooks_and_a_large_private_launch_script() {
+        let root = tempfile::tempdir().unwrap();
+        let hook = root.path().join("plugins/hook.cjs");
+        let launch = root.path().join("launch/card.sh");
+        let large_script = "'".repeat(150_000);
+        let files = HashMap::from([
+            (hook.to_string_lossy().into_owned(), "hook body".to_string()),
+            (launch.to_string_lossy().into_owned(), large_script.clone()),
+        ]);
+        let mut child = Command::new("node")
+            .args(["-e", PUSH])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&files).unwrap())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), "hook body");
+        assert_eq!(std::fs::read_to_string(&launch).unwrap(), large_script);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+}
+
 /// The machine-wide install: the user-level config that serves every session Que did not
 /// launch. There is no token and no per-card signal dir here — the ingress falls back to
 /// the external sink on its own.
@@ -279,6 +361,12 @@ impl GlobalCtx {
             .join("hook.cjs")
             .to_string_lossy()
             .into_owned()
+    }
+
+    /// Stable name for this Que data directory in shared CLI configuration.
+    pub fn profile_id(&self) -> String {
+        let digest = Sha256::digest(self.plugins.to_string_lossy().as_bytes());
+        hex::encode(&digest[..6])
     }
 
     /// Lay the shared ingress script down under a harness's plugin directory.
