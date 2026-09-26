@@ -1,31 +1,59 @@
 import { oscTrace } from "./app-log";
 
 export function isTerminalAbortError(error: unknown) {
-  return (error instanceof DOMException && error.name === "AbortError")
-    || (error instanceof Error && /abort/i.test(error.message));
+  return (error instanceof DOMException || error instanceof Error) && error.name === "AbortError";
+}
+
+export class TerminalRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "TerminalRequestError";
+  }
+}
+
+export function isRetryableTerminalRequestError(error: unknown) {
+  return error instanceof TerminalRequestError
+    ? error.status === 408 || error.status === 429 || error.status >= 500
+    : (error instanceof DOMException || error instanceof Error) && ["TypeError", "AbortError", "TimeoutError"].includes(error.name);
 }
 
 export async function terminalRequest(path: string, options?: RequestInit): Promise<{ id?: string; cwd?: string; readOnly?: boolean }> {
   const response = await fetch(path, { ...options, signal: options?.signal ?? AbortSignal.timeout(15_000) });
-  const data = await response.json().catch(() => {
-    throw new Error(`Terminal request failed (HTTP ${response.status}): server returned an empty or invalid JSON response. Check the Que server log.`);
+  const data = await response.json().catch((error: unknown) => {
+    // The timeout covers the response body too; keep transport errors intact
+    // so startup can retry a lookup that stalled after receiving HTTP headers.
+    if (isRetryableTerminalRequestError(error)) throw error;
+    throw new TerminalRequestError(`Terminal request failed (HTTP ${response.status}): server returned an empty or invalid JSON response. Check the Que server log.`, response.status);
   });
-  if (!data || typeof data !== "object") throw new Error(`Terminal request failed (HTTP ${response.status}): invalid JSON response. Check the Que server log.`);
-  if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+  if (!data || typeof data !== "object") throw new TerminalRequestError(`Terminal request failed (HTTP ${response.status}): invalid JSON response. Check the Que server log.`, response.status);
+  if (!response.ok) throw new TerminalRequestError(data.error ?? `HTTP ${response.status}`, response.status);
   return data;
 }
 
 export function createTerminalWriter(id: string, onError: (error: Error) => void) {
   let pending = Promise.resolve();
   let stopped = false;
+  let failed = false;
   let lastSize: { cols: number; rows: number } | undefined;
   const replyRequests = new Set<AbortController>();
   let bufferedInput: { type: "input"; data: string; human: boolean } | null = null;
+  const fail = (error: Error) => {
+    if (failed) return;
+    failed = true;
+    stopped = true;
+    bufferedInput = null;
+    for (const request of replyRequests) request.abort();
+    onError(error);
+  };
   const enqueue = (body: Record<string, unknown> | FormData | (() => Promise<Record<string, unknown>>)) => {
     if (stopped) return;
     pending = pending.then(async () => {
+      // A clean stop drains accepted work. A failed delivery must discard its
+      // tail: later characters/Enter may otherwise execute a partial command.
+      if (failed) return;
       if (body === bufferedInput) bufferedInput = null;
       const payload = typeof body === "function" ? await body() : body;
+      if (failed) return; // A protocol reply can fail while an image is loading.
       // OSC color-query experiment: dump what is actually about to go over
       // the wire, after any keystroke coalescing, right before the POST.
       if (!(payload instanceof FormData) && payload.type === "input" && typeof payload.data === "string") {
@@ -40,8 +68,7 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
       });
     }).catch((error: Error) => {
       // Delivery is ambiguous after a network error. Never replay shell input.
-      stopped = true;
-      onError(error);
+      fail(error);
     });
   };
   return {
@@ -59,8 +86,7 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
       }).catch((error: Error) => {
         if (stopped || controller.signal.aborted) return;
-        stopped = true;
-        onError(error);
+        fail(error);
       }).finally(() => replyRequests.delete(controller));
     },
     write(data: string, human = false) {
@@ -99,6 +125,11 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
       for (const file of files) form.append("files", file, file.name);
       form.append("bracketed", String(bracketed));
       enqueue(form);
+    },
+    invalidateSize() {
+      // A different window can resize the shared PTY while this view is paused.
+      // Keep deduplication local to the current connection, not the writer's life.
+      lastSize = undefined;
     },
     resize(cols: number, rows: number) {
       if (lastSize?.cols === cols && lastSize.rows === rows) return;

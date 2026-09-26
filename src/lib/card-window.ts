@@ -1,6 +1,22 @@
 import { desktopBridge } from "./desktop";
 
 const CARD_ID = /^[a-zA-Z0-9-]{1,100}$/;
+const CARD_RETURN_EVENT = "que:card-return";
+
+// Send intent before releasing the lease: the main window can destroy the
+// detached WebView as soon as it observes release, before its next await resumes.
+export async function notifyCardReturn(cardId: string, cancel = false) {
+  if (!CARD_ID.test(cardId) || !isDesktopApp()) return;
+  const { emitTo } = await import("@tauri-apps/api/event");
+  await emitTo("main", CARD_RETURN_EVENT, { cardId, cancel });
+}
+
+export async function listenCardReturn(onReturn: (cardId: string, cancel: boolean) => void) {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  return getCurrentWindow().listen<{ cardId: string; cancel?: boolean }>(CARD_RETURN_EVENT, ({ payload }) => {
+    if (typeof payload?.cardId === "string" && CARD_ID.test(payload.cardId)) onReturn(payload.cardId, !!payload.cancel);
+  });
+}
 
 export function cardWindowLabel(cardId: string) {
   return `card-${cardId}`;

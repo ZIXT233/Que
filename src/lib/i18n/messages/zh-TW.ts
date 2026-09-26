@@ -76,6 +76,7 @@ export const zhTWLocale: LocalePlugin = {
     "harness.resume": "繼續會話",
     "harness.startProcess": "啟動程序",
     "harness.startAllProcesses": "啟動所有卡片程序",
+    "harness.batchHostUnavailable": "未啟動：該主機連線失敗。{detail}",
     "harness.reconnect": "重新連線",
     "harness.viewOutput": "不啟動，僅查看終端機記錄",
     "harness.backToConnection": "顯示啟動選項",

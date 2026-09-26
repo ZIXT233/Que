@@ -15,10 +15,11 @@ import { ErrorDialog } from "./ErrorDialog";
 import { saveAndOpenCardLog } from "@/lib/card-log";
 import type { QueueCard } from "@/lib/card-queue";
 
-export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostName, children, onAction, onStartAll, extensionHarnesses = [] }: {
+export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostName, children, onAction, onStartAll, startingAll = false, extensionHarnesses = [] }: {
   card: QueueCard; active: boolean; inQueue?: boolean; sshHost?: string; sshHostName?: string; children?: ReactNode;
   onAction: (action: string, data: Record<string, unknown>) => Promise<boolean>;
   onStartAll?: () => Promise<void>;
+  startingAll?: boolean;
   extensionHarnesses?: HarnessCatalogEntry[];
 }) {
   const { t } = useI18n();
@@ -182,17 +183,17 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
           {!ended && <p>{t("harness.reconnectHint")}</p>}
           {actionError ? <p role="alert">{harnessErrorText(actionError, t)}</p> : null}
           <div className="cq-terminal-recovery-actions">
-            <button type="button" className="cq-terminal-recovery-primary" disabled={busy} onClick={() => {
+            <button type="button" className="cq-terminal-recovery-primary" disabled={busy || startingAll} onClick={() => {
               if (ended) void act(harness.providerSessionId ? "harness_resume" : "harness_reopen", { tmux: harness.tmux ?? (Boolean(sshHost) && useTmux) });
               else { setTerminalStatus("connecting"); setConnection(key => key + 1); }
             }}>{busy ? t("harness.opening") : ended ? harness.providerSessionId ? t("harness.resume") : t("harness.startProcess") : t("harness.reconnect")}</button>
-            {ended && onStartAll && <button type="button" className="cq-terminal-recovery-all" disabled={busy} onClick={() => void (async () => {
+            {ended && onStartAll && <button type="button" className="cq-terminal-recovery-all" disabled={busy || startingAll} onClick={() => void (async () => {
               setBusy(true);
               setActionError(null);
               try { await onStartAll(); }
               catch (error) { setActionError(error); }
               finally { setBusy(false); }
-            })()}>{t("harness.startAllProcesses")}</button>}
+            })()}>{t(startingAll ? "harness.opening" : "harness.startAllProcesses")}</button>}
           </div>
         </div>
         <button type="button" className="cq-terminal-recovery-view" onClick={() => setShowTranscript(true)}>{t("harness.viewOutput")}</button>

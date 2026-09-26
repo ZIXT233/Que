@@ -76,6 +76,7 @@ export const zhCNLocale: LocalePlugin = {
     "harness.resume": "继续会话",
     "harness.startProcess": "启动进程",
     "harness.startAllProcesses": "启动所有卡片进程",
+    "harness.batchHostUnavailable": "未启动：该主机连接失败。{detail}",
     "harness.reconnect": "重新连接",
     "harness.viewOutput": "不启动，仅查看终端记录",
     "harness.backToConnection": "显示启动选项",

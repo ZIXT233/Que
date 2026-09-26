@@ -5,6 +5,7 @@ import { persistentStorage } from "../lib/persistent-storage.ts";
 import { cardTitle as harnessCardTitle } from "@/lib/harness/card-title";
 import { harnessName, setExtensionCatalog, type HarnessCatalogEntry } from "@/lib/harness/catalog";
 import { harnessErrorText } from "@/lib/harness/errors";
+import { createHarnessBatchStarter } from "@/lib/harness/start-all";
 import { ScoreChipTooltip } from "./ScoreChipTooltip";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -57,7 +58,7 @@ import { latestAssistantReply, queueArrivalSide } from "@/lib/queue-arrival";
 import { QueueArrivalPreview, type QueueArrivalNotice } from "./QueueArrivalPreview";
 import { ErrorDialog } from "./ErrorDialog";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
-import { cardWindowLabel, closeCurrentCardWindow, destroyCardWindow, focusMainWindow, isDesktopApp, setCurrentWindowTitle } from "@/lib/card-window";
+import { cardWindowLabel, closeCurrentCardWindow, destroyCardWindow, focusMainWindow, isDesktopApp, listenCardReturn, notifyCardReturn, setCurrentWindowTitle } from "@/lib/card-window";
 import { desktopBridge } from "@/lib/desktop";
 import { externalNoticeKey, externalNoticeTitle, externalWorkingNotices, newExternalNotices, startableHarnessCards, toExternalCard, type QueueCard, type QueueWorkspace } from "@/lib/card-queue";
 import type { RemoteHost } from "@/lib/remote-hosts";
@@ -550,6 +551,29 @@ function CardQueueShellContent() {
     setDeckReset(key => key + 1);
     return true;
   }, [queue, detachedId, ready, pendingDetach]);
+  const [returnedCardId, setReturnedCardId] = useState<string | null>(null);
+  useEffect(() => {
+    if (detachedId || !isDesktopApp()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listenCardReturn((id, cancel) => {
+      if (disposed) return;
+      setReturnedCardId(current => cancel ? (current === id ? null : current) : id);
+      if (!cancel) void refresh();
+    }).then(stop => { if (disposed) stop(); else unlisten = stop; }).catch(setError);
+    return () => { disposed = true; unlisten?.(); };
+  }, [detachedId, refresh, setError]);
+  useEffect(() => {
+    if (!returnedCardId) return;
+    const card = cards.find(item => item.id === returnedCardId);
+    // A return intent precedes release. Never use the notification focus path
+    // with a stale detached card: that path would reopen its independent window.
+    if (!card || card.detached || pendingDetach.has(card.id)) return;
+    if (focusNotificationCard(card.id)) {
+      setReturnedCardId(null);
+      void focusMainWindow().catch(setError);
+    }
+  }, [returnedCardId, cards, pendingDetach, focusNotificationCard, setError]);
   useEffect(() => {
     if (requestedAttentionId && resolvedAttention.current !== requestedAttentionId && focusNotificationCard(requestedAttentionId)) {
       resolvedAttention.current = requestedAttentionId;
@@ -678,19 +702,20 @@ function CardQueueShellContent() {
     catch (error) { setError(error); return null; }
   }, [act]);
   const startable = startableHarnessCards(cards);
+  const [startBatch] = useState(createHarnessBatchStarter);
+  const [startingAll, setStartingAll] = useState(false);
   const startAllHarnesses = useCallback(async () => {
-    const errors: string[] = [];
-    for (const card of startableHarnessCards(cards)) {
-      const harness = card.harness;
-      if (!harness) continue;
-      try {
-        await act(harness.providerSessionId ? "harness_resume" : "harness_reopen", { id: card.id });
-      } catch (error) {
-        errors.push(`${titleOf(card)}: ${harnessErrorText(error, t)}`);
-      }
+    setStartingAll(true);
+    try {
+      const failures = await startBatch({ getCards: () => cardsRef.current, workspaces: queue?.workspaces ?? [], launch: act });
+      if (failures.length) throw new Error(failures.map(({ card, error, skipped }) => {
+        const detail = harnessErrorText(error, t);
+        return `${titleOf(card)}: ${skipped ? t("harness.batchHostUnavailable", { detail }) : detail}`;
+      }).join("\n"));
+    } finally {
+      setStartingAll(false);
     }
-    if (errors.length) throw new Error(errors.join("\n"));
-  }, [act, cards, titleOf, t]);
+  }, [act, startBatch, queue?.workspaces, titleOf, t]);
   const chooseSortMode = useCallback(async (mode: "score" | "fifo") => {
     if (!queue || busy || queue.sortMode === mode) return;
     setBusy(true);
@@ -737,7 +762,14 @@ function CardQueueShellContent() {
         if (!alive) return;
         return getCurrentWindow().onCloseRequested(async (event) => {
           event.preventDefault();
-          try { await act("release", { id: detachedId, owner }); } catch { /* Window is going away either way. */ }
+          try {
+            await notifyCardReturn(detachedId);
+            await act("release", { id: detachedId, owner });
+          } catch (error) {
+            void notifyCardReturn(detachedId, true).catch(() => {});
+            setError(error);
+            return;
+          }
           void focusMainWindow();
           await closeCurrentCardWindow();
         });
@@ -870,7 +902,16 @@ function CardQueueShellContent() {
     setError(t(isDesktopApp() ? "queue.无法打开独立窗口" : "queue.浏览器拦截了新标签页，请允许本站打开弹出窗口。"));
   };
   const returnToQueue = async () => {
-    if (detachedId && claimOwner) await run("release", { id: detachedId, owner: claimOwner });
+    if (detachedId && claimOwner) {
+      try {
+        await notifyCardReturn(detachedId);
+        await act("release", { id: detachedId, owner: claimOwner });
+      } catch (error) {
+        void notifyCardReturn(detachedId, true).catch(() => {});
+        setError(error);
+        return;
+      }
+    }
     if (isDesktopApp()) {
       await focusMainWindow();
       try { await closeCurrentCardWindow(); return; } catch { /* Fall through if destroy is unavailable. */ }
@@ -934,7 +975,7 @@ function CardQueueShellContent() {
       </button> : null;
     const showHeaderMeta = visibleCard.phase !== "attention" || hasUrgentCall(visibleCard) || visibleCard.remindAt !== undefined || !(visibleCard.session || visibleCard.harness);
     const harness = (
-              <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} sshHost={workspace?.kind === "ssh" ? workspace.sshHost : undefined} sshHostName={remoteHost?.name ?? workspace?.sshHost} extensionHarnesses={extensionHarnesses} onStartAll={startable.length > 1 ? startAllHarnesses : undefined} onAction={async (action, data) => {
+              <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} sshHost={workspace?.kind === "ssh" ? workspace.sshHost : undefined} sshHostName={remoteHost?.name ?? workspace?.sshHost} extensionHarnesses={extensionHarnesses} startingAll={startingAll} onStartAll={startable.length > 1 || startingAll ? startAllHarnesses : undefined} onAction={async (action, data) => {
                 const result = await act(action, data);
                 if (result && action === "harness_start") {
                   setInspecting(null); setFocus({ id: visibleCard.id, index: 0 }); setDeckReset(key => key + 1);

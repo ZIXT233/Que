@@ -1,8 +1,8 @@
 /**
  * Launch-chain failure codes Que itself authors. Their messages live in the i18n files
  * (`harness.error.<CODE>`) and are translated at render time, so a locale change
- * re-renders them. Everything without one of these codes is raw terminal, SSH or io
- * text — the command's own words are the actual answer, and pass through untouched.
+ * re-renders them. Machine connection codes use the shared machine translations.
+ * Uncoded terminal, SSH or io text passes through untouched.
  * A `{detail}` placeholder in the message carries the variable part (the CLI name, the
  * version floor, the hook owner).
  */
@@ -17,6 +17,7 @@ export const HARNESS_ERROR_CODES = [
 ] as const as readonly string[];
 
 import type { TranslationParams } from "@/lib/i18n/types";
+import { MACHINE_ERROR_CODES, machineErrorText } from "../workspace-machine-errors";
 
 type Translate = (key: string, params?: TranslationParams) => string;
 
@@ -24,6 +25,7 @@ export function harnessErrorText(error: unknown, t: Translate): string {
   if (typeof error === "string") return error;
   if (!(error && typeof error === "object")) return "";
   const { code, message, detail } = error as { code?: string; message?: string; detail?: string };
+  if (code && MACHINE_ERROR_CODES.includes(code)) return machineErrorText(error, t);
   if (!code || !HARNESS_ERROR_CODES.includes(code)) return message ?? "";
   return t(`harness.error.${code}`, detail !== undefined ? { detail } : undefined);
 }

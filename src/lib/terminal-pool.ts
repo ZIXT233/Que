@@ -23,7 +23,7 @@ import { TerminalReplyPolicy, isTerminalProtocolReply } from "./terminal-replies
 import { enhancedTerminalKey, decodeTerminalClipboard } from "./terminal-enhancements";
 import { isFileDrag, droppedFiles, dropFilesError } from "./file-drop";
 import { copyText } from "./clipboard";
-import { createTerminalWriter, isTerminalAbortError, terminalRequest } from "./terminal-client";
+import { createTerminalWriter, isRetryableTerminalRequestError, isTerminalAbortError, terminalRequest, TerminalRequestError } from "./terminal-client";
 import { setXtermProbe } from "./terminal-probe";
 import { TerminalOutputQueue } from "./terminal-output-queue";
 import { TerminalPerformanceProbe } from "./terminal-performance";
@@ -108,8 +108,8 @@ export class TerminalSession {
   readonly startedAt = Date.now();
   readonly host: HTMLDivElement;
   readonly search: SearchAddon;
-  /** Resolves once the terminal exists on the server (or start failed). */
-  readonly started: Promise<void>;
+  /** The current startup attempt; close waits for it before deleting the PTY. */
+  started: Promise<void>;
 
   private params: TerminalSessionParams;
   private terminal: Terminal;
@@ -183,6 +183,8 @@ export class TerminalSession {
   private destroyed = false;
   private startReady = false;
   private startFailed = false;
+  private startPending = false;
+  private retryStart = false;
   private startupDismissTimer?: ReturnType<typeof setTimeout>;
 
   constructor(params: TerminalSessionParams) {
@@ -565,7 +567,8 @@ export class TerminalSession {
   // ---------------------------------------------------------------- input
 
   private sendFocusReport() {
-    if (!this.focusArmed || this.closing) return;
+    if (!this.focusArmed || this.destroyed || this.closing || this.exited || this.inputFailed
+      || !this.connected || this.replaying || this.readOnlyEffective()) return;
     const focused = this.view?.options.focusReporting === true && this.presented;
     if (focused === this.reportedFocus) return;
     if (!this.view?.options.focusReporting && this.reportedFocus !== true) return;
@@ -749,7 +752,7 @@ export class TerminalSession {
   // including a stale `after` cursor. Always rebuild the request with the
   // offset we actually hold so the server replays exactly what we missed.
   private scheduleReconnect() {
-    if (this.destroyed || this.exited || !this.live) return;
+    if (this.destroyed || this.exited || this.closing || this.inputFailed || !this.live) return;
     this.connected = false;
     this.syncStdin();
     this.events?.close();
@@ -810,8 +813,12 @@ export class TerminalSession {
   }
 
   private connect = () => {
-    if (this.destroyed || this.exited || !this.live || !this.startReady || !navigator.onLine) return;
+    if (this.destroyed || this.exited || this.closing || this.inputFailed || !this.live || !navigator.onLine) return;
     clearTimeout(this.reconnectTimer);
+    if (!this.startReady) {
+      if (this.retryStart && !this.startPending) this.started = this.start();
+      return;
+    }
     this.connected = false;
     this.syncStdin();
     this.events?.close();
@@ -883,7 +890,12 @@ export class TerminalSession {
       if (this.inputFailed) return;
       this.syncStdin();
       this.patch({ status: "ready" });
+      this.sendFocusReport();
       if (!this.hasOutput) this.patch({ startupStage: "waiting_output" });
+      // The detached window may have changed the PTY while we were paused.
+      // Our xterm can still have its old size, so onResize need not fire and
+      // the writer must not suppress the next fit's explicit size update.
+      this.writer.invalidateSize();
       this.fitAndResize();
       if (this.host.offsetWidth && this.host.offsetHeight) this.terminal.focus();
       this.publishProbe("ready");
@@ -903,22 +915,33 @@ export class TerminalSession {
 
   private async start() {
     const { id, cwd, sshHost, restored, cardId } = this.params;
+    this.startPending = true;
+    this.retryStart = false;
+    let checkingExisting = false;
     try {
       this.fitAndResize();
       if (restored || this.params.restarted) {
         // Restoring a tab must never silently launch a replacement shell for local processes,
         // but remote sessions (sshHost) with tmux should re-attach to their existing remote session.
         try {
+          checkingExisting = true;
           const info = await terminalRequest(`/api/terminal/${encodeURIComponent(id)}`);
+          checkingExisting = false;
           this.serverReadOnly ||= info.readOnly === true;
         } catch (error) {
-          if (sshHost) {
+          // Network failures do not prove the PTY is gone. In particular, do
+          // not let onUnavailable delete a running side terminal on a 5xx.
+          if (!(error instanceof TerminalRequestError) || error.status !== 404) throw error;
+          checkingExisting = false;
+          if (this.destroyed || this.closing) return;
+          if (sshHost && !this.readOnlyEffective()) {
             await terminalRequest("/api/terminal", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ id, cwd, cols: this.terminal.cols, rows: this.terminal.rows, sshHost, ...(cardId ? { cardId } : {}) }),
             });
           } else {
+            if (restored) this.currentSink()?.onUnavailable?.();
             throw error;
           }
         }
@@ -929,23 +952,28 @@ export class TerminalSession {
           body: JSON.stringify({ id, cwd, cols: this.terminal.cols, rows: this.terminal.rows, ...(sshHost ? { sshHost } : {}), ...(cardId ? { cardId } : {}) }),
         });
       }
-      if (!this.destroyed && !this.hasOutput) {
+      if (this.destroyed || this.closing) return;
+      this.startFailed = false;
+      this.patch({ error: null, status: this.live ? "connecting" : "paused" });
+      if (!this.hasOutput) {
         this.patch({ startupStage: "connecting" });
       }
       this.startReady = true;
       this.connect();
     } catch (reason) {
-      if (this.destroyed || isTerminalAbortError(reason)) return;
-      this.startFailed = true;
-      if (restored) {
-        this.currentSink()?.onUnavailable?.();
-        return;
-      }
+      if (this.destroyed || this.closing) return;
+      // Only retry the read-only existence check. A failed create may already
+      // have launched a process; never automatically repeat that mutation.
+      this.retryStart = checkingExisting && isRetryableTerminalRequestError(reason);
+      this.startFailed = !this.retryStart;
       const message = reason instanceof Error ? reason.message : String(reason);
       this.patch({ error: message, status: "error" });
       if (!this.hasOutput) {
         this.patch({ startupStage: "error", showStartup: true });
       }
+      if (this.retryStart) this.scheduleReconnect();
+    } finally {
+      this.startPending = false;
     }
   }
 

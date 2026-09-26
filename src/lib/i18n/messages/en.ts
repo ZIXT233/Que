@@ -76,6 +76,7 @@ export const enLocale: LocalePlugin = {
     "harness.resume": "Resume session",
     "harness.startProcess": "Start process",
     "harness.startAllProcesses": "Start all card processes",
+    "harness.batchHostUnavailable": "Not started because this host could not be connected. {detail}",
     "harness.reconnect": "Reconnect",
     "harness.viewOutput": "Don't start — just view the terminal output",
     "harness.backToConnection": "Show startup options",
