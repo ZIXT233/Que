@@ -17,9 +17,9 @@
 
 <h3 align="center"><a href="https://github.com/ZIXT233/Que/releases/latest">下载 Que</a></h3>
 
-Que 通过统一的待处理 Agent 会话队列调度你的注意力，让你只需处理队首，而不用追着通知小红点跑。
+Que 通过统一的 Agent 会话队列安排你的注意力，让你只需处理排在最前面的会话，不必再想着哪些 Agent 还在等你回复。
 
-Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方处理多个 Harness 工作流。
+Que 既支持在终端卡片中直接使用主流 CLI Agent，也支持把其他地方运行的会话作为通知卡片接入。两类卡片会汇入同一个队列，让你挨个处理。
 
 ## 功能
 
@@ -95,3 +95,7 @@ npm run tauri build
 ## 协议
 
 [MIT](LICENSE)。第三方组件保留各自的协议与版权声明。
+
+## 友情链接
+
+[LINUX DO](https://linux.do)

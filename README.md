@@ -17,9 +17,9 @@
 
 <h3 align="center"><a href="https://github.com/ZIXT233/Que/releases/latest">Download Que</a></h3>
 
-Que schedules your attention with a unified queue of waiting Agent sessions, so you can just handle the one at the front instead of chasing notification badges.
+Que schedules your attention with a unified queue of agent sessions, so you can just handle the one at the front without wondering which agents are still waiting for your reply.
 
-Que supports mainstream CLI harnesses through terminal cards, so you can handle multiple harness workflows in one place.
+Que lets you work directly with mainstream CLI agents in terminal cards, or receive notifications from sessions running elsewhere in notification cards. Que puts both kinds of cards in the same queue so you can handle them one by one.
 
 ## Features
 
@@ -95,3 +95,7 @@ App data lives in `~/.que`. See the [harness hook contract](docs/harness/hook-ap
 ## License
 
 [MIT](LICENSE). Third-party components retain their own licenses and notices.
+
+## Friends
+
+[LINUX DO](https://linux.do)
