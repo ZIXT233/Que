@@ -11,12 +11,13 @@ import { ATTENTION_MODES } from "@/lib/attention-mode";
 import { SUBMISSION_BEHAVIORS } from "@/lib/submission-behavior";
 import { announceQueueToast } from "@/lib/queue-toast";
 import { THEME_OPTIONS } from "@/lib/theme";
+import { SpeechSettings } from "./SpeechSettings";
+import "./chat/speech.css";
 import { McpSettings } from "./McpSettings";
 import { TerminalSettings } from "./TerminalSettings";
 import { ThemeIcon } from "./ThemeIcon";
 import { setLastSettingsSection, SETTINGS_SECTION_VALUES, type SettingsSection } from "@/lib/settings-navigation";
 import { RemoteHostsSettings } from "./RemoteHostsSettings";
-import { ExternalSessionsSettings } from "./ExternalSessionsSettings";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 import { saveAndOpenAppLog } from "@/lib/card-log";
 import { invoke } from "@tauri-apps/api/core";
@@ -50,17 +51,9 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
     className: "settings-section-icon",
   };
   if (section === "remote-hosts") return <svg {...common}><rect x="4" y="3" width="16" height="7" rx="2" /><rect x="4" y="14" width="16" height="7" rx="2" /><path d="M8 6h.01M8 17h.01M12 6h5M12 17h5" /></svg>;
+  if (section === "speech") return <svg {...common}><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M6 11v1a6 6 0 0 0 12 0v-1m-6 7v3" /></svg>;
   if (section === "terminal") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></svg>;
   if (section === "about") return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>;
-  if (section === "external-sessions") {
-    return (
-      <svg {...common}>
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-        <polyline points="15 3 21 3 21 9" />
-        <line x1="10" y1="14" x2="21" y2="3" />
-      </svg>
-    );
-  }
   return <svg {...common}><path d="M20 7h-9M14 17H5" /><circle cx="7" cy="7" r="3" /><circle cx="17" cy="17" r="3" /></svg>;
 }
 
@@ -250,9 +243,9 @@ export function SettingsPanel({ initialSection, onClose, appUpdate }: Props) {
   const [mountedSections, setMountedSections] = useState<ReadonlySet<SettingsSection>>(() => new Set([section]));
   const sections: { id: SettingsSection; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "speech", label: t("speech.title") },
     { id: "terminal", label: t("settings.terminal") },
     { id: "remote-hosts", label: t("machines.settings") },
-    { id: "external-sessions", label: t("settings.externalSessions") },
     { id: "about", label: t("settings.about") },
   ];
 
@@ -303,8 +296,8 @@ export function SettingsPanel({ initialSection, onClose, appUpdate }: Props) {
         </div>
         <main className="settings-dialog-main">
           {sectionHost("remote-hosts", <RemoteHostsSettings />)}
-          {sectionHost("external-sessions", <ExternalSessionsSettings />)}
           {sectionHost("general", <GeneralSettings />)}
+          {sectionHost("speech", <div className="settings-general"><h2 className="settings-general-title">{t("speech.title")}</h2><SpeechSettings /></div>)}
           {sectionHost("terminal", <TerminalSettings />)}
           {sectionHost("about", <AboutSettings update={appUpdate} />)}
         </main>

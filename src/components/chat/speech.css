@@ -1,0 +1,23 @@
+.fc-speech-input { display:flex; align-items:center; gap:4px; }
+.fc-microphone[data-recording="true"] { color:var(--cq-accent); background:var(--cq-surface); }
+.fc-speech-state { font-size:11px; color:var(--cq-muted); font-variant-numeric:tabular-nums; }
+.fc-speech-error { position:absolute; bottom:calc(100% + 8px); left:0; right:0; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 14px; border:1px solid var(--cq-line); border-radius:12px; background:var(--cq-paper); color:var(--cq-ink); font-size:12px; box-shadow:0 4px 16px #0001; }
+.fc-speech-settings { padding:4px 12px 12px; font-size:12px; }
+.fc-speech-settings p { color:var(--cq-muted,var(--text-secondary)); line-height:1.6; margin:4px 0 12px; }
+.fc-speech-settings label { display:grid; gap:6px; }
+.fc-speech-languages { display:flex; gap:4px; margin:12px 0; }
+.fc-speech-languages button { flex:1; border:1px solid var(--cq-line,var(--border)); padding:6px 8px; border-radius:8px; background:transparent; color:inherit; cursor:pointer; }
+.fc-speech-languages button[aria-pressed="true"] { color:var(--cq-accent,var(--accent)); background:var(--cq-surface,var(--bg)); }
+.fc-speech-settings-actions { display:flex; gap:8px; margin-bottom:8px; }
+
+.fc-toolbar[data-dictating="true"] .fc-toolbar-left,
+.fc-toolbar[data-dictating="true"] .fc-toolbar-right > :not(.fc-speech-input):not(.fc-send) { display:none; }
+.fc-toolbar[data-dictating="true"] .fc-toolbar-right { width:100%; flex:1; min-width:0; }
+.fc-toolbar[data-dictating="true"] .fc-speech-input { flex:1; min-width:0; gap:12px; }
+.fc-speech-waveform { display:flex; flex:1; min-width:0; height:32px; align-items:center; justify-content:flex-end; gap:4px; overflow:hidden; }
+.fc-speech-waveform i { display:block; flex:1 0 3px; transition:height 180ms linear, opacity 180ms linear; }
+.fc-speech-waveform i::after { content:""; display:block; width:3px; height:100%; margin:auto; border-radius:4px; background:var(--cq-muted); }
+.fc-speech-waveform .fc-speech-state { margin:auto; }
+.fc-speech-input:not([data-phase="idle"]) > .fc-icon-button { flex:none; border-radius:50%; background:var(--cq-surface); }
+
+@media(prefers-reduced-motion:reduce) { .fc-speech-waveform i { transition:none; } }

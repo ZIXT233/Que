@@ -797,7 +797,7 @@ fn classify(error: &russh::Error, trust: &Arc<Mutex<Trust>>) -> AppError {
         | russh::Error::InactivityTimeout => "TIMEOUT",
         _ => code_from_text(&error.to_string()),
     };
-    AppError::machine(code)
+    AppError::machine_detail(code, error.to_string())
 }
 
 /// `client::connect` reports name resolution failures as an opaque
@@ -1095,6 +1095,19 @@ pub async fn exec_target(target: &Target, command: &str, stdin: &[u8]) -> AppRes
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn connection_failure_keeps_handshake_reason() {
+        let error = classify(&russh::Error::Version, &Arc::new(Mutex::new(Trust::default())));
+        match error {
+            AppError::Machine { code, detail, prompt } => {
+                assert_eq!(code, "CONNECTION_FAILED");
+                assert_eq!(detail.as_deref(), Some("invalid SSH version string"));
+                assert!(prompt.is_none());
+            }
+            _ => panic!("expected a classified machine error"),
+        }
+    }
+
     use russh::server::{
         Auth, ChannelOpenHandle, Msg as ServerMsg, Server as _, Session as ServerSession,
     };
@@ -1569,4 +1582,34 @@ mod tests {
         ));
         assert!(matches!(exec_error(b"", 3), AppError::Message(_)));
     }
+}
+
+/// A non-PTY duplex channel for structured ACP host traffic. Reuses the same
+/// authenticated connection and host-trust flow as the workspace picker.
+pub async fn acp_channel(host: &str, command: &str, mut input: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>, output: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> AppResult<()> {
+    let session = session_with(host, None, None).await?;
+    let channel = session.handle.lock().await.channel_open_session().await.map_err(|e| AppError::msg(e.to_string()))?;
+    let (mut reader, writer) = channel.split();
+    writer.exec(true, command).await.map_err(|e| AppError::msg(e.to_string()))?;
+    let mut stderr=Vec::new();
+    loop {
+        tokio::select! {
+            data = input.recv() => match data {
+                Some(data) => writer.data_bytes(data).await.map_err(|e| AppError::msg(e.to_string()))?,
+                None => break,
+            },
+            message = reader.wait() => match message {
+                Some(ChannelMsg::Data { data }) => { if output.send(data.to_vec()).is_err() { break; } },
+                Some(ChannelMsg::ExtendedData { data, .. }) => {
+                    stderr.extend_from_slice(&data);
+                    if stderr.len()>8192 {stderr.drain(..stderr.len()-8192);}
+                },
+                Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                _ => {},
+            }
+        }
+    }
+    let _ = writer.close().await;
+    if !stderr.is_empty() {return Err(AppError::msg(String::from_utf8_lossy(&stderr).into_owned()));}
+    Ok(())
 }

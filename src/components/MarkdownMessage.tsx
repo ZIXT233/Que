@@ -462,7 +462,7 @@ export function MarkdownMessage({
   const blocks = useMemo(() => parseBlocks(content), [content]);
 
   return (
-    <div className={`markdown-content-root ${role ? `markdown-${role}-message` : ""}`}>
+    <div className={`markdown-body markdown-content-root ${role ? `markdown-${role}-message` : ""}`}>
       {blocks.map((block, idx) => {
         switch (block.type) {
           case "code":

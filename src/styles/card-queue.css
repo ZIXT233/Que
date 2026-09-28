@@ -2119,3 +2119,11 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-mcp-approval button:focus-visible { outline: 2px solid var(--cq-ink); outline-offset: 2px; }
 .cq-mcp-all-cards { display:flex; align-items:flex-start; gap:8px; margin:18px 0; font-size:14px; line-height:1.5; cursor:pointer; }
 .cq-mcp-all-cards input { margin-top:3px; accent-color:var(--cq-ink); }
+
+/* Butler reuses the deck card and its controls. */
+.cq-butler-launch{position:absolute;left:20px;bottom:20px;z-index:24;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:#f5e3aa;color:#70551a;border:1px solid #ddc784;box-shadow:0 4px 16px #6a50151c;cursor:pointer;transition:transform .15s,box-shadow .15s}
+.cq-butler-launch:hover{transform:translateY(-2px);box-shadow:0 6px 20px #6a50152a}
+.cq-butler-launch:focus-visible{outline:2px solid #a27b24;outline-offset:3px}
+.cq-butler-launch:disabled{opacity:.5;cursor:wait}
+.cq-large-card[data-butler="true"] .cq-card-header{background:linear-gradient(110deg,#fbf0cc,#efda96);border-bottom-color:#dbc47f;color:#604d21}
+.cq-large-card[data-butler="true"] .cq-card-header h2{color:#604d21}

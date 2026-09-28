@@ -1,6 +1,6 @@
 use crate::cwd::{browse, pick_local_folder};
 use crate::error::{AppError, AppResult};
-use crate::harness::{ExternalRuntime, HarnessRuntime};
+use crate::acp::AcpRuntime;
 use crate::hosts::HostStore;
 use crate::live::LiveBus;
 use crate::models::{CardQueue, RemoteHost};
@@ -40,10 +40,9 @@ use uuid::Uuid;
 pub struct AppState {
     pub queue: Arc<QueueStore>,
     pub terminals: TerminalHub,
-    pub harness: HarnessRuntime,
+    pub harness: AcpRuntime,
     /// Attention notices from sessions Que did not launch. Read-only overlay data:
     /// never part of the queue store, never persisted.
-    pub external: ExternalRuntime,
     pub hosts: Arc<HostStore>,
     pub settings: Arc<SettingsStore>,
     pub live: LiveBus,
@@ -60,6 +59,11 @@ pub fn router(state: AppState) -> Router {
             "/api/mcp/tools",
             post(crate::mcp::tools).layer(DefaultBodyLimit::max(64 * 1024)),
         )
+        .route("/api/acp/{id}", get(acp_read).post(acp_action))
+        .route("/api/speech/settings", get(crate::speech::settings).put(crate::speech::save_settings))
+        .route("/api/speech/transcribe", post(crate::speech::transcribe).layer(DefaultBodyLimit::max(10_100_000)))
+        .route("/api/acp-catalog", get(acp_catalog))
+        .route("/api/acp-history", get(acp_history).post(acp_history_open))
         .route("/api/card-queue", get(get_queue).post(post_queue))
         .route("/api/card-queue/bootstrap", get(bootstrap_queue))
         .route("/api/card-queue/events", get(queue_events))
@@ -68,6 +72,7 @@ pub fn router(state: AppState) -> Router {
             get(list_machines).post(machine_action),
         )
         .route("/api/cwd/browse", get(browse_cwd))
+        .route("/api/preferences", get(crate::mcp_settings::get_preferences).put(crate::mcp_settings::put_preferences))
         .route("/api/tools/settings", get(get_tools).put(put_tools))
         .route("/api/logs", get(get_logs).post(post_log))
         .route(
@@ -136,15 +141,26 @@ async fn get_queue(State(state): State<AppState>) -> AppResult<impl IntoResponse
     Ok(Json(with_cwd(queue, &state)))
 }
 
-async fn post_queue(
+pub(crate) async fn post_queue(
     State(state): State<AppState>,
     Json(mut body): Json<Value>,
-) -> AppResult<impl IntoResponse> {
+) -> AppResult<Json<Value>> {
     let action = body
         .get("action")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
+    if action == "butler_open" {
+        crate::butler::install()?;
+        state.queue.with_queue(false, |q| crate::butler::ensure(q)).await?;
+        let queue=state.queue.read_snapshot()?;
+        let card=queue.cards.iter().find(|c|c.id==crate::butler::CARD_ID).unwrap();
+        if !state.harness.is_live(crate::butler::CARD_ID) {
+            let action=if card.harness.is_some() {"harness_resume"} else {"harness_start"};
+            return launch_harness(&state,&json!({"id":crate::butler::CARD_ID,"kind":"codex"}),action).await.map(|q|Json(with_cwd(q,&state)));
+        }
+        return Ok(Json(with_cwd(queue,&state)));
+    }
     if action == "workspace_rc_verify" {
         let queue = state.queue.read_snapshot()?;
         let mut workspace = if let Some(key) = body["machineKey"].as_str() {
@@ -172,27 +188,7 @@ async fn post_queue(
         )?;
         return Ok(Json(crate::workspace_rc::verify(&workspace).await?));
     }
-    // External notices live outside the queue: dismissing one never touches queue.json.
-    // The re-read below returns the full snapshot so the notice list arrives without it.
-    if action == "dismiss_external" {
-        let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-        state.external.dismiss(id);
-    } else if action == "external_priority_weight" {
-        let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-        let weight = numeric_weight(body.get("weight").unwrap_or(&json!(0)));
-        if !state.external.set_priority_weight(id, weight) {
-            return Err(AppError::msg("外部通知不存在"));
-        }
-    } else if action == "snooze_external" {
-        let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-        let minutes = body.get("minutes").and_then(|v| v.as_i64()).unwrap_or(0);
-        if minutes <= 0 || minutes > 24 * 60 {
-            return Err(AppError::msg("无效的提醒间隔"));
-        }
-        if !state.external.snooze(id, now_ms() + minutes * 60_000) {
-            return Err(AppError::msg("外部通知无法进入稍后提醒"));
-        }
-    } else if matches!(
+    if matches!(
         action.as_str(),
         "harness_start" | "harness_reopen" | "harness_restart" | "harness_resume"
     ) {
@@ -200,7 +196,49 @@ async fn post_queue(
             .await
             .map(|queue| Json(with_cwd(queue, &state)));
     }
-    if action == "workspace_create" && body.get("kind").and_then(|v| v.as_str()) == Some("ssh") {
+    // Archive and startup share admission so a background reconnect cannot
+    // slip between closing the agent and committing the archived card.
+    let _lifecycle_guard = if matches!(action.as_str(), "archive" | "harness_close" | "remove") {
+        body["id"].as_str().map(|id| try_acquire_launch(&state, id)).transpose()?
+    } else { None };
+    if matches!(action.as_str(), "archive" | "harness_close" | "remove") {
+        if let Some(id) = body["id"].as_str() {
+            let queue = state.queue.read_snapshot()?;
+            if let Some(card) = queue.cards.iter().find(|c| c.id == id && c.harness.is_some()) {
+                if card.detached.is_some() { return Err(AppError::msg("请先收回卡片")); }
+                let ws = acp_workspace(&state, id).await?;
+                let current = state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":id})).await?;
+                if current["turns"].as_array().is_some_and(|turns| turns.iter().any(|t| matches!(t["state"].as_str(), Some("running" | "queued" | "cancelling")))) {
+                    return Err(AppError::msg("请先停止或等待当前消息结束"));
+                }
+                if current["state"] != "not_running" { state.harness.request(&ws, &state.bin_dir, json!({"action":"close","id":id})).await?; }
+            }
+        }
+    }
+    if action == "workspace_create" { normalize_workspace_create(&mut body).await?; }
+    // dismiss_external already did its work above and has no queue-side action; every
+    // other action goes through apply_action. Both share this one read+response path.
+    let external_action = matches!(
+        action.as_str(),
+        "dismiss_external" | "external_priority_weight" | "snooze_external"
+    );
+    let queue = state
+        .queue
+        .with_queue(false, |queue| {
+            refresh_queue(queue, &state);
+            if external_action {
+                return Ok(queue.clone());
+            }
+            apply_action(queue, &body, &action, &state)?;
+            refresh_queue(queue, &state);
+            Ok(queue.clone())
+        })
+        .await?;
+    Ok(Json(with_cwd(queue, &state)))
+}
+
+pub(crate) async fn normalize_workspace_create(body: &mut Value) -> AppResult<()> {
+    if body.get("kind").and_then(|v| v.as_str()) == Some("ssh") {
         let host = body
             .get("sshHost")
             .and_then(|v| v.as_str())
@@ -250,28 +288,85 @@ async fn post_queue(
             }
         }
     }
-    // dismiss_external already did its work above and has no queue-side action; every
-    // other action goes through apply_action. Both share this one read+response path.
-    let external_action = matches!(
-        action.as_str(),
-        "dismiss_external" | "external_priority_weight" | "snooze_external"
-    );
-    let queue = state
-        .queue
-        .with_queue(false, |queue| {
-            refresh_queue(queue, &state);
-            if external_action {
-                return Ok(queue.clone());
-            }
-            apply_action(queue, &body, &action, &state)?;
-            refresh_queue(queue, &state);
-            Ok(queue.clone())
-        })
-        .await?;
-    Ok(Json(with_cwd(queue, &state)))
+    Ok(())
 }
 
-struct LaunchGuard {
+pub(crate) async fn acp_workspace(state: &AppState, id: &str) -> AppResult<crate::models::QueueWorkspace> {
+    let queue = state.queue.read_snapshot()?;
+    let card = queue.cards.iter().find(|c| c.id == id).ok_or_else(|| AppError::msg("卡片不存在"))?;
+    let ws = queue.workspaces.as_ref().and_then(|ws| ws.iter().find(|w| Some(&w.id) == card.workspace_id.as_ref())).ok_or_else(|| AppError::msg("工作区不存在"))?;
+    Ok(crate::workspace_rc::effective_workspace(&queue, ws))
+}
+async fn acp_catalog(State(state): State<AppState>, Query(query): Query<std::collections::HashMap<String,String>>) -> AppResult<Json<Value>> {
+    let ws = if let Some(id) = query.get("workspace") { history_workspace(&state, id)? } else if let Some(id) = query.get("card") {
+        acp_workspace(&state, id).await?
+    } else { history_local_machine(&state)? };
+    Ok(Json(state.harness.request(&ws, &state.bin_dir, json!({"action":"catalog"})).await?))
+}
+fn history_workspace(state: &AppState, id: &str) -> AppResult<crate::models::QueueWorkspace> {
+    let queue=state.queue.read_snapshot()?;
+    let workspace=queue.workspaces.as_ref().and_then(|items| items.iter().find(|w|w.id==id)).ok_or_else(||AppError::msg("工作区不存在"))?;
+    Ok(crate::workspace_rc::effective_workspace(&queue,workspace))
+}
+fn history_local_machine(state: &AppState) -> AppResult<crate::models::QueueWorkspace> {
+    let queue=state.queue.read_snapshot()?;
+    let cwd=state.default_cwd.to_string_lossy().into_owned();
+    let ws=crate::models::QueueWorkspace { id:String::new(),name:String::new(),kind:"local".into(),cwd:cwd.clone(),runtime_cwd:cwd,ssh_host:None,terminal_rc:None,session_env:Default::default(),default_conversation_weight:None };
+    Ok(crate::workspace_rc::effective_workspace(&queue,&ws))
+}
+async fn acp_history(State(state): State<AppState>, Query(query): Query<std::collections::HashMap<String,String>>) -> AppResult<Json<Value>> {
+    let ws=if let Some(id)=query.get("workspace") {history_workspace(&state,id)?} else if query.contains_key("agent") {history_local_machine(&state)?} else {return Err(AppError::msg("请选择工作区"));};
+    let mut entries=state.harness.request(&ws,&state.bin_dir,json!({"action":if query.contains_key("agent") {"history_native"} else {"history"},"cwd":ws.cwd,"agent":query.get("agent"),"allWorkspaces":!query.contains_key("workspace"),"cursor":query.get("cursor"),"env":ws.session_env})).await?;
+    let queue=state.queue.read_snapshot()?;
+    let items = if entries.is_array() { entries.as_array_mut() } else { entries.get_mut("sessions").and_then(Value::as_array_mut) };
+    if let Some(items)=items {
+        items.retain(|entry| !queue.cards.iter().any(|card| card.archived_at.is_none() && card.harness.is_some() && entry["cardId"].as_str()==Some(card.id.as_str())));
+    }
+    Ok(Json(entries))
+}
+async fn acp_history_open(State(state): State<AppState>, Json(body): Json<Value>) -> AppResult<Json<Value>> {
+    let ws=if let Some(id)=body["workspaceId"].as_str() {history_workspace(&state,id)?} else {
+        let cwd=body["cwd"].as_str().filter(|p|std::path::Path::new(p).is_absolute()).ok_or_else(||AppError::msg("会话没有有效的工作目录"))?;
+        let name=std::path::Path::new(cwd).file_name().and_then(|n|n.to_str()).unwrap_or(cwd);
+        state.queue.with_queue(false,|queue| {
+            apply_action(queue,&json!({"action":"workspace_create","kind":"local","cwd":cwd,"name":name,"createCard":false}),"workspace_create",&state)?;
+            Ok(())
+        }).await?;
+        let queue=state.queue.read_snapshot()?;
+        let ws=queue.workspaces.as_ref().and_then(|ws|ws.iter().find(|w|w.kind=="local"&&w.cwd==cwd)).ok_or_else(||AppError::msg("工作区关联失败"))?;
+        crate::workspace_rc::effective_workspace(&queue,ws)
+    };
+    let snapshot=state.harness.request(&ws,&state.bin_dir,json!({"action":"attach","id":uuid::Uuid::new_v4().to_string(),"recordId":body["recordId"],"nativeSessionId":body["nativeSessionId"],"agent":body["agent"],"title":body["title"],"env":ws.session_env,"cwd":ws.cwd})).await?;
+    let id=snapshot["id"].as_str().ok_or_else(||AppError::msg("会话关联失败"))?.to_string();
+    state.queue.with_queue(false,|queue| {
+        if !queue.cards.iter().any(|c|c.id==id) {
+            let card:crate::models::QueueCard=serde_json::from_value(json!({"id":id,"cwd":ws.runtime_cwd,"workspaceId":ws.id,"phase":"attention","createdAt":crate::queue::now_ms(),"archivedAt":crate::queue::now_ms(),"session":null,"harness":{"kind":snapshot["agent"],"terminalId":id,"state":"not_running","remote":ws.kind=="ssh"}}))?;
+            queue.cards.push(card);
+        }
+        Ok(())
+    }).await?;
+    let queue=state.queue.read_snapshot()?;
+    let card=queue.cards.iter().find(|card|card.id==id).ok_or_else(||AppError::msg("卡片不存在"))?;
+    if card.archived_at.is_some() || !state.harness.is_live(&id) {
+        launch_harness(&state,&json!({"id":id}),"harness_resume").await?;
+    }
+    Ok(Json(json!({"cardId":id})))
+}
+async fn acp_read(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
+    let ws = acp_workspace(&state, &id).await?;
+    Ok(Json(state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":id})).await?))
+}
+async fn acp_action(State(state): State<AppState>, Path(id): Path<String>, Json(mut body): Json<Value>) -> AppResult<Json<Value>> {
+    let queue = state.queue.read_snapshot()?;
+    let card = queue.cards.iter().find(|c| c.id == id).ok_or_else(|| AppError::msg("卡片不存在"))?;
+    if card.archived_at.is_some() { return Err(AppError::msg("请先恢复卡片")); }
+    let ws = acp_workspace(&state, &id).await?;
+    if let Some(object)=body.as_object_mut() { object.remove("sender"); }
+    body["id"] = json!(id); body["env"] = json!(ws.session_env);
+    Ok(Json(state.harness.request(&ws, &state.bin_dir, body).await?))
+}
+
+pub(crate) struct LaunchGuard {
     launches: Arc<Mutex<HashSet<String>>>,
     id: String,
 }
@@ -282,7 +377,7 @@ impl Drop for LaunchGuard {
     }
 }
 
-fn try_acquire_launch(state: &AppState, id: &str) -> AppResult<LaunchGuard> {
+pub(crate) fn try_acquire_launch(state: &AppState, id: &str) -> AppResult<LaunchGuard> {
     let mut launches = state.launches.lock();
     if !launches.insert(id.to_string()) {
         return Err(AppError::machine("HARNESS_LAUNCH_IN_PROGRESS"));
@@ -582,7 +677,7 @@ fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCar
     );
 }
 
-fn apply_action(
+pub(crate) fn apply_action(
     queue: &mut CardQueue,
     body: &Value,
     action: &str,
@@ -1220,7 +1315,7 @@ struct SaveHostInput {
     port: Option<u16>,
 }
 
-async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value> {
+pub(crate) async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value> {
     let action = body
         .get("action")
         .and_then(|v| v.as_str())
@@ -1430,37 +1525,6 @@ async fn put_tools(
     State(state): State<AppState>,
     Json(body): Json<Value>,
 ) -> AppResult<impl IntoResponse> {
-    if let Some(enabled) = body.get("externalNotices").and_then(|v| v.as_bool()) {
-        let settings = state.settings.set_external_notices(enabled).await?;
-        // The toggle's other half: disabled kinds get their Que entries stripped
-        // from the CLIs' own configs; enabled ones are (re)installed.
-        let errors = crate::harness::sync_external_hooks(
-            &state.bin_dir,
-            &crate::paths::plugins_dir(),
-            &settings,
-        );
-        let mut response = tools_json(&settings);
-        response["extensionErrors"] = json!(errors);
-        return Ok(Json(response));
-    }
-    if let Some(harness) = body.get("externalHarness").and_then(|v| v.as_str()) {
-        let enabled = body
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-        let settings = state
-            .settings
-            .set_external_ingress(harness, enabled)
-            .await?;
-        let errors = crate::harness::sync_external_hooks(
-            &state.bin_dir,
-            &crate::paths::plugins_dir(),
-            &settings,
-        );
-        let mut response = tools_json(&settings);
-        response["extensionErrors"] = json!(errors);
-        return Ok(Json(response));
-    }
     if let Some(enabled) = body.get("debugLogging").and_then(|v| v.as_bool()) {
         let settings = state.settings.set_debug_logging(enabled).await?;
         return Ok(Json(tools_json(&settings)));
@@ -1477,25 +1541,8 @@ async fn harness_debug(State(state): State<AppState>, Path(id): Path<String>) ->
     Json(state.harness.debug_snapshot(&id, &state.terminals)).into_response()
 }
 
-async fn extension_harnesses() -> impl IntoResponse {
-    Json(json!({
-        "harnesses": crate::harness::extension_harnesses(),
-        "errors": crate::harness::extension_errors(),
-    }))
-}
-
-async fn reload_extensions(State(state): State<AppState>) -> impl IntoResponse {
-    let mut errors = crate::harness::refresh_extensions(&state.bin_dir);
-    if let Ok(settings) = state.settings.read() {
-        errors.extend(crate::harness::sync_external_hooks(
-            &state.bin_dir,
-            &crate::paths::plugins_dir(),
-            &settings,
-        ));
-    }
-    state.live.notify("queue");
-    Json(json!({ "harnesses": crate::harness::extension_harnesses(), "errors": errors }))
-}
+async fn extension_harnesses() -> impl IntoResponse { Json(json!({ "harnesses": [], "errors": [] })) }
+async fn reload_extensions() -> impl IntoResponse { extension_harnesses().await }
 
 #[derive(Deserialize)]
 struct LogsQuery {
@@ -1761,51 +1808,6 @@ async fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<Stri
     let id = body.get("id").and_then(|v| v.as_str()).map(str::to_string);
     let target = terminal_target(cwd, terminal_ssh_host(body)?)?;
     let queue = state.queue.read_snapshot()?;
-    let rc_workspace = body["cardId"]
-        .as_str()
-        .and_then(|cid| queue.cards.iter().find(|c| c.id == cid))
-        .and_then(|card| {
-            queue
-                .workspaces
-                .as_ref()?
-                .iter()
-                .find(|w| Some(&w.id) == card.workspace_id.as_ref())
-        })
-        .map(|workspace| crate::workspace_rc::effective_workspace(&queue, workspace))
-        .filter(|w| {
-            (crate::workspace_rc::script(w).is_some() || !w.session_env.is_empty())
-                && w.cwd == cwd
-                && w.ssh_host.as_deref() == body["sshHost"].as_str()
-        });
-    if let Some(workspace) = rc_workspace.as_ref() {
-        let tid = id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
-        if state.terminals.is_live(&tid) {
-            return Ok(tid);
-        }
-        let cid = body["cardId"].as_str().unwrap();
-        let tmux = queue
-            .cards
-            .iter()
-            .find(|c| c.id == cid)
-            .and_then(|c| c.harness.as_ref())
-            .and_then(|h| h.tmux)
-            .unwrap_or(true);
-        let shell = crate::harness::prepare_shell(
-            workspace,
-            &format!("{cid}_side_{tid}"),
-            &crate::paths::signal_dir(&tid),
-            &state.bin_dir,
-            state.settings.read()?.powershell_enabled,
-            tmux,
-        )
-        .await?;
-        let created =
-            state
-                .terminals
-                .create(cwd.into(), cols, rows, Some(tid), shell.spawn, false, None)?;
-        crate::debuglog::bind_term(&created, cid);
-        return Ok(created);
-    }
     let created = match target {
         TerminalTarget::Local(cwd) => {
             state
@@ -2240,7 +2242,7 @@ fn with_cwd(queue: CardQueue, state: &AppState) -> Value {
         obj.insert("defaultCwd".into(), json!(state.default_cwd));
         // External sessions ride along in the snapshot so the deck can show them
         // without the queue store ever learning they exist.
-        obj.insert("external".into(), json!(state.external.notices()));
+        obj.insert("external".into(), json!([]));
     }
     value
 }
@@ -2250,6 +2252,7 @@ pub async fn start_server(state: AppState) -> AppResult<u16> {
     let port = listener.local_addr()?.port();
     crate::mcp::migrate_legacy_cards(&state).await?;
     crate::mcp::publish(&state, port)?;
+    crate::acp_supervisor::start(state.clone());
     let app = router(state);
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -2265,14 +2268,10 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
     // straight onto the PTY probe (see `TerminalHub::record_first_hook`).
     let terminals = TerminalHub::new(live.clone());
     let bin_dir = resolve_bin_dir(resource_dir);
-    for error in crate::harness::refresh_extensions(&bin_dir) {
-        crate::debuglog::log(&format!("extension: {error}"));
-    }
     AppState {
         queue: Arc::new(QueueStore::new(live.clone())),
         terminals: terminals.clone(),
-        harness: HarnessRuntime::new(live.clone(), terminals),
-        external: ExternalRuntime::new(live.clone(), settings.clone()),
+        harness: AcpRuntime::new(live.clone()),
         hosts: Arc::new(HostStore::new()),
         settings,
         live,

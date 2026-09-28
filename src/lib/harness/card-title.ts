@@ -7,9 +7,9 @@ export function cardTitle(
   fallback: string,
 ) {
   if (!harness) return fallback;
-  // Explicit/session names stay stable; unnamed sessions follow the latest user turn.
+  // Prefer the provider title; the first prompt is the stable fallback.
   return harness.sessionName?.trim()
-    || harness.submitPrompt?.trim()
     || harness.firstPrompt?.trim()
+    || harness.submitPrompt?.trim()
     || `${harnessName(harness.kind)} · ${workspaceName || fallback}`;
 }

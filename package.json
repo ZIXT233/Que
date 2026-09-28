@@ -1,16 +1,19 @@
 {
-  "name": "que",
+  "name": "flat",
   "private": true,
   "version": "0.2.1",
   "description": "Queue of Agent Cues — schedule your attention with a unified queue of waiting Agent sessions.",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:que": "QUE_DATA_DIR=\"$HOME/.que-dev\" tauri dev --config src-tauri/tauri.dev.conf.json",
-    "build": "tsc && vite build",
+    "dev:que": "FLAT_DATA_DIR=\"$HOME/.flat-dev\" tauri dev",
+    "build": "npm run build:acp && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "QUE_DATA_DIR=\"$HOME/.que-dev\" tauri dev --config src-tauri/tauri.dev.conf.json"
+    "tauri:dev": "FLAT_DATA_DIR=\"$HOME/.flat-dev\" tauri dev",
+    "build:acp": "node scripts/build-acp.mjs",
+    "predev": "npm run build:acp",
+    "test:acp": "npm run build:acp && node --test --test-timeout=30000 tests/acp/*.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -22,7 +25,9 @@
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "6.0.0",
+    "acpx": "0.19.3",
     "ansi_up": "^6.0.6",
+    "diff": "^9.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -33,6 +38,8 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
+    "esbuild": "0.28.2",
+    "jsdom": "^30.1.1",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.8.3",

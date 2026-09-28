@@ -11,11 +11,16 @@ mod editor;
 mod error;
 mod focus;
 mod harness;
+mod acp;
+mod acp_supervisor;
 #[cfg(feature = "headless-e2e")]
 pub mod headless;
 mod hosts;
 mod live;
 mod mcp;
+mod mcp_cards;
+mod mcp_settings;
+mod butler;
 mod models;
 mod notify;
 mod paste;
@@ -23,6 +28,7 @@ mod paths;
 mod queue;
 mod remote;
 mod settings;
+mod speech;
 mod ssh;
 mod terminal;
 mod terminal_theme;
@@ -190,31 +196,6 @@ pub fn run() {
             // (must happen before the first local pty spawn).
             crate::conpty::preload(resource_dir.as_deref());
             let state = build_state(resource_dir);
-            // Hook plugins are only installed when a card of that kind launches, so a
-            // build with a new ingress script leaves the kinds this machine no longer
-            // launches on the old one — silently, since the provider's config keeps
-            // pointing at the same path. Align them here: at most one small write each.
-            let aligned =
-                crate::harness::sync_installed_hooks(&state.bin_dir, &crate::paths::plugins_dir());
-            // Dev and release obey the same saved external-notification settings.
-            // An explicit opt-out remains available for isolated development.
-            let should_deploy_external = std::env::var("QUE_SKIP_EXTERNAL_HOOKS").is_err();
-
-            if should_deploy_external {
-                // Settings-aware: enabled kinds install, disabled ones get their
-                // Que entries stripped (the toggle's other half).
-                crate::harness::sync_external_hooks(
-                    &state.bin_dir,
-                    &crate::paths::plugins_dir(),
-                    &state.settings.read()?,
-                );
-            }
-            if !aligned.is_empty() {
-                crate::debuglog::info(
-                    "hooks",
-                    &format!("plugin hooks realigned: {}", aligned.join(", ")),
-                );
-            }
             app.manage(state.terminals.clone());
             app.manage(state.clone());
             let port =

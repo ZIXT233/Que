@@ -1,0 +1,112 @@
+{
+  "theme": {
+    "storageKey": "pi-theme",
+    "type": "string",
+    "default": "auto",
+    "enum": [
+      "auto",
+      "light",
+      "dark"
+    ]
+  },
+  "language": {
+    "storageKey": "pi-locale",
+    "type": "string",
+    "default": "en",
+    "enum": [
+      "en",
+      "zh-CN",
+      "zh-TW"
+    ]
+  },
+  "attentionMode": {
+    "storageKey": "que:attention-mode",
+    "type": "string",
+    "default": "daily",
+    "enum": [
+      "daily",
+      "focus"
+    ]
+  },
+  "submissionBehavior": {
+    "storageKey": "que:submission-behavior",
+    "type": "string",
+    "default": "collapse",
+    "enum": [
+      "collapse",
+      "keep-in-view"
+    ]
+  },
+  "soundEnabled": {
+    "storageKey": "que:sound-enabled",
+    "type": "boolean",
+    "default": true
+  },
+  "completionNotifications": {
+    "storageKey": "que:completion-notifications",
+    "type": "boolean",
+    "default": true
+  },
+  "fontSize": {
+    "storageKey": "pi-chat-content-font-size",
+    "type": "number",
+    "default": 14,
+    "minimum": 12,
+    "maximum": 24
+  },
+  "terminalBackground": {
+    "storageKey": "que-terminal-bg",
+    "type": "string",
+    "default": "follow",
+    "enum": [
+      "follow",
+      "light",
+      "dark"
+    ]
+  },
+  "terminalAppearance": {
+    "storageKey": "que-terminal-appearance",
+    "type": "object",
+    "default": {
+      "light": "solarized",
+      "dark": "solarized",
+      "font": "default",
+      "codexAdaptiveBackground": true
+    },
+    "properties": {
+      "light": {
+        "type": "string",
+        "enum": [
+          "solarized",
+          "catppuccin",
+          "github",
+          "gruvbox"
+        ]
+      },
+      "dark": {
+        "type": "string",
+        "enum": [
+          "solarized",
+          "catppuccin",
+          "github",
+          "gruvbox"
+        ]
+      },
+      "font": {
+        "type": "string",
+        "enum": [
+          "default",
+          "Cascadia Mono",
+          "Consolas",
+          "JetBrains Mono",
+          "Fira Code",
+          "Menlo",
+          "DejaVu Sans Mono"
+        ]
+      },
+      "codexAdaptiveBackground": {
+        "type": "boolean"
+      }
+    }
+  }
+}

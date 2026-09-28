@@ -9,8 +9,8 @@ import type { RemoteHost } from "@/lib/remote-hosts";
 import type { MachineSessionSettings, QueueWorkspace } from "@/lib/card-queue";
 import { SshAuthChallenge, SshConnectionWait, useSshAuthChallenge } from "./SshAuthChallenge";
 
-export function WorkspacePicker({ workspaces, machineSettings, remoteHosts, onSelect, onUpdate, onUpdateMachine, onRemove, onAddWorkspace, onManageHosts, onClose, busy }: {
-  workspaces: QueueWorkspace[]; machineSettings: Record<string, MachineSessionSettings>; remoteHosts: RemoteHost[]; onSelect: (id: string) => void; onUpdate: (id: string, value: { name: string; defaultConversationWeight: number }) => Promise<boolean>; onUpdateMachine: (key: string, value: { terminalRc: string; sessionEnv: Record<string, string> }) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onAddWorkspace: (machine: RemoteHost | "local") => void; onManageHosts: () => void; onClose: () => void; busy: boolean;
+export function WorkspacePicker({ purpose = "new", workspaces, machineSettings, remoteHosts, onSelect, onUpdate, onUpdateMachine, onRemove, onAddWorkspace, onManageHosts, onClose, busy }: {
+  purpose?: "new" | "history"; workspaces: QueueWorkspace[]; machineSettings: Record<string, MachineSessionSettings>; remoteHosts: RemoteHost[]; onSelect: (id: string) => void; onUpdate: (id: string, value: { name: string; defaultConversationWeight: number }) => Promise<boolean>; onUpdateMachine: (key: string, value: { terminalRc: string; sessionEnv: Record<string, string> }) => Promise<boolean>; onRemove: (id: string) => Promise<boolean>; onAddWorkspace: (machine: RemoteHost | "local") => void; onManageHosts: () => void; onClose: () => void; busy: boolean;
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
@@ -77,7 +77,7 @@ export function WorkspacePicker({ workspaces, machineSettings, remoteHosts, onSe
     const host = remoteHosts.find(item => item.id === workspace.sshHost) ?? { id: workspace.sshHost || "", name: workspace.sshHost || "SSH", hostname: workspace.sshHost || "", source: "config" as const };
     void connectAndSelect(workspace, host);
   }, [busy, connectingWorkspace, editingWorkspace, editingMachine, removingWorkspace, connectAndSelect, onSelect, remoteHosts]);
-  return <><div className="cq-overlay" onClick={onClose}><section inert={!!removingWorkspace || !!editingWorkspace || !!editingMachine || !!connectingWorkspace} className="cq-workspace-picker" role="dialog" aria-modal="true" aria-label={t("queue.选择工作区，新建会话")} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
+  return <><div className="cq-overlay" onClick={onClose}><section inert={!!removingWorkspace || !!editingWorkspace || !!editingMachine || !!connectingWorkspace} className="cq-workspace-picker" role="dialog" aria-modal="true" aria-label={t(purpose === "history" ? "history.chooseWorkspace" : "queue.选择工作区，新建会话")} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
     // React portal events can bubble here even though the DOM subtree is
     // inert. Only handle our own keyboard navigation while the picker is free.
     if (event.defaultPrevented || event.nativeEvent.isComposing || busy || connectingWorkspace || editingWorkspace || editingMachine || removingWorkspace || !event.currentTarget.contains(event.target as Node)) return;

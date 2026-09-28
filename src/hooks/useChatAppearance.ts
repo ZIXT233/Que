@@ -51,7 +51,14 @@ function getSnapshot(): ChatAppearance {
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  const sync=(event:StorageEvent)=>{
+    if(event.key!==null && event.key!==CHAT_CONTENT_FONT_SIZE_STORAGE_KEY)return;
+    const next=clampChatContentFontSize(readStoredPreference(CHAT_CONTENT_FONT_SIZE_STORAGE_KEY));
+    if(next===getSnapshot().fontSize)return;
+    appearance={fontSize:next};applyAppearance(appearance);listeners.forEach(fn=>fn());
+  };
+  window.addEventListener('storage',sync);
+  return () => { listeners.delete(listener);window.removeEventListener('storage',sync); };
 }
 
 function setFontSize(value: number): void {

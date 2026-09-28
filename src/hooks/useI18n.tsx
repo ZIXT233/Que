@@ -51,10 +51,10 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   const messages = useMemo(() => getMessages(), []);
 
   useEffect(() => {
-    const next = readInitialLocale();
-    setLocaleState(next);
-    document.documentElement.lang = next;
-    setHydrated(true);
+    const sync=()=>{const next=readInitialLocale();setLocaleState(next);document.documentElement.lang=next;};
+    sync();setHydrated(true);
+    window.addEventListener("storage",sync);
+    return()=>window.removeEventListener("storage",sync);
   }, []);
 
   const setLocale = useCallback((next: Locale) => {

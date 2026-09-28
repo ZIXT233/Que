@@ -52,3 +52,6 @@ src-tauri/target-before-path-rename-*/
 # Local promotional video production (README assets stay tracked)
 /docs/promo/
 /scripts/render-promo.py
+
+# Bundled from runtime/acp-owner.mjs by npm run build:acp
+/src-tauri/resources/bin/flat-acp.mjs

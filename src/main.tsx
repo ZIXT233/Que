@@ -1,4 +1,5 @@
 import React from "react";
+import { startSettingsSync } from "./lib/settings-sync";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -64,6 +65,7 @@ async function boot() {
   setApiBase(base);
   installApiInterceptor();
   installFrontendLogBridge();
+  await startSettingsSync();
   window.__QUE_API_BASE__ = base;
   try {
     const response = await fetch("/api/tools/settings");

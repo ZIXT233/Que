@@ -30,7 +30,14 @@ function getSnapshot(): TerminalBackground {
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  const sync=(event:StorageEvent)=>{
+    if(event.key!==null && event.key!==TERMINAL_BACKGROUND_KEY)return;
+    const next=readTerminalBackground();if(next===getSnapshot())return;
+    preference=next;applyTerminalBackgroundAttr(next);
+    syncTerminalCanvasToBackend(resolveTerminalDark(document.documentElement.classList.contains('dark'),next));emit();
+  };
+  window.addEventListener('storage',sync);
+  return () => { listeners.delete(listener);window.removeEventListener('storage',sync); };
 }
 
 export function useTerminalBackground() {

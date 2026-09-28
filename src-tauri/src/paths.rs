@@ -30,20 +30,20 @@ pub(crate) fn set_test_home(home: PathBuf) {
 }
 
 pub fn data_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("QUE_DATA_DIR") {
+    if let Ok(path) = std::env::var("FLAT_DATA_DIR") {
         return expand_user(&path);
     }
     #[cfg(debug_assertions)]
     {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".que-dev")
+            .join(".flat-dev")
     }
     #[cfg(not(debug_assertions))]
     {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".que")
+            .join(".flat")
     }
 }
 

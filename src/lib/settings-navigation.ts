@@ -3,7 +3,7 @@ import { persistentStorage } from "./persistent-storage.ts";
 export const SETTINGS_SECTION_VALUES = [
   "general",
   "terminal",
-  "external-sessions",
+  "speech",
   "remote-hosts",
   "about",
 ] as const;
@@ -65,3 +65,8 @@ export function getLastSettingsSelection(): string | null {
 }
 
 export function setLastSettingsSelection(): void {}
+
+export const OPEN_SETTINGS_EVENT = "flat:open-settings";
+export function openSettingsSection(section: SettingsSection): void {
+  window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT, { detail: { section } }));
+}
