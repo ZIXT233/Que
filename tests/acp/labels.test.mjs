@@ -1,9 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { acpChoiceLabel, acpOptionLabel, acpStartupLabel } from '../../src/lib/acp-labels.ts';
-import { zhCNLocale } from '../../src/lib/i18n/messages/zh-CN.ts';
-import { enLocale } from '../../src/lib/i18n/messages/en.ts';
-import { zhTWLocale } from '../../src/lib/i18n/messages/zh-TW.ts';
+import { build } from 'esbuild';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+// Node cannot import TypeScript directly; bundle the modules under test first.
+const dir = await mkdtemp(path.join(tmpdir(), 'que-labels-'));
+const { outputFiles: [bundle] } = await build({ bundle: true, format: 'esm', platform: 'node', write: false, stdin: { resolveDir: process.cwd(), contents: `
+  export { acpChoiceLabel, acpOptionLabel, acpStartupLabel } from './src/lib/acp-labels.ts';
+  export { zhCNLocale } from './src/lib/i18n/messages/zh-CN.ts';
+  export { enLocale } from './src/lib/i18n/messages/en.ts';
+  export { zhTWLocale } from './src/lib/i18n/messages/zh-TW.ts';` } });
+await writeFile(path.join(dir, 'labels.mjs'), bundle.text);
+const { acpChoiceLabel, acpOptionLabel, acpStartupLabel, zhCNLocale, enLocale, zhTWLocale } = await import(pathToFileURL(path.join(dir, 'labels.mjs')).href);
+await rm(dir, { recursive: true, force: true });
 
 test('agent controls follow UI locale without renaming models or custom values', () => {
  const t = key => zhCNLocale.messages[key] || key;
