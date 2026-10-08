@@ -211,7 +211,8 @@ impl AcpRuntime {
             let remote = format!("$HOME/.flat/runtime/{hash}.mjs");
             let install = format!("umask 077; mkdir -p \"$HOME/.flat/runtime\"; cat > \"{remote}.tmp\" && mv \"{remote}.tmp\" \"{remote}\"");
             tokio::time::timeout(Duration::from_secs(15),crate::ssh::ssh_exec_stdin(host, &install, &bytes)).await.map_err(|_|AppError::msg("远程连接超时，请重试"))??;
-            let command = crate::ssh::ssh_login_command(&format!("exec node \"{remote}\""));
+            // The remote owner lives in tmux and outlives this connection; see the script.
+            let command = crate::ssh::ssh_login_command(&include_str!("../../resources/remote-owner.sh").replace("@BUNDLE@", &remote));
             let host = host.clone();
             tokio::spawn(async move {
                 let errors=output.clone();
