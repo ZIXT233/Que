@@ -221,7 +221,7 @@ pub async fn decide(
         .ok_or_else(|| AppError::msg("Request expired or already handled"))?;
     let body = &p.body;
     let card_id = required(body, "cardId")?;
-    let terminal_id = body["terminalId"].as_str().unwrap_or_default();
+    let terminal_id = body["sessionId"].as_str().unwrap_or_default();
     if all_cards && (!approve || p.scope.source_card.is_none()) {
         tools.pending.insert(id.to_string(), p);
         return Err(AppError::msg(
@@ -259,7 +259,7 @@ pub async fn decide(
                 if scope.valid(state) {
                     tools.grants.insert(scope);
                 }
-                json!({"requestId":body["requestId"],"delivery":"started","cardId":card_id,"terminalId":terminal.terminal_id,"sessionId":terminal.terminal_id,
+                json!({"requestId":body["requestId"],"delivery":"started","cardId":card_id,"sessionId":terminal.terminal_id,
                     "scope":if all_cards { "source-run-all-cards" } else { "run" },"execution":"unconfirmed","next":"read_session using the returned sessionId before sending a message"})
             }
             Err(error) => {
@@ -448,16 +448,8 @@ pub async fn tools(
 ) -> impl IntoResponse {
     tools_inner(state,headers,body,None).await
 }
-async fn tools_inner(state:AppState, headers:HeaderMap, mut body:Value, remote:Option<(&str,&str)>) -> axum::response::Response {
-    // Public tools describe sessions; internal access-grant keys are retained.
-    let operation = match body["tool"].as_str() {
-        Some("read_session") => "read_terminal",
-        Some("send_message") => "send_text",
-        Some("cancel_turn") => "send_key",
-        _ => body["tool"].as_str().unwrap_or("")
-    }.to_string();
-    body["tool"] = json!(operation);
-    if body["sessionId"].is_string() { body["terminalId"] = body["sessionId"].clone(); }
+async fn tools_inner(state:AppState, headers:HeaderMap, body:Value, remote:Option<(&str,&str)>) -> axum::response::Response {
+    let operation = body["tool"].as_str().unwrap_or("").to_string();
 
     let authorized = state.mcp.token.get().is_some_and(|token| {
         headers.get("authorization").and_then(|h| h.to_str().ok())
@@ -491,7 +483,7 @@ async fn tools_inner(state:AppState, headers:HeaderMap, mut body:Value, remote:O
     // Transport recovery is app lifecycle, not an Agent task. Perform it
     // before acquiring the global tool lock; a slow remote must not block
     // approvals or unrelated cards. Revalidate source and grants afterwards.
-    if matches!(operation.as_str(), "send_text" | "read_terminal" | "observe_terminal" | "subscribe_session" | "get_turn_status") {
+    if matches!(operation.as_str(), "send_message" | "read_session" | "subscribe_session" | "get_turn_status") {
         if let Some((machine,generation))=remote {
             if !state.harness.current_link(machine,generation)
                 || !state.queue.read_snapshot().is_ok_and(|queue|remote_source_matches(&queue,machine,source_terminal)) {
@@ -501,7 +493,7 @@ async fn tools_inner(state:AppState, headers:HeaderMap, mut body:Value, remote:O
         if !source_terminal.is_empty() && !state.harness.is_live(source_terminal) {
             return (StatusCode::FORBIDDEN,Json(json!({"error":"Source agent run ended or changed"}))).into_response();
         }
-        let target = match (required(&body,"cardId"),required(&body,"terminalId")) {
+        let target = match (required(&body,"cardId"),required(&body,"sessionId")) {
             (Ok(card),Ok(session)) => (card,session),
             (Err(error),_) | (_,Err(error)) => return error.into_response(),
         };
@@ -709,7 +701,6 @@ async fn run_tool(
                 "workspaceName":workspace.map(|w| &w.name),
                 "kind":h.as_ref().map(|h| &h.kind), "state":h.as_ref().map(|h| h.state.as_str()).unwrap_or("not_started"),
                 "stateNote": "not_started: blank card; not_running/unknown: connection is recovering, not a frozen card. read_session and send_message automatically connect existing unarchived sessions; no separate start_card is needed. Connection state does not prove task completion",
-                "terminalId":h.as_ref().map(|h| &h.terminal_id),
                 "remote":h.as_ref().and_then(|h| h.remote),
                 "controllable":h.is_some(),"connected":h.as_ref().is_some_and(|h| state.harness.is_live(&h.terminal_id))})
             })
@@ -787,7 +778,7 @@ async fn run_tool(
                         .find(|c| c.id == card_id)
                         .and_then(|c| c.harness.as_ref())
                         .ok_or_else(|| AppError::msg("Started terminal is missing"))?;
-                    json!({"requestId":request_id,"delivery":"started","cardId":card_id,"terminalId":terminal.terminal_id,"sessionId":terminal.terminal_id,
+                    json!({"requestId":request_id,"delivery":"started","cardId":card_id,"sessionId":terminal.terminal_id,
                         "scope":"source-run-all-cards","execution":"unconfirmed","next":"read_session using the returned sessionId before sending a message"})
                 }
                 Err(error) => {
@@ -826,7 +817,7 @@ async fn run_tool(
         }
         let pending = PendingAccess {
             key,
-            body: json!({"tool":"start_card","id":card_id,"cardId":card_id,"terminalId":scope.terminal,"kind":kind,
+            body: json!({"tool":"start_card","id":card_id,"cardId":card_id,"sessionId":scope.terminal,"kind":kind,
                 "requestId":request_id,"_original":body,"_mcpExpected":launch_target(&queue, card_id)}),
             scope,
             at: Instant::now(),
@@ -850,19 +841,19 @@ async fn run_tool(
             .map(|h| h.terminal_id.as_str())
             .unwrap_or("")
     } else {
-        required(body, "terminalId")?
+        required(body, "sessionId")?
     };
     if !nickname_tool && card.harness.as_ref().map(|h| h.terminal_id.as_str()) != Some(terminal_id)
     {
         return Err(AppError::msg(
-            "The card's terminal changed; list cards again",
+            "The card's session changed; list cards again",
         ));
     }
     if !matches!(
         tool,
-        "read_terminal" | "observe_terminal" | "send_text" | "send_key" | "set_card_nickname" | "subscribe_session" | "get_turn_status"
+        "read_session" | "send_message" | "cancel_turn" | "set_card_nickname" | "subscribe_session" | "get_turn_status"
     ) {
-        return Err(AppError::msg("Unknown terminal tool"));
+        return Err(AppError::msg("Unknown session tool"));
     }
     if nickname_tool {
         if required(body, "requestId")?.len() > 128 {
@@ -886,11 +877,11 @@ async fn run_tool(
         card: card_id.into(),
         terminal: terminal_id.into(),
     };
-    let butler_read=source_card.is_some_and(crate::butler::is_card) && matches!(tool,"read_terminal" | "observe_terminal" | "get_turn_status");
+    let butler_read=source_card.is_some_and(crate::butler::is_card) && matches!(tool,"read_session" | "get_turn_status");
     if !scope.valid(state) && !butler_read {
         return Err(AppError::msg("Source or target run ended or changed"));
     }
-    if !all_cards && !tools.grants.contains(&scope) && !(source_card.is_some_and(|source|source.id==card_id) && matches!(tool,"get_turn_status" | "read_terminal")) {
+    if !all_cards && !tools.grants.contains(&scope) && !(source_card.is_some_and(|source|source.id==card_id) && matches!(tool,"get_turn_status" | "read_session")) {
         if let Some((id, pending)) = tools.pending.iter().find(|(_, p)| p.scope == scope) {
             return Ok(pending_result(id, pending));
         }
@@ -901,7 +892,7 @@ async fn run_tool(
         let request_id = Uuid::new_v4().to_string();
         let pending = PendingAccess {
             key: format!("{principal}:{request_id}"),
-            body: json!({"requestId":request_id,"cardId":card_id,"terminalId":terminal_id,"tool":tool,"nickname":body["nickname"]}),
+            body: json!({"requestId":request_id,"cardId":card_id,"sessionId":terminal_id,"tool":tool,"nickname":body["nickname"]}),
             scope,
             at: Instant::now(),
             expires_at: crate::queue::now_ms() + 30_000,
@@ -1014,16 +1005,16 @@ async fn run_tool(
             let turn=snapshot["turns"].as_array().and_then(|turns|turns.iter().find(|turn|turn["id"].as_str()==Some(turn_id))).ok_or_else(||AppError::msg("Turn not found; do not resend with a new ID"))?;
             Ok(json!({"cardId":card_id,"turnId":turn_id,"state":turn["state"],"result":turn["result"]}))
         }
-        "read_terminal" | "observe_terminal" => {
+        "read_session" => {
             let ws = crate::api::acp_workspace(state, card_id).await?;
             let snapshot = state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":card_id})).await?;
             Ok(crate::mailbox::session_view(card_id, &snapshot, body))
         }
-        "send_text" | "send_key" => {
+        "send_message" | "cancel_turn" => {
             let request_id = required(body, "requestId")?;
             if request_id.len() > 128 { return Err(AppError::msg("requestId is too long")); }
             let ws = crate::api::acp_workspace(state, card_id).await?;
-            let command = if tool == "send_text" {
+            let command = if tool == "send_message" {
                 json!({"action":"send","id":card_id,"requestId":format!("mcp:{}:{}",principal,request_id),"text":required(body,"text")?,"env":ws.session_env,
                     "hostAccess":card.harness.as_ref().and_then(|h|h.host_access),
                     "sender":source_card.map(|source|json!({"cardId":source.id,"name":source_label(source),"epoch":state.harness.epoch(&source.id)}))})
@@ -1031,14 +1022,14 @@ async fn run_tool(
                 json!({"action":"cancel","id":card_id,"requestId":required(body,"turnId")?})
             };
             let result = state.harness.request(&ws, &state.bin_dir, command).await?;
-            if tool == "send_text" {
+            if tool == "send_message" {
                 if let Some(source) = source_card {
                     if let Err(error) = crate::mailbox::expect_reply(state, source, card_id, &result).await { eprintln!("Que reply tracking failed: {error}"); }
                 }
             }
             Ok(result)
         }
-        _ => Err(AppError::msg("Unknown terminal tool")),
+        _ => Err(AppError::msg("Unknown session tool")),
     }
 }
 

@@ -10,8 +10,6 @@ const sourceTerminal = process.env.FLAT_SOURCE_CARD || path.basename(process.env
 const sourceEpoch = process.env.FLAT_SOURCE_EPOCH || '';
 const validSource = /^(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.test(sourceTerminal);
 const configPath = process.env.QUE_MCP_ENDPOINT_FILE || path.join(__dirname, 'endpoint.json');
-const target = { cardId: { type: 'string' }, terminalId: { type: 'string' } };
-const input = { ...target, readToken: { type: 'string' }, requestId: { type: 'string' } };
 const schema = (properties, required) => ({ type: 'object', properties, required, additionalProperties: false });
 const tools = [
  {name:'list_settings',description:'Discover Flat settings scopes, fields, valid values, effect timing and limitations. Read this before configuring Flat.',inputSchema:schema({},[])},
