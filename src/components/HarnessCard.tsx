@@ -58,7 +58,7 @@ export function HarnessCard({ card, active, sshHost, sshHostName, onAction }: {
       catch (e) { if (!auth.present(e)) setError(e); }
       finally { setBusy(false); }
     }} />}
-    {card.harness ? <AcpConversation card={card} active={active} onResume={() => start(card.harness!.kind)} /> : busy ? <div className="cq-harness-empty"><AcpStartup agent={starting} stage={stage} /></div> : <div className="cq-harness-empty"><div className="cq-harness-picker">
+    {card.harness ? <AcpConversation card={card} active={active} onResume={() => start(card.harness!.kind)} onNewSession={() => onAction("harness_new", { id: card.id })} /> : busy ? <div className="cq-harness-empty"><AcpStartup agent={starting} stage={stage} /></div> : <div className="cq-harness-empty"><div className="cq-harness-picker">
       <div className="cq-harness-picker-head"><div>{card.workspaceId === "flat-butler"
         ? <><h3>选择管家使用的 Agent</h3><p>之后点管家按钮会直接用它；这里列出的是这台机器上检测到的 Agent</p></>
         : <><h3>选择 Agent</h3><p>选择 Agent，在当前工作区开始会话</p></>}</div></div>

@@ -64,7 +64,7 @@ function Decision({ block, answer, disabled }: { block: Block; answer: (answer: 
     return <label key={key}>{field.title || key}{field.description && <small>{field.description}</small>}{field.enum ? <select required={required} value={values[key] ?? ''} onChange={e => setValues(v => ({...v,[key]:e.target.value}))}><option value="">请选择</option>{field.enum.map((v: string) => <option key={v}>{v}</option>)}</select> : field.type === 'boolean' ? <input type="checkbox" checked={!!values[key]} onChange={e => setValues(v => ({...v,[key]:e.target.checked}))} /> : <input required={required} type={field.type === 'number' || field.type === 'integer' ? 'number' : 'text'} min={field.minimum} max={field.maximum} minLength={field.minLength} maxLength={field.maxLength} value={values[key] ?? ''} onChange={e => setValues(v => ({...v,[key]:field.type === 'number' || field.type === 'integer' ? Number(e.target.value) : e.target.value}))} />}</label>;
   })}<div><button type="button" disabled={disabled} onClick={() => answer({action:'decline'})}>不提供</button><button type="submit" disabled={disabled}>提交</button></div></form>;
 }
-export function AcpConversation({ card, active, onResume }: {card: QueueCard; active: boolean; onResume: () => Promise<void>}) {
+export function AcpConversation({ card, active, onResume, onNewSession }: {card: QueueCard; active: boolean; onResume: () => Promise<void>; onNewSession: () => Promise<unknown>}) {
   const {t}=useI18n();
   const viewKey=JSON.stringify([card.id, card.workspaceId, card.cwd, card.harness?.kind]);
   const view = useConversationView(viewKey);
@@ -228,6 +228,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     </div>
     {!follow && <button className="cq-acp-latest" onClick={()=>setFollow(true)}>↓ 回到最新</button>}
     {(error||connectionError) && <div className="cq-acp-error" role="alert">{error||connectionError}</div>}
+    {!archived && (snapshot?.state==='error' || turns.at(-1)?.state==='failed') && !running && <div className="cq-acp-recovery"><span>这个会话出错了，可以换一个全新的会话（旧记录保留在历史里）</span><button disabled={controlBusy} onClick={()=>{setControlBusy(true);void onNewSession().finally(()=>setControlBusy(false))}}>新会话</button></div>}
     {sending && (disconnected || snapshot?.state === "starting") && <div className="cq-acp-recovery" role="status">正在连接…</div>}
     {!archived && <PendingMessages editing={!!editingDraft} onEdit={id=>void editQueued(id)} turns={turns.filter(turn=>turn.state==='queued'&&!turn.withdrawn)} disabled={controlBusy || disconnected} onRemove={id=>void command({action:'cancel',requestId:id,queuedOnly:true})} />}
     {editingDraft && <div className="fc-editing-draft"><span>{t('composer.editingQueued')}</span><button disabled={sending || controlBusy} onClick={()=>void cancelEdit()}>{t('composer.cancelEdit')}</button></div>}

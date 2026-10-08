@@ -75,37 +75,24 @@ test('a second owner on the same data waits for the first instead of sharing it'
   }finally{rmSync(root,{recursive:true,force:true});}
 });
 
-test('switching a failed card to another agent publishes a newer revision, so clients show it',async()=>{
+test('a fresh start replaces a card\'s session; resuming never silently does', async()=>{
   const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
-  writeFileSync(path.join(root,'agents.json'),JSON.stringify({broken:[process.execPath,'-e','process.exit(1)'],fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')],second:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
+  writeFileSync(path.join(root,'agents.json'),JSON.stringify({broken:[process.execPath,'-e','process.exit(1)'],fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
+  // Like Devin, the fixture cannot load a session that never received a prompt.
+  const {child,rpc}=start(root,pidFile,{FLAT_TEST_EMPTY_ROLLOUT:path.join(root,'rollout'),FLAT_TEST_LOAD_ERROR:'not-found'});
+  const settle=async id=>{let turn;for(let i=0;i<200;i++){turn=(await rpc({action:'read',id:'card'})).turns.find(t=>t.id===id);if(['completed','failed'].includes(turn?.state))break;await sleep(40);}return turn;};
   try{
-    const {child,rpc}=start(root,pidFile);
     // Retries push the failed session's revision well past a fresh session's startup.
     for(let i=0;i<5;i++)await assert.rejects(rpc({action:'ensure',id:'card',cwd:root,agent:'broken'}));
     const failed=await rpc({action:'read',id:'card'});
-    assert.equal(failed.state,'error');
-    const switched=await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
-    assert.equal(switched.agent,'fixture');
-    assert.ok(switched.revision>failed.revision,`revision ${switched.revision} must exceed ${failed.revision}`);
-    // A started-but-silent session has an (empty) acpx record; switching must still work,
-    // and the new agent gets its own record instead of loading the old one.
+    await assert.rejects(rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'}),/新会话/,'switching agents needs an explicit fresh start');
+    const fresh=await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture',fresh:true});
+    assert.equal(fresh.agent,'fixture');
+    assert.ok(fresh.revision>failed.revision,`revision ${fresh.revision} must exceed ${failed.revision}, or clients drop it as stale`);
     await rpc({action:'close',id:'card'});
-    const again=await rpc({action:'ensure',id:'card',cwd:root,agent:'second'});
-    assert.equal(again.agent,'second');assert.notEqual(again.recordId,switched.recordId);
-    child.stdin.end();await until(()=>child.exitCode!==null);
-  }finally{for(const pid of agentPids(pidFile))try{process.kill(pid,'SIGKILL')}catch{};rmSync(root,{recursive:true,force:true});}
-});
-
-test('a session that never exchanged a message starts fresh when the agent cannot resume it',async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
-  writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-  // The fixture can only load sessions after a prompt was persisted, like Devin.
-  const {child,rpc}=start(root,pidFile,{FLAT_TEST_EMPTY_ROLLOUT:path.join(root,'rollout'),FLAT_TEST_LOAD_ERROR:'not-found'});
-  try{
-    await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
-    await rpc({action:'close',id:'card'});
-    await rpc({action:'send',id:'card',requestId:'hello',text:'hh'});
-    let turn;for(let i=0;i<200;i++){turn=(await rpc({action:'read',id:'card'})).turns.find(t=>t.id==='hello');if(['completed','failed'].includes(turn?.state))break;await sleep(40);}
-    assert.equal(turn.state,'completed',JSON.stringify(turn?.result));
+    assert.equal((await settle(await rpc({action:'send',id:'card',requestId:'resume',text:'hh'}).then(t=>t.id))).state,'failed','an unresumable session is reported, not replaced');
+    const next=await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture',fresh:true});
+    assert.notEqual(next.recordId,fresh.recordId,'a fresh session never loads the old record');
+    assert.equal((await settle(await rpc({action:'send',id:'card',requestId:'after',text:'hh'}).then(t=>t.id))).state,'completed');
   }finally{child.stdin.end();await until(()=>child.exitCode!==null);for(const pid of agentPids(pidFile))try{process.kill(pid,'SIGKILL')}catch{};rmSync(root,{recursive:true,force:true});}
 });

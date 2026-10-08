@@ -135,31 +135,20 @@ async function metadata(id) {
   publish(id);
 }
 async function ensure(input) {
-  const { id, cwd, agent, env = {} } = input;
+  const { id, cwd, agent, env = {}, fresh = false } = input;
   if (!id || !cwd || (!registry.list().includes(agent) && !sessions[id]?.recordId)) throw Error('Invalid session target');
   let owner = owners.get(id);
   const existing = sessions[id];
-  // Revisions only grow per card within an owner: a replacement session that
-  // restarted at 0 would look stale to every client and never be shown.
-  let revision = existing?.revision;
-  // A replacement gets its own acpx record; it must never load the old agent's.
-  let generation = 0;
-  if(existing?.historyMissing)throw Error('找不到该会话的 acpx 历史记录，已保留发送收据；不会自动创建新会话替代');
-  if (existing && (existing.cwd !== cwd || existing.agent !== agent)) {
-    const saved = existing.recordId && await history.store.load(existing.recordId);
-    // A failed first spawn has no conversation to protect. Retain all bindings
-    // that have a native identity, history, or an in-flight startup.
-    // An empty record (agent started, nothing said) has no conversation to protect.
-    if (owner || existing.resumeSessionId || existing.turns.length || saved?.messages?.length
-        || !['error','not_running'].includes(existing.state)) {
-      throw Error('这张卡片已绑定其他 Agent 或工作目录，请使用新卡片；已有会话不会被替换');
-    }
-    // Recheck after the disk read in case another ensure began concurrently.
-    if (owners.has(id) || sessions[id] !== existing) throw Error('会话正在启动，请稍后重试');
-    // Bindings persist recordId, not generation: derive it so repeated switches never collide.
-    generation = Math.max(existing.generation || 0, Number(existing.recordId?.split(':').pop()) || 0) + 1;
-    wire.forget(id);delete sessions[id];delete bindings[id];checkpoint();
+  // A card either resumes its own session or, when started fresh from the picker,
+  // replaces it with a new one; the old transcript stays in history.
+  if (existing && fresh) {
+    if (owner?.preparing || owner?.controlBusy || owner?.turns.size) throw Error('会话正在运行，请先停止');
+    await owner?.runtime?.shutdown().catch(() => {}); owners.delete(id);
+    wire.forget(id); delete sessions[id]; delete bindings[id];
+  } else if (existing && (existing.cwd !== cwd || existing.agent !== agent)) {
+    throw Error('这张卡片绑定了另一个 Agent，请点“新会话”重新选择');
   }
+  if (sessions[id]?.historyMissing) throw Error('找不到该会话的 acpx 历史记录，已保留发送收据；不会自动创建新会话替代');
   owner = owners.get(id);
   if (owner?.preparing) return owner.preparing;
   if (owner?.handle && !owner.disconnected) return sessions[id];
@@ -172,7 +161,8 @@ async function ensure(input) {
     })();
     return owner.preparing;
   }
-  const s = sessions[id] ||= { id, cwd, agent, hostAccess: true, turns: [], generation, revision };
+  // Revisions keep growing across a replacement, or clients would drop it as stale.
+  const s = sessions[id] ||= { id, cwd, agent, hostAccess: true, turns: [], revision: existing?.revision };
   s.mcpBridge = input.mcpBridge || s.mcpBridge;
   s.mcpRelay = input.mcpRelay === true || s.mcpRelay;
   s.connectionId = randomUUID();
@@ -181,7 +171,7 @@ async function ensure(input) {
   owners.set(id, owner);
   owner.preparing = (async () => {
     try {
-    s.recordId ||= `flat:${id}:${s.generation||0}`;
+    s.recordId ||= `flat:${id}:${randomUUID()}`;
     const records = history.store;
     const saved=await records.load(s.recordId);
     if(saved?.pid) {
@@ -192,9 +182,6 @@ async function ensure(input) {
     // Older imports resumed without replay, leaving an empty local record.
     // Re-load the same native ID, retaining the old file until a successful save.
     let needsHistoryReplay = !!s.resumeSessionId && !!saved && !saved.messages?.length;
-    // A session that never exchanged a message has nothing to lose, and some agents
-    // (Devin) do not keep it; start a new one rather than fail to resume it.
-    let freshStart = !s.resumeSessionId && !!saved && !saved.messages?.length && !s.turns.length;
     const agentEnvironment = await sessionEnvironment({root, cwd, env, terminalRc:input.terminalRc});
     const missing = missingAgentCommand(agentRegistry, agent, agentEnvironment);
     if (missing) throw Error(missing);
@@ -202,7 +189,7 @@ async function ensure(input) {
     if (/^npx\b/.test([agentRegistry.resolve(agent)].flat().join(' '))) { s.stage = 'installing'; publish(id); }
     owner.runtime = createAcpRuntime({ cwd, agentProcessEnv: agentEnvironment, agentRegistry,
       mcpServers: s.mcpRelay ? [{name:'flat',command:process.execPath,args:[remoteBridgePath],env:[{name:'FLAT_MCP_SOCKET',value:mcpSocketPath},{name:'FLAT_MCP_CAPABILITY',value:mcpHub.capability(id,s.connectionId)}]}] : s.mcpBridge ? [{name:'flat',command:process.execPath,args:[s.mcpBridge],env:[{name:'FLAT_SOURCE_CARD',value:id},{name:'FLAT_SOURCE_EPOCH',value:s.connectionId}]}] : [],
-      sessionStore: { load: key => (needsHistoryReplay || freshStart) && key === s.recordId ? Promise.resolve(undefined) : records.load(key), save: async record => { needsHistoryReplay = false; freshStart = false;
+      sessionStore: { load: key => needsHistoryReplay && key === s.recordId ? Promise.resolve(undefined) : records.load(key), save: async record => { needsHistoryReplay = false;
         const known=new Set(s.turns.map(t=>t.messageId).filter(Boolean));
         const fresh=(record.messages||[]).filter(m=>m.User&&!known.has(m.User.id));
         const pending=s.turns.filter(t=>!t.messageId&&['queued','running'].includes(t.state));

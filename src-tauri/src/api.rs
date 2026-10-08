@@ -155,24 +155,22 @@ pub(crate) async fn post_queue(
     if action == "butler_open" {
         crate::butler::install()?;
         state.queue.with_queue(false, |q| crate::butler::ensure(q)).await?;
-        let queue=state.queue.read_snapshot()?;
-        let card=queue.cards.iter().find(|c|c.id==crate::butler::CARD_ID).unwrap();
-        // The button never starts an agent by itself: an inactive Butler is just
-        // opened so the user decides. One that never got a working session (e.g.
-        // its CLI is missing) is reset to the picker instead of retrying that agent.
-        if card.harness.is_some() && !state.harness.is_live(crate::butler::CARD_ID) {
-            let ws=acp_workspace(&state,crate::butler::CARD_ID).await?;
-            let conversation=state.harness.request(&ws,&state.bin_dir,json!({"action":"read","id":crate::butler::CARD_ID})).await
-                .ok().and_then(|s|s["turns"].as_array().map(|t|!t.is_empty())).unwrap_or(false);
-            if !conversation {
-                state.queue.with_queue(false,|q|{
-                    if let Some(card)=q.cards.iter_mut().find(|c|c.id==crate::butler::CARD_ID) {card.harness=None;card.phase=crate::models::CardPhase::Draft;}
-                    Ok(())
-                }).await?;
-                return Ok(Json(with_cwd(state.queue.read_snapshot()?,&state)));
-            }
+        // Only opens the Butler; the card itself offers picking or resuming an agent.
+        return Ok(Json(with_cwd(state.queue.read_snapshot()?,&state)));
+    }
+    if action == "harness_new" {
+        // "New session": stop the card's agent and return the card to the picker.
+        // The next start replaces the session; its transcript stays in history.
+        let id = body["id"].as_str().ok_or_else(|| AppError::msg("缺少卡片"))?.to_string();
+        if let Ok(ws) = acp_workspace(&state, &id).await {
+            let _ = state.harness.request(&ws, &state.bin_dir, json!({"action":"close","id":id})).await;
         }
-        return Ok(Json(with_cwd(queue,&state)));
+        state.queue.with_queue(false, |q| {
+            let card = q.cards.iter_mut().find(|c| c.id == id).ok_or_else(|| AppError::msg("卡片不存在"))?;
+            card.harness = None; card.phase = crate::models::CardPhase::Draft;
+            Ok(())
+        }).await?;
+        return Ok(Json(with_cwd(state.queue.read_snapshot()?,&state)));
     }
     if action == "workspace_rc_verify" {
         let queue = state.queue.read_snapshot()?;
@@ -553,7 +551,7 @@ pub(crate) async fn launch_harness(
             id,
             kind,
             &captured.1,
-            resume.clone(),
+            action == "harness_start",
             &state.terminals,
             &state.settings,
             &state.bin_dir,
