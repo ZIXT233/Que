@@ -1108,8 +1108,9 @@ function CardQueueShellContent() {
       <div className="cq-content" ref={contentRef}>
         {!detachedId && <button type="button" className="cq-butler-launch" aria-label="Butler" title="召唤 Butler" disabled={busy} onClick={async () => {
           setBusy(true);
-          // Open the Butler even when (re)starting it failed: its card shows why.
-          try { const id = (await act("butler_open") as { butlerId?: string } | null)?.butlerId; if (id) { setInspecting(id); setWatching(id); setFocus({id,index:0}); setDeckReset(key=>key+1); } }
+          // Open it the way every card is opened: in the deck when it is queued,
+          // otherwise inspected. A Butler just created is a blank card, never in the deck.
+          try { const id = (await act("butler_open") as { butlerId?: string } | null)?.butlerId; if (id && !focusNotificationCard(id)) setInspecting(id); }
           finally {setBusy(false);}
         }}><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 15a7 7 0 0 1 14 0M3 18h18M12 6V4M10 4h4"/><path d="m9 21 3-2 3 2"/></svg></button>}
         {!detachedId && <div className="cq-content-drag" data-tauri-drag-region aria-hidden="true" />}
