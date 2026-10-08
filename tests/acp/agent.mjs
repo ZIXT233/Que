@@ -63,5 +63,6 @@ readline.createInterface({input:process.stdin}).on('line', async line => {
     notify({sessionUpdate:'usage_update',used:1200,size:32000});
     result={stopReason:'end_turn'};
   }
-  if(id!==undefined)send({id,result});
+  // JSON-RPC needs a result member; without one the client waits for its timeout.
+  if(id!==undefined)send({id,result:result??null});
 });

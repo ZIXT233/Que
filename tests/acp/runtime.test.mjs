@@ -46,21 +46,22 @@ test('real acpx owner: approval, queued message, controls, restart, persistent r
    await rpc({action:'close',id:'card'});
    await rpc({action:'ensure',id:'card',agent:'fixture',cwd:root});
    assert.equal((await rpc({action:'read',id:'card'})).turns.length,2);
-   await rpc({action:'send',id:'card',requestId:'file',text:'file-check',butlerContext:'Butler fixture instructions',attachments:[{mediaType:'text/plain',name:'example.ts',data:'const answer = 42;'}]});
+   await rpc({action:'send',id:'card',requestId:'file',text:'file-check',attachments:[{mediaType:'text/plain',name:'example.ts',data:'const answer = 42;'}]});
    const fileDone=await wait(s=>s.turns.find(t=>t.id==='file')?.state==='completed');
    const fileOutput=fileDone.turns.find(t=>t.id==='file').blocks.filter(b=>b.type==='text_delta').map(b=>b.text).join('');
-   assert.match(fileOutput,/Butler fixture instructions/);assert.match(fileOutput,/example.ts/);assert.match(fileOutput,/const answer = 42/);
+   assert.match(fileOutput,/example.ts/);assert.match(fileOutput,/const answer = 42/);
    await assert.rejects(rpc({action:'send',id:'card',requestId:'badfile',text:'bad',attachments:[{mediaType:'text/plain',name:'bad.txt',data:'a\0b'}]}),/Invalid text file/);
    await rpc({action:'close',id:'card'});
    assert.equal((await rpc({action:'close',id:'card'})).state,'not_running');
    const history=await rpc({action:'history',cwd:root});assert.equal(history.length,1);assert.equal(history[0].cardId,'card');
    assert.deepEqual(await rpc({action:'history',cwd:path.join(root,'elsewhere')}),[]);
-   const rawBindings=readFileSync(path.join(root,'bindings.json'),'utf8');assert.ok(!rawBindings.includes('const answer = 42'));assert.ok(!existsSync(path.join(root,'sessions.json')));
+   // The conversation lives only in the acpx record; the owner keeps no second copy.
+   assert.ok(!existsSync(path.join(root,'bindings.json')));
    await restart();
    const afterRestart=await rpc({action:'read',id:'card'});
    assert.equal(afterRestart.title,'Fixture native title');
-   assert.ok(!afterRestart.turns.map(t=>t.text).join(' ').includes('Butler fixture instructions'));
-   assert.ok(afterRestart.turns[0].blocks.find(b=>b.type==='tool_call').content.some(c=>c.type==='diff'));
+   // History comes from the acpx record: tool calls are listed, their rendered content is not kept.
+   assert.equal(afterRestart.turns[0].blocks.find(b=>b.type==='tool_call').title,'查看项目文件');
    assert.match(afterRestart.turns.map(t=>t.text).join(' '),/const answer = 42/);
    assert.match(afterRestart.turns.flatMap(t=>t.blocks).filter(b=>b.type==='text_delta').map(b=>b.text).join(' '),/large/);
    assert.equal((await rpc({action:'attach',id:'second-card',recordId:history[0].recordId,cwd:root})).id,'card');
@@ -92,7 +93,6 @@ test('real acpx owner: approval, queued message, controls, restart, persistent r
    await assert.rejects(rpc({action:'host_access',id:'card',enabled:'yes'}),/Invalid/);
    assert.equal((await rpc({action:'host_access',id:'card',enabled:true})).hostAccess,true);
    await checkTerminal('host-allowed','host-terminal-ok');
-   assert.equal(JSON.parse(readFileSync(path.join(root,'bindings.json'),'utf8')).card.hostAccess,true);
    assert.equal((await rpc({action:'host_access',id:'card',enabled:false})).hostAccess,false);
    await rpc({action:'close',id:'card'});
    await rpc({action:'ensure',id:'card',agent:'fixture',cwd:root});
@@ -132,8 +132,10 @@ test('real acpx owner: approval, queued message, controls, restart, persistent r
    assert.equal((await rpc({action:'read',id:'card'})).turns.filter(t=>t.id==='notification').length,1);
    await rpc({action:'close',id:'card'});await rpc({action:'close',id:'sender'});
    await restart();
-   assert.deepEqual((await rpc({action:'read',id:'card'})).turns.find(t=>t.id==='peer').sender,sender);
-   assert.equal((await rpc({action:'read',id:'card'})).turns.find(t=>t.id==='notification').source,'event');
+   // After a restart the conversation is the acpx record; who sent a message is part of it.
+   const restored=(await rpc({action:'read',id:'card'})).turns;
+   assert.deepEqual(restored.find(t=>t.text==='Agent message').sender,{cardId:sender.cardId,name:sender.name});
+   assert.equal(restored.find(t=>t.text==='status data').source,'event');
 
  } finally {
    child.kill();

@@ -39,7 +39,7 @@ test('the owner and its agents end when the app closes the pipe, even mid-turn',
     const next=start(root,pidFile);
     const session=await next.rpc({action:'read',id:'card'});
     assert.equal(session.state,'not_running');
-    assert.notEqual(session.turns[0].state,'running');
+    assert.ok(session.turns.every(t=>t.state==='history'),'nothing from the interrupted run is still running');
     next.child.stdin.end();await until(()=>next.child.exitCode!==null);
   }finally{for(const pid of agentPids(pidFile))try{process.kill(pid,'SIGKILL')}catch{};rmSync(root,{recursive:true,force:true});}
 });
@@ -75,18 +75,18 @@ test('a second owner on the same data waits for the first instead of sharing it'
   }finally{rmSync(root,{recursive:true,force:true});}
 });
 
-test('a card is one session: it is never rebound, and a lost session is reported', async()=>{
+test('a card is one session: never rebound, and an empty one is started fresh instead of restored', async()=>{
   const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
   writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')],other:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   // Like Devin, the fixture cannot load a session that never received a prompt.
   const {child,rpc}=start(root,pidFile,{FLAT_TEST_EMPTY_ROLLOUT:path.join(root,'rollout'),FLAT_TEST_LOAD_ERROR:'not-found'});
   try{
     const session=await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
-    assert.equal(session.recordId,'flat:card');
+    assert.equal(session.recordId,'card','the card id is the acpx session key');
     await assert.rejects(rpc({action:'ensure',id:'card',cwd:root,agent:'other'}),/已绑定/);
     await rpc({action:'close',id:'card'});
     const sent=await rpc({action:'send',id:'card',requestId:'resume',text:'hh'});
     let turn;for(let i=0;i<200;i++){turn=(await rpc({action:'read',id:'card'})).turns.find(t=>t.id===sent.id);if(['completed','failed'].includes(turn?.state))break;await sleep(40);}
-    assert.equal(turn.state,'failed','shown as failed, never replaced by a new session');
+    assert.equal(turn.state,'completed','nothing was said, so nothing is restored: the agent starts fresh');
   }finally{child.stdin.end();await until(()=>child.exitCode!==null);for(const pid of agentPids(pidFile))try{process.kill(pid,'SIGKILL')}catch{};rmSync(root,{recursive:true,force:true});}
 });

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-test('owner crash preserves pending input and withdrawal without re-executing it',async()=>{
+test('after an owner crash the card shows its acpx record and nothing is re-executed',async()=>{
  const root=mkdtempSync(path.join(os.tmpdir(),'flat-crash-'));
  const pidFile=path.join(root,'fixture-pids');
  writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
@@ -21,37 +21,27 @@ test('owner crash preserves pending input and withdrawal without re-executing it
  }
  try{
   let rpc=connect();
-  const ready=await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
+  await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
   await rpc({action:'send',id:'card',requestId:'hold',text:'permission'});
   let decision;
   for(let i=0;i<100&&!decision;i++){decision=(await rpc({action:'read',id:'card'})).turns[0].blocks.find(b=>b.type==='decision');if(!decision)await sleep(30)}
   assert.ok(decision);
-  await rpc({action:'send',id:'card',requestId:'withdraw',text:'removed queued message'});
-  await rpc({action:'cancel',id:'card',requestId:'withdraw',queuedOnly:true});
-  const message={action:'send',id:'card',requestId:'pending',text:'keep my pending message',attachments:[{mediaType:'text/plain',name:'note.txt',data:'pending file'}]};
-  assert.equal((await rpc(message)).state,'queued');
+  assert.equal((await rpc({action:'send',id:'card',requestId:'queued',text:'never sent to the agent'})).state,'queued');
   const before=await rpc({action:'read',id:'card'});
-  assert.ok(before.revision>ready.revision);
-  const receipts=JSON.parse(readFileSync(path.join(root,'bindings.json'),'utf8')).card.receipts;
-  assert.equal(receipts.find(r=>r.id==='pending').pending.text,message.text);
-  assert.equal(receipts.find(r=>r.id==='hold').pending,undefined,'already persisted ACP messages are not duplicated');
   process.kill(Number(readFileSync(path.join(root,'owner.pid'),'utf8')),'SIGKILL');killAgents();
   await sleep(150);
   rpc=connect();
+  // The conversation is the acpx record: what reached the agent is there,
+  // what was only queued in the dead owner is gone, and nothing runs again.
   const after=await rpc({action:'read',id:'card'});
   assert.notEqual(after.ownerEpoch,before.ownerEpoch);
-  const restored=after.turns.find(t=>t.id==='pending');
-  assert.equal(restored.text,message.text);assert.deepEqual(restored.attachments,message.attachments);assert.equal(restored.state,'unknown');
-  assert.equal(after.turns.find(t=>t.id==='withdraw').withdrawn,true);
-  assert.equal((await rpc(message)).state,'unknown','retry only returns receipt, never automatically executes uncertain work');
-  assert.equal((await rpc({action:'read',id:'card'})).turns.filter(t=>t.id==='pending').length,1);
-  process.kill(Number(readFileSync(path.join(root,'owner.pid'),'utf8')));
-  for(let i=0;i<240&&existsSync(path.join(root,'owner.pid'));i++)await sleep(30);
-  assert.equal(existsSync(path.join(root,'owner.pid')),false);
-  rmSync(path.join(root,'acpx','sessions',encodeURIComponent(ready.recordId)+'.json'));
-  rpc=connect();
-  await assert.rejects(rpc({action:'ensure',id:'card',agent:'fixture',cwd:root}),/不会自动创建新会话/);
-  assert.equal((await rpc({action:'read',id:'card'})).turns.find(t=>t.id==='pending').text,message.text,'a missing record must not erase pending input');
+  assert.equal(after.state,'not_running');
+  assert.ok(after.turns.some(t=>t.text==='permission'));
+  assert.ok(!after.turns.some(t=>t.text==='never sent to the agent'));
+  assert.ok(after.turns.every(t=>t.state==='history'));
+  const next=await rpc({action:'send',id:'card',requestId:'after-crash',text:'continue'});
+  let done;for(let i=0;i<200&&done?.state!=='completed';i++){done=(await rpc({action:'read',id:'card'})).turns.find(t=>t.id===next.id);if(done?.state!=='completed')await sleep(40)}
+  assert.equal(done.state,'completed');
  }finally{
   relays.forEach(c=>c.kill());
   try{process.kill(Number(readFileSync(path.join(root,'owner.pid'),'utf8')))}catch{}
