@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,existsSync} from 'node:fs';
 import readline from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
@@ -58,6 +58,9 @@ test('Butler gets replies by mail, compact reads, no per-event wakeups, and dige
   } finally {
     child.kill('SIGTERM');
     for(let i=0;i<200&&child.exitCode===null&&child.signalCode===null;i++)await sleep(25);
+    // The owner leaves after the app; remove its files only once it is gone.
+    const ownerPid=path.join(root,'que','acp','owner.pid');
+    for(let i=0;i<400&&existsSync(ownerPid);i++)await sleep(25);
     rmSync(root,{recursive:true,force:true});
   }
 });
