@@ -18,7 +18,7 @@ Agent ──事件──▶ owner ──snapshot / delta──▶ Que ──SSE�
 
 | 事件 | 内容 | 何时发送 |
 | --- | --- | --- |
-| `snapshot` | 完整会话，含 `ownerEpoch`、`revision` | 新连接、每次状态变化（启动、完成、待确认、取消、配置变化等）、`resync` |
+| `snapshot` | 完整会话，含 `ownerEpoch`、`revision` | 新连接、每次状态变化（启动、完成、待确认、取消、配置变化等） |
 | `delta` | `{epoch, base, rev, ops}`，只在持有 `base` 版本时可应用 | 流式输出（文字追加、工具调用更新、用量、命令列表） |
 
 `revision` 在同一个 `ownerEpoch` 内只增不减，允许跳号，所以只需要 `base` 与本地版本相等。
