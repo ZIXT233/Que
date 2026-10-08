@@ -1,11 +1,16 @@
-// Que's ACP owner: one per machine, a child of Que talking over stdin/stdout.
+// Que's ACP owner: a thin layer over acpx.
 //
-// It is a thin layer over acpx. A workspace's agent environment is one
-// AcpRuntime; a card is one acpx session whose sessionKey is the card id; the
-// conversation is that session's acpx record. The owner only adds what Que
-// needs on top: the turns submitted in this run (streamed to clients as
-// snapshot + delta, see session-wire.mjs), the decisions waiting for a person,
-// and the card state derived from them. Nothing outlives Que.
+//   a workspace's agent environment  = one AcpRuntime
+//   a card                           = one acpx session, sessionKey = card id
+//   a card's conversation            = that session's acpx record
+//
+// On top of acpx it keeps only what Que needs: the turns submitted in this run
+// (streamed to Que as snapshot + delta, see session-wire.mjs), the decisions
+// waiting for a person, and the card state derived from those.
+//
+// Lifetime. On this machine the owner is Que's child over stdin/stdout and
+// ends with Que. On a remote host it runs with --serve inside tmux and outlives
+// SSH; Que reaches it with --connect (see resources/remote-owner.sh).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,6 +27,7 @@ import { discoverSessions } from './native-sessions.mjs';
 import { sessionEnvironment } from './session-environment.mjs';
 import { agentReaper } from './agent-reaper.mjs';
 import { missingAgentCommand, agentAvailability } from './preflight.mjs';
+import { relay } from './relay.mjs';
 
 if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Flat requires Node.js 22.13 or newer');
 const root = process.env.FLAT_ACP_ROOT || path.join(os.homedir(), '.flat', 'acp');
@@ -29,49 +35,7 @@ fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 const ownerSocket = path.join(root, 'owner.sock');
 const build = createHash('sha256').update(fs.readFileSync(fileURLToPath(import.meta.url))).digest('hex');
 const serveMode = process.argv.includes('--serve');
-if (process.argv.includes('--connect')) await relay(process.argv.includes('--wait'));
-
-/**
- * Pipes stdio to a running `--serve` owner. Exit 3: no owner is running.
- * Exit 4: an idle owner of another build was stopped; start this build instead.
- * A busy owner of another build keeps serving until a later reconnect finds it idle.
- */
-async function relay(wait) {
-  let socket;
-  for (let attempt = 0; !socket; attempt++) {
-    try { socket = await new Promise((resolve, reject) => { const s = net.createConnection(ownerSocket); s.once('connect', () => resolve(s)); s.once('error', reject); }); }
-    catch (error) {
-      if (!wait || attempt >= 100) { process.stderr.write(`no owner at ${ownerSocket}: ${error.code}\n`); process.exit(3); }
-      await new Promise(r => setTimeout(r, 100));
-    }
-  }
-  socket.write(JSON.stringify({ action: '_hello', rpc: '_relay' }) + '\n');
-  let buffered = '', hello;
-  socket.setEncoding('utf8');
-  await new Promise(resolve => {
-    const read = chunk => {
-      buffered += chunk;
-      const lines = buffered.split('\n'); buffered = lines.pop();
-      for (const line of lines) {
-        let value; try { value = JSON.parse(line); } catch {}
-        if (value?.rpc === '_relay') hello = value.result; else process.stdout.write(line + '\n');
-      }
-      if (hello) { socket.off('data', read); socket.off('close', lost); resolve(); }
-    };
-    const lost = () => process.exit(1);
-    socket.on('data', read);
-    socket.once('close', lost);
-  });
-  if (hello.build !== build && !hello.busy) {
-    socket.write(JSON.stringify({ action: '_shutdown' }) + '\n');
-    socket.once('close', () => process.exit(4));
-    return new Promise(() => {});
-  }
-  if (buffered) process.stdout.write(buffered);
-  process.stdin.pipe(socket); socket.pipe(process.stdout);
-  socket.once('close', () => process.exit(0));
-  return new Promise(() => {});
-}
+if (process.argv.includes('--connect')) await relay({ socketPath: ownerSocket, build, wait: process.argv.includes('--wait') });
 
 // One owner per data directory; wait for a previous one that is still stopping its agents.
 const pidFile = path.join(root, 'owner.pid');
@@ -138,9 +102,10 @@ function settle(id) {
 }
 
 const normalize = command => Array.isArray(command) ? command : String(command ?? '').trim().split(/\s+/);
+/** The registry agent a record was started with, when its command still matches one. */
 function agentOf(record) {
   const argv = JSON.stringify(normalize(record.agentArgv?.length ? record.agentArgv : record.agentCommand));
-  return registry.list().find(name => JSON.stringify(normalize(registry.resolve(name))) === argv) || 'acpx-external';
+  return registry.list().find(name => JSON.stringify(normalize(registry.resolve(name))) === argv);
 }
 
 /** A card not seen in this run is whatever its acpx record says. */
@@ -209,9 +174,12 @@ async function metadata(id) {
 async function ensure(req) {
   const { id, cwd, agent } = req;
   if (!id || !cwd || !agent) throw Error('Invalid session target');
-  const s = sessions[id] ??= await loadCard(id) ?? { id, cwd, agent, hostAccess: true, turns: [] };
-  if (s.agent !== agent || s.cwd !== cwd) throw Error('这张卡片已绑定另一个 Agent 或目录');
+  // Que's card names the agent; acpx decides how to launch it. A record whose
+  // command no longer matches (an adapter update) still belongs to this agent.
+  const s = sessions[id] ??= await loadCard(id) ?? { id, cwd, hostAccess: true, turns: [] };
+  if ((s.agent && s.agent !== agent) || s.cwd !== cwd) throw Error('这张卡片已绑定另一个 Agent 或目录');
   if (!registry.list().includes(agent)) throw Error(`未知的 Agent：${agent}`);
+  s.agent = agent;
   if (typeof req.hostAccess === 'boolean') s.hostAccess = req.hostAccess;
   const current = live.get(id);
   if (current?.starting) return current.starting;
@@ -451,8 +419,9 @@ async function dispatch(req, client) {
     return Object.fromEntries([...live].map(([card, l]) => [card, { connected: !!l.handle && !l.disconnected, busy: !!l.starting || l.turns.size > 0 }]));
   }
   if (action === 'history') {
+    // Only what can be reopened is listed: a record of an unknown agent cannot be.
     return (await listHistory(req.cwd)).map(r => ({ recordId: r.acpxRecordId, cardId: r.acpxRecordId, cwd: r.cwd,
-      title: r.title || r.name || r.acpxRecordId, updatedAt: r.lastUsedAt, agent: agentOf(r) }));
+      title: r.title || r.name || r.acpxRecordId, updatedAt: r.lastUsedAt, agent: agentOf(r) })).filter(r => r.agent);
   }
   if (action === 'history_native') {
     const env = await sessionEnvironment({ root, cwd: req.cwd, env: req.env, terminalRc: req.terminalRc });
