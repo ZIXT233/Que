@@ -459,8 +459,10 @@ async function dispatch(req, client) {
   return control(id, req);
 }
 
-// Logging must never reach a protocol stream.
+// Logging must never reach a protocol stream, nor crash the owner once Que's
+// end of stderr is gone (EPIPE) — that is exactly when agents must be stopped.
 console.log = console.info = console.error;
+process.stderr.on('error', () => {});
 fs.writeFileSync(remoteBridgePath, FLAT_MCP_BRIDGE_SOURCE, { mode: 0o600 });
 try { fs.unlinkSync(mcpSocketPath); } catch {}
 await mcpHub.listen();
