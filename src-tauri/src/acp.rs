@@ -15,56 +15,6 @@ fn accept_snapshot(values: &mut HashMap<String, Value>, id: &str, next: Value) -
     true
 }
 
-#[derive(Debug, PartialEq)]
-pub(crate) enum DeltaOutcome { Applied, Stale, Gap }
-
-/// Apply an owner `delta` (see runtime/session-wire.mjs) to a cached session.
-/// `Stale` means the snapshot already includes it; `Gap` means it cannot be applied
-/// and a full snapshot must be requested. A rejected delta never changes the cache:
-/// ops run on copies of the touched turns, which replace the originals only on success.
-/// tests/acp/delta-vectors.json pins this to the UI applier in src/lib/acp-delta.ts.
-pub(crate) fn apply_delta(snapshot: &mut Value, delta: &Value) -> DeltaOutcome {
-    use DeltaOutcome::*;
-    let Some(revision) = snapshot["revision"].as_u64() else { return Gap };
-    if !snapshot["ownerEpoch"].is_string() || snapshot["ownerEpoch"] != delta["epoch"] { return Gap; }
-    let (Some(base), Some(rev), Some(ops)) = (delta["base"].as_u64(), delta["rev"].as_u64(), delta["ops"].as_array()) else { return Gap };
-    if rev <= revision { return Stale; }
-    if base != revision { return Gap; }
-    let Some(turns) = snapshot["turns"].as_array() else { return Gap };
-    let mut touched: HashMap<String, Value> = HashMap::new();
-    let mut sets: Vec<(&str, &Value)> = Vec::new();
-    for op in ops {
-        let kind = op["op"].as_str();
-        if kind == Some("set") {
-            match op["key"].as_str() { Some(key @ ("context" | "commands")) => sets.push((key, &op["value"])), _ => return Gap }
-            continue;
-        }
-        if !matches!(kind, Some("append" | "block")) { return Gap; }
-        let (Some(turn_id), Some(index)) = (op["turn"].as_str(), op["block"].as_u64().map(|v| v as usize)) else { return Gap };
-        if !touched.contains_key(turn_id) {
-            let Some(turn) = turns.iter().find(|turn| turn["id"] == turn_id) else { return Gap };
-            touched.insert(turn_id.to_string(), turn.clone());
-        }
-        let Some(blocks) = touched.get_mut(turn_id).and_then(|turn| turn["blocks"].as_array_mut()) else { return Gap };
-        if kind == Some("block") {
-            if index > blocks.len() { return Gap; }
-            if index == blocks.len() { blocks.push(op["value"].clone()); } else { blocks[index] = op["value"].clone(); }
-        } else {
-            let (Some(text), Some(Value::String(current))) = (op["text"].as_str(), blocks.get_mut(index).map(|block| &mut block["text"])) else { return Gap };
-            current.push_str(text);
-        }
-    }
-    let sets: Vec<(String, Value)> = sets.into_iter().map(|(key, value)| (key.to_string(), value.clone())).collect();
-    if let Some(turns) = snapshot["turns"].as_array_mut() {
-        for turn in turns.iter_mut() {
-            if let Some(updated) = turn["id"].as_str().and_then(|id| touched.remove(id)) { *turn = updated; }
-        }
-    }
-    for (key, value) in sets { snapshot[key.as_str()] = value; }
-    snapshot["revision"] = json!(rev);
-    Applied
-}
-
 fn publish_snapshot(updates: &broadcast::Sender<AcpUpdate>, id: &str, snapshot: &Value) {
     if updates.receiver_count() > 0 { let _ = updates.send(AcpUpdate{id:id.into(),event:"snapshot",data:snapshot.to_string()}); }
 }
@@ -287,13 +237,10 @@ impl AcpRuntime {
                             }
                             seen.insert(id);
                         } else if let Some(id) = value["id"].as_str().filter(|_| value["event"] == "delta").map(str::to_string) {
-                            // Streaming text changes no queue state, so deltas do not wake the queue.
-                            let outcome = snapshots.lock().get_mut(&id).map_or(DeltaOutcome::Gap, |cache| apply_delta(cache,&value));
-                            match outcome {
-                                DeltaOutcome::Applied => if updates.receiver_count() > 0 { let _ = updates.send(AcpUpdate{id:id.clone(),event:"delta",data:value.to_string()}); },
-                                DeltaOutcome::Stale => {}
-                                DeltaOutcome::Gap => { let _ = reverse_input.send(format!("{}\n",json!({"action":"resync","id":id})).into_bytes()); }
-                            }
+                            // Deltas carry streaming detail only the UI shows: pass them through.
+                            // Queue decisions use full snapshots, which the owner sends on every
+                            // state change; a UI that misses a delta asks for a snapshot itself.
+                            if updates.receiver_count() > 0 { let _ = updates.send(AcpUpdate{id:id.clone(),event:"delta",data:value.to_string()}); }
                             seen.insert(id);
                         } else if value["event"] == "mcp_request" && is_remote {
                             let request_id=value["requestId"].clone();
@@ -399,29 +346,6 @@ mod lifecycle_tests {
         assert!(!accept_snapshot(&mut values,"card",json!({"ownerEpoch":"one","revision":7,"state":"starting","turns":[]})));
         assert_eq!(values["card"],current);
         assert!(accept_snapshot(&mut values,"card",json!({"ownerEpoch":"two","revision":0,"state":"not_running"})));
-    }
-    #[test]
-    fn delta_vectors_match_the_ui_applier() {
-        let vectors: Vec<Value> = serde_json::from_str(include_str!("../../tests/acp/delta-vectors.json")).unwrap();
-        assert!(vectors.len() > 10);
-        for vector in vectors {
-            let mut snapshot = vector["before"].clone();
-            let outcome = apply_delta(&mut snapshot, &vector["delta"]);
-            match vector["after"].as_str() {
-                Some("stale") => assert_eq!(outcome, DeltaOutcome::Stale, "{}", vector["name"]),
-                Some("gap") => assert_eq!(outcome, DeltaOutcome::Gap, "{}", vector["name"]),
-                _ => { assert_eq!(outcome, DeltaOutcome::Applied, "{}", vector["name"]); assert_eq!(snapshot, vector["after"], "{}", vector["name"]); continue; }
-            }
-            assert_eq!(snapshot, vector["before"], "{}: a rejected delta leaves the cache untouched", vector["name"]);
-        }
-    }
-    #[test]
-    fn a_delta_that_fails_midway_changes_nothing() {
-        let before = json!({"ownerEpoch":"e","revision":1,"turns":[{"id":"t","blocks":[{"type":"text_delta","text":"ab"}]}]});
-        let mut snapshot = before.clone();
-        let delta = json!({"epoch":"e","base":1,"rev":2,"ops":[{"op":"append","turn":"t","block":0,"text":"cd"},{"op":"append","turn":"t","block":5,"text":"!"}]});
-        assert_eq!(apply_delta(&mut snapshot, &delta), DeltaOutcome::Gap);
-        assert_eq!(snapshot, before, "the first op must not leak when a later op is rejected");
     }
     #[test]
     fn lines_are_reassembled_across_reads_without_rescanning() {
