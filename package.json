@@ -5,7 +5,7 @@
   "description": "Queue of Agent Cues — schedule your attention with a unified queue of waiting Agent sessions.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run build:acp && vite",
     "dev:que": "FLAT_DATA_DIR=\"$HOME/.flat-dev\" tauri dev",
     "build": "npm run build:acp && tsc && vite build",
     "preview": "vite preview",

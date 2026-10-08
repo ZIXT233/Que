@@ -142,17 +142,22 @@ async function ensure(input) {
   // Revisions only grow per card within an owner: a replacement session that
   // restarted at 0 would look stale to every client and never be shown.
   let revision = existing?.revision;
+  // A replacement gets its own acpx record; it must never load the old agent's.
+  let generation = 0;
   if(existing?.historyMissing)throw Error('找不到该会话的 acpx 历史记录，已保留发送收据；不会自动创建新会话替代');
   if (existing && (existing.cwd !== cwd || existing.agent !== agent)) {
     const saved = existing.recordId && await history.store.load(existing.recordId);
     // A failed first spawn has no conversation to protect. Retain all bindings
     // that have a native identity, history, or an in-flight startup.
-    if (owner || existing.resumeSessionId || existing.turns.length || saved
+    // An empty record (agent started, nothing said) has no conversation to protect.
+    if (owner || existing.resumeSessionId || existing.turns.length || saved?.messages?.length
         || !['error','not_running'].includes(existing.state)) {
       throw Error('这张卡片已绑定其他 Agent 或工作目录，请使用新卡片；已有会话不会被替换');
     }
     // Recheck after the disk read in case another ensure began concurrently.
     if (owners.has(id) || sessions[id] !== existing) throw Error('会话正在启动，请稍后重试');
+    // Bindings persist recordId, not generation: derive it so repeated switches never collide.
+    generation = Math.max(existing.generation || 0, Number(existing.recordId?.split(':').pop()) || 0) + 1;
     wire.forget(id);delete sessions[id];delete bindings[id];checkpoint();
   }
   owner = owners.get(id);
@@ -167,7 +172,7 @@ async function ensure(input) {
     })();
     return owner.preparing;
   }
-  const s = sessions[id] ||= { id, cwd, agent, hostAccess: true, turns: [], generation: 0, revision };
+  const s = sessions[id] ||= { id, cwd, agent, hostAccess: true, turns: [], generation, revision };
   s.mcpBridge = input.mcpBridge || s.mcpBridge;
   s.mcpRelay = input.mcpRelay === true || s.mcpRelay;
   s.connectionId = randomUUID();

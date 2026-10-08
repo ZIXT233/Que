@@ -77,7 +77,7 @@ test('a second owner on the same data waits for the first instead of sharing it'
 
 test('switching a failed card to another agent publishes a newer revision, so clients show it',async()=>{
   const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
-  writeFileSync(path.join(root,'agents.json'),JSON.stringify({broken:[process.execPath,'-e','process.exit(1)'],fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
+  writeFileSync(path.join(root,'agents.json'),JSON.stringify({broken:[process.execPath,'-e','process.exit(1)'],fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')],second:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   try{
     const {child,rpc}=start(root,pidFile);
     // Retries push the failed session's revision well past a fresh session's startup.
@@ -87,6 +87,11 @@ test('switching a failed card to another agent publishes a newer revision, so cl
     const switched=await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
     assert.equal(switched.agent,'fixture');
     assert.ok(switched.revision>failed.revision,`revision ${switched.revision} must exceed ${failed.revision}`);
+    // A started-but-silent session has an (empty) acpx record; switching must still work,
+    // and the new agent gets its own record instead of loading the old one.
+    await rpc({action:'close',id:'card'});
+    const again=await rpc({action:'ensure',id:'card',cwd:root,agent:'second'});
+    assert.equal(again.agent,'second');assert.notEqual(again.recordId,switched.recordId);
     child.stdin.end();await until(()=>child.exitCode!==null);
   }finally{for(const pid of agentPids(pidFile))try{process.kill(pid,'SIGKILL')}catch{};rmSync(root,{recursive:true,force:true});}
 });

@@ -33,13 +33,14 @@ export function missingAgentCommand(registry, agent, env) {
 
 // npx adapters wrap a CLI that must itself be installed and signed in; npx
 // existing says nothing about whether the agent can actually be used.
-const ADAPTER_CLI = { codex: 'codex', claude: 'claude', pi: 'pi' };
+// Packages fetched by npx/uvx only count once their CLI is installed and set up.
+const ADAPTER_CLI = { codex: 'codex', claude: 'claude', pi: 'pi', opencode: 'opencode', kilocode: 'kilocode', mux: 'mux', 'fast-agent': 'fast-agent' };
 
 /** Whether this machine can run `agent`, for ordering the picker. Never blocks a choice. */
 export function agentAvailability(registry, agent, env) {
   let resolved;
   try { resolved = registry.resolve(agent); } catch { return { available: false, missing: agent }; }
   const command = Array.isArray(resolved) ? resolved[0] : String(resolved ?? '').trim().split(/\s+/)[0];
-  const needed = command === 'npx' && ADAPTER_CLI[agent] ? ADAPTER_CLI[agent] : command;
+  const needed = ['npx', 'uvx'].includes(command) ? ADAPTER_CLI[agent] ?? `${agent}（需通过 ${command} 下载）` : command;
   return findExecutable(needed, env) ? { available: true } : { available: false, missing: needed };
 }
