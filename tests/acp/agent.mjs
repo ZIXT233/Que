@@ -10,6 +10,8 @@ readline.createInterface({input:process.stdin}).on('line', async line => {
   const message=JSON.parse(line), {id, method,params}=message;
   if (!method) {respond?.(message.result ?? {error:message.error});return;}
   if(process.env.FLAT_TEST_EMPTY_ROLLOUT && ['session/load','session/resume'].includes(method) && !fs.existsSync(process.env.FLAT_TEST_EMPTY_ROLLOUT)) {
+    // Codex reports a missing rollout; Devin just says the session is unknown.
+    if(process.env.FLAT_TEST_LOAD_ERROR==='not-found'){send({id,error:{code:-32602,message:'Session not found'}});return;}
     send({id,error:{code:-32603,message:'Internal error',data:{details:'no rollout found for thread id '+params.sessionId}}});return;
   }
   if(method==='session/load' && params.sessionId==='locked-native') {

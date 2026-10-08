@@ -192,6 +192,9 @@ async function ensure(input) {
     // Older imports resumed without replay, leaving an empty local record.
     // Re-load the same native ID, retaining the old file until a successful save.
     let needsHistoryReplay = !!s.resumeSessionId && !!saved && !saved.messages?.length;
+    // A session that never exchanged a message has nothing to lose, and some agents
+    // (Devin) do not keep it; start a new one rather than fail to resume it.
+    let freshStart = !s.resumeSessionId && !!saved && !saved.messages?.length && !s.turns.length;
     const agentEnvironment = await sessionEnvironment({root, cwd, env, terminalRc:input.terminalRc});
     const missing = missingAgentCommand(agentRegistry, agent, agentEnvironment);
     if (missing) throw Error(missing);
@@ -199,7 +202,7 @@ async function ensure(input) {
     if (/^npx\b/.test([agentRegistry.resolve(agent)].flat().join(' '))) { s.stage = 'installing'; publish(id); }
     owner.runtime = createAcpRuntime({ cwd, agentProcessEnv: agentEnvironment, agentRegistry,
       mcpServers: s.mcpRelay ? [{name:'flat',command:process.execPath,args:[remoteBridgePath],env:[{name:'FLAT_MCP_SOCKET',value:mcpSocketPath},{name:'FLAT_MCP_CAPABILITY',value:mcpHub.capability(id,s.connectionId)}]}] : s.mcpBridge ? [{name:'flat',command:process.execPath,args:[s.mcpBridge],env:[{name:'FLAT_SOURCE_CARD',value:id},{name:'FLAT_SOURCE_EPOCH',value:s.connectionId}]}] : [],
-      sessionStore: { load: key => needsHistoryReplay && key === s.recordId ? Promise.resolve(undefined) : records.load(key), save: async record => { needsHistoryReplay = false;
+      sessionStore: { load: key => (needsHistoryReplay || freshStart) && key === s.recordId ? Promise.resolve(undefined) : records.load(key), save: async record => { needsHistoryReplay = false; freshStart = false;
         const known=new Set(s.turns.map(t=>t.messageId).filter(Boolean));
         const fresh=(record.messages||[]).filter(m=>m.User&&!known.has(m.User.id));
         const pending=s.turns.filter(t=>!t.messageId&&['queued','running'].includes(t.state));

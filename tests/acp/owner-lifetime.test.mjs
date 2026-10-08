@@ -95,3 +95,17 @@ test('switching a failed card to another agent publishes a newer revision, so cl
     child.stdin.end();await until(()=>child.exitCode!==null);
   }finally{for(const pid of agentPids(pidFile))try{process.kill(pid,'SIGKILL')}catch{};rmSync(root,{recursive:true,force:true});}
 });
+
+test('a session that never exchanged a message starts fresh when the agent cannot resume it',async()=>{
+  const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
+  writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
+  // The fixture can only load sessions after a prompt was persisted, like Devin.
+  const {child,rpc}=start(root,pidFile,{FLAT_TEST_EMPTY_ROLLOUT:path.join(root,'rollout'),FLAT_TEST_LOAD_ERROR:'not-found'});
+  try{
+    await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
+    await rpc({action:'close',id:'card'});
+    await rpc({action:'send',id:'card',requestId:'hello',text:'hh'});
+    let turn;for(let i=0;i<200;i++){turn=(await rpc({action:'read',id:'card'})).turns.find(t=>t.id==='hello');if(['completed','failed'].includes(turn?.state))break;await sleep(40);}
+    assert.equal(turn.state,'completed',JSON.stringify(turn?.result));
+  }finally{child.stdin.end();await until(()=>child.exitCode!==null);for(const pid of agentPids(pidFile))try{process.kill(pid,'SIGKILL')}catch{};rmSync(root,{recursive:true,force:true});}
+});
