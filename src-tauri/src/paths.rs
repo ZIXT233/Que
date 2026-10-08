@@ -30,6 +30,10 @@ pub(crate) fn set_test_home(home: PathBuf) {
 }
 
 pub fn data_dir() -> PathBuf {
+    // Unit tests never touch the user's data, logs included.
+    #[cfg(test)]
+    return std::env::temp_dir().join(format!("flat-unit-tests-{}", std::process::id()));
+    #[allow(unreachable_code)]
     if let Ok(path) = std::env::var("FLAT_DATA_DIR") {
         return expand_user(&path);
     }
