@@ -391,6 +391,9 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
         })}
       </div>
       {cards.map((card, index) => <div className="cq-snap-point" key={card.id} style={{ left: index * step }} aria-hidden="true" />)}
+      {/* WebKitGTK (Linux) leaves the scroller's end padding out of its scroll
+          range, so the last card could never be reached. A real element spans it. */}
+      <div className="cq-deck-end" aria-hidden="true" />
     </div>
   </div>;
 }

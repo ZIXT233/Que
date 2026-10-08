@@ -250,6 +250,7 @@ html.dark .cq-history-list .cq-history-nickname { color: hsl(var(--cq-nickname-h
 
 /* Stack previews extend outside the full-width foreground card. */
 .cq-deck-scroller{right:calc(-1 * var(--cq-deck-bleed-right,160px));padding-right:var(--cq-deck-bleed-right,160px)}
+.cq-deck-end{position:absolute;left:100%;top:0;width:var(--cq-deck-bleed-right,160px);height:1px;pointer-events:none}
 
 /* Dim only the preview surface, keeping card edges and shadows crisp. A
    translucent tint is used instead of backdrop-filter: blurring a moving
