@@ -51,7 +51,7 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
   let stderr = ''; child.stderr.on('data', d => stderr += d);
   const lines = readline.createInterface({ input: child.stdout });
   const address = new Promise((resolve, reject) => { lines.on('line', line => { try { const v = JSON.parse(line); if (v.base) resolve(v.base); } catch {} }); child.once('exit', () => reject(Error(stderr))); });
-  const card = 'b071e000-0000-4000-8000-000000000001';
+  let card;
   let ownerPid, stream, second;
   try {
     const base = await address;
@@ -61,7 +61,9 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
     };
     const acpRoot = path.join(root, 'que', 'acp'); await mkdir(acpRoot, { recursive: true });
     await writeFile(path.join(acpRoot, 'agents.json'), JSON.stringify({ codex: [process.execPath, path.resolve('tests/acp/agent.mjs')] }));
-    await request('/api/card-queue', { action: 'butler_open' });
+    // The Butler button only opens the card; the agent is chosen on it.
+    card = (await request('/api/card-queue', { action: 'butler_open' })).butlerId;
+    await request('/api/card-queue', { action: 'harness_start', id: card, kind: 'codex' });
 
     stream = await subscribe(`${base}/api/acp/${card}/events`);
     await until(() => stream.events.length, 'the initial snapshot');

@@ -154,23 +154,10 @@ pub(crate) async fn post_queue(
         .to_string();
     if action == "butler_open" {
         crate::butler::install()?;
-        state.queue.with_queue(false, |q| crate::butler::ensure(q)).await?;
-        // Only opens the Butler; the card itself offers picking or resuming an agent.
-        return Ok(Json(with_cwd(state.queue.read_snapshot()?,&state)));
-    }
-    if action == "harness_new" {
-        // "New session": stop the card's agent and return the card to the picker.
-        // The next start replaces the session; its transcript stays in history.
-        let id = body["id"].as_str().ok_or_else(|| AppError::msg("缺少卡片"))?.to_string();
-        if let Ok(ws) = acp_workspace(&state, &id).await {
-            let _ = state.harness.request(&ws, &state.bin_dir, json!({"action":"close","id":id})).await;
-        }
-        state.queue.with_queue(false, |q| {
-            let card = q.cards.iter_mut().find(|c| c.id == id).ok_or_else(|| AppError::msg("卡片不存在"))?;
-            card.harness = None; card.phase = crate::models::CardPhase::Draft;
-            Ok(())
-        }).await?;
-        return Ok(Json(with_cwd(state.queue.read_snapshot()?,&state)));
+        let id = state.queue.with_queue(false, |q| crate::butler::ensure(q)).await?;
+        let mut queue = with_cwd(state.queue.read_snapshot()?, &state);
+        queue["butlerId"] = json!(id);
+        return Ok(Json(queue));
     }
     if action == "workspace_rc_verify" {
         let queue = state.queue.read_snapshot()?;
@@ -551,7 +538,7 @@ pub(crate) async fn launch_harness(
             id,
             kind,
             &captured.1,
-            action == "harness_start",
+            resume.clone(),
             &state.terminals,
             &state.settings,
             &state.bin_dir,

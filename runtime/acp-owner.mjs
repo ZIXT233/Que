@@ -135,19 +135,12 @@ async function metadata(id) {
   publish(id);
 }
 async function ensure(input) {
-  const { id, cwd, agent, env = {}, fresh = false } = input;
+  const { id, cwd, agent, env = {} } = input;
   if (!id || !cwd || (!registry.list().includes(agent) && !sessions[id]?.recordId)) throw Error('Invalid session target');
   let owner = owners.get(id);
   const existing = sessions[id];
-  // A card either resumes its own session or, when started fresh from the picker,
-  // replaces it with a new one; the old transcript stays in history.
-  if (existing && fresh) {
-    if (owner?.preparing || owner?.controlBusy || owner?.turns.size) throw Error('会话正在运行，请先停止');
-    await owner?.runtime?.shutdown().catch(() => {}); owners.delete(id);
-    wire.forget(id); delete sessions[id]; delete bindings[id];
-  } else if (existing && (existing.cwd !== cwd || existing.agent !== agent)) {
-    throw Error('这张卡片绑定了另一个 Agent，请点“新会话”重新选择');
-  }
+  // A card is one session: it is never rebound to another agent or directory.
+  if (existing && (existing.cwd !== cwd || existing.agent !== agent)) throw Error('这张卡片已绑定另一个 Agent 或目录');
   if (sessions[id]?.historyMissing) throw Error('找不到该会话的 acpx 历史记录，已保留发送收据；不会自动创建新会话替代');
   owner = owners.get(id);
   if (owner?.preparing) return owner.preparing;
@@ -161,8 +154,7 @@ async function ensure(input) {
     })();
     return owner.preparing;
   }
-  // Revisions keep growing across a replacement, or clients would drop it as stale.
-  const s = sessions[id] ||= { id, cwd, agent, hostAccess: true, turns: [], revision: existing?.revision };
+  const s = sessions[id] ||= { id, cwd, agent, hostAccess: true, turns: [] };
   s.mcpBridge = input.mcpBridge || s.mcpBridge;
   s.mcpRelay = input.mcpRelay === true || s.mcpRelay;
   s.connectionId = randomUUID();
@@ -171,7 +163,7 @@ async function ensure(input) {
   owners.set(id, owner);
   owner.preparing = (async () => {
     try {
-    s.recordId ||= `flat:${id}:${randomUUID()}`;
+    s.recordId ||= `flat:${id}`;
     const records = history.store;
     const saved=await records.load(s.recordId);
     if(saved?.pid) {

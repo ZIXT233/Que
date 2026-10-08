@@ -1,6 +1,5 @@
 use crate::{error::AppResult, models::{CardQueue, QueueCard, QueueWorkspace}};
 use serde_json::json;
-pub const CARD_ID:&str="b071e000-0000-4000-8000-000000000001";
 pub const WORKSPACE_ID:&str="flat-butler";
 pub fn root()->std::path::PathBuf {crate::paths::user_home().unwrap_or_default().join(".flat/butler")}
 pub fn install()->AppResult<()> {
@@ -17,15 +16,19 @@ fn install_at(root:&std::path::Path)->AppResult<()> {
  }
  Ok(())
 }
-pub fn is_card(card:&QueueCard)->bool {card.id==CARD_ID && card.workspace_id.as_deref()==Some(WORKSPACE_ID) && std::path::Path::new(&card.cwd)==root()}
-pub fn ensure(queue:&mut CardQueue)->AppResult<()> {
+/// A Butler card is any card in the Butler workspace. Like every card it is one
+/// session: when that is done or broken it is archived and a new Butler card made.
+pub fn is_card(card:&QueueCard)->bool {card.workspace_id.as_deref()==Some(WORKSPACE_ID) && std::path::Path::new(&card.cwd)==root()}
+/// Returns the active Butler card, creating one when there is none.
+pub fn ensure(queue:&mut CardQueue)->AppResult<String> {
  let cwd=root().to_string_lossy().into_owned();
  let workspaces=queue.workspaces.get_or_insert_with(Vec::new);
  if !workspaces.iter().any(|w|w.id==WORKSPACE_ID) {workspaces.push(QueueWorkspace{id:WORKSPACE_ID.into(),name:"Butler".into(),kind:"local".into(),cwd:cwd.clone(),runtime_cwd:cwd.clone(),ssh_host:None,terminal_rc:None,session_env:Default::default(),default_conversation_weight:None});}
- if let Some(card)=queue.cards.iter_mut().find(|c|c.id==CARD_ID) {card.archived_at=None;card.remind_at=None;}
- else {queue.cards.push(serde_json::from_value(json!({"id":CARD_ID,"workspaceId":WORKSPACE_ID,"cwd":cwd,"nickname":"Butler","phase":"draft","createdAt":crate::queue::now_ms()}))?);}
- if !queue.order.iter().any(|id|id==CARD_ID) {queue.order.insert(0,CARD_ID.into());}
- Ok(())
+ if let Some(card)=queue.cards.iter().find(|c|is_card(c) && c.archived_at.is_none()) {return Ok(card.id.clone());}
+ let id=uuid::Uuid::new_v4().to_string();
+ queue.cards.push(serde_json::from_value(json!({"id":id,"workspaceId":WORKSPACE_ID,"cwd":cwd,"nickname":"Butler","phase":"draft","createdAt":crate::queue::now_ms()}))?);
+ queue.order.insert(0,id.clone());
+ Ok(id)
 }
 
 #[cfg(test)]
@@ -41,10 +44,15 @@ mod tests {
   assert!(std::fs::read_to_string(dir.join("ROLE.md")).unwrap().contains("Flat MCP"));
   std::fs::remove_dir_all(dir).unwrap();
  }
- #[test] fn singleton_and_identity_are_stable() {
+ #[test] fn one_active_butler_card_and_a_new_one_after_archiving() {
   let mut q:CardQueue=crate::models::CardQueue::empty();
-  ensure(&mut q).unwrap();ensure(&mut q).unwrap();
+  let first=ensure(&mut q).unwrap();assert_eq!(ensure(&mut q).unwrap(),first);
   assert_eq!(q.cards.len(),1);assert_eq!(q.workspaces.as_ref().unwrap().len(),1);
-  assert!(is_card(&q.cards[0]));q.cards[0].cwd="/tmp".into();assert!(!is_card(&q.cards[0]));
+  assert!(is_card(&q.cards[0]));
+  // A card is one session: an archived Butler stays archived; the next one is new.
+  q.cards[0].archived_at=Some(1);
+  let second=ensure(&mut q).unwrap();
+  assert_ne!(second,first);assert_eq!(q.cards.len(),2);assert!(q.cards[0].archived_at.is_some());
+  q.cards[1].cwd="/tmp".into();assert!(!is_card(&q.cards[1]));
  }
 }

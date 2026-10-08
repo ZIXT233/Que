@@ -1193,7 +1193,7 @@ async fn sync_butler_watches(state:&AppState) -> AppResult<()> {
 /// Events collected for the Butler since its last digest, as (watch, event, target card, detail).
 pub(crate) async fn butler_backlog(state:&AppState) -> Vec<(String,String,String,Value)> {
     let Ok(queue)=state.queue.read_snapshot() else {return Vec::new()};
-    let Some(butler)=queue.cards.iter().find(|c|crate::butler::is_card(c)) else {return Vec::new()};
+    let Some(butler)=queue.cards.iter().find(|c|crate::butler::is_card(c) && c.archived_at.is_none()) else {return Vec::new()};
     let tools=state.mcp.tools.lock().await;
     tools.watches.iter().filter(|(_,w)|w.scope.source_card.as_deref()==Some(butler.id.as_str()))
         .flat_map(|(key,w)|w.pending.iter().map(move |(event,detail)|(key.clone(),event.clone(),w.scope.card.clone(),detail.clone()))).collect()

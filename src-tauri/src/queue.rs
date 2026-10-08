@@ -189,13 +189,13 @@ pub fn pin_draft(state: &mut CardQueue) {
     let draft = state
         .cards
         .iter()
-        .filter(|c| c.session.is_none() && c.harness.is_none() && c.id != crate::butler::CARD_ID)
+        .filter(|c| c.session.is_none() && c.harness.is_none() && !crate::butler::is_card(c))
         .max_by_key(|c| c.created_at)
         .map(|c| c.id.clone());
     let Some(draft_id) = draft else { return };
     state
         .cards
-        .retain(|c| c.session.is_some() || c.harness.is_some() || c.id == draft_id || c.id == crate::butler::CARD_ID);
+        .retain(|c| c.session.is_some() || c.harness.is_some() || c.id == draft_id || crate::butler::is_card(c));
     let ids: HashSet<_> = state
         .cards
         .iter()
@@ -286,7 +286,7 @@ pub fn select_workspace_for_draft(state: &mut CardQueue, workspace: &QueueWorksp
     if let Some(draft) = state
         .cards
         .iter_mut()
-        .find(|c| c.session.is_none() && c.harness.is_none() && c.id != crate::butler::CARD_ID)
+        .find(|c| c.session.is_none() && c.harness.is_none() && !crate::butler::is_card(c))
     {
         draft.cwd = workspace.runtime_cwd.clone();
         draft.workspace_id = Some(workspace.id.clone());

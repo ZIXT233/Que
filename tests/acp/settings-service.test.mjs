@@ -12,12 +12,14 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin')},stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',d=>stderr+=d);
  const lines=readline.createInterface({input:child.stdout});
  const address=new Promise((resolve,reject)=>{lines.on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v.base)}catch{}});child.once('exit',()=>reject(Error(stderr)))});
- const card='b071e000-0000-4000-8000-000000000001';let ownerPid;
+ let card,ownerPid;
  try{
   const base=await address;
   const request=async(route,body,headers={})=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...headers},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error||JSON.stringify(data));return data;};
   const acpRoot=path.join(root,'que','acp');await mkdir(acpRoot,{recursive:true});await writeFile(path.join(acpRoot,'agents.json'),JSON.stringify({codex:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-  await request('/api/card-queue',{action:'butler_open'});
+  // The Butler button only opens the card; the agent is chosen on it.
+  card=(await request('/api/card-queue',{action:'butler_open'})).butlerId;
+  await request('/api/card-queue',{action:'harness_start',id:card,kind:'codex'});
   const session=await request('/api/acp/'+card);ownerPid=Number(await readFile(path.join(acpRoot,'owner.pid'),'utf8'));
   const discovery=JSON.parse(await readFile(path.join(root,'que','mcp','endpoint.json'),'utf8'));
   const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-Flat-Source-Epoch':session.connectionId};

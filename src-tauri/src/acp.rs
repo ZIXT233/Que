@@ -323,7 +323,7 @@ impl AcpRuntime {
             body.as_object_mut().map(|v|v.remove("mcpBridge"));
         }
         body.as_object_mut().map(|v|v.remove("butlerContext"));
-        if workspace.id==crate::butler::WORKSPACE_ID && workspace.kind=="local" && std::path::Path::new(&workspace.cwd)==crate::butler::root() && body["id"]==crate::butler::CARD_ID && body["action"]=="send" {
+        if workspace.id==crate::butler::WORKSPACE_ID && workspace.kind=="local" && std::path::Path::new(&workspace.cwd)==crate::butler::root() && body["action"]=="send" {
             body["butlerContext"]=json!(include_str!("../../resources/butler/ROLE.md"));
         }
         let link = self.link(workspace, bin).await?;
@@ -370,9 +370,8 @@ impl AcpRuntime {
         }
         Ok(result)
     }
-    /// `fresh` starts a new session (picker); otherwise the card's own session is resumed.
-    pub async fn launch(&self, id: &str, kind: &str, workspace: &QueueWorkspace, fresh: bool, _: &TerminalHub, _: &crate::settings::SettingsStore, bin: &Path, _: bool) -> AppResult<HarnessSession> {
-        self.request(workspace, bin, json!({"action":"ensure","id":id,"agent":kind,"cwd":workspace.cwd,"env":workspace.session_env,"fresh":fresh})).await?;
+    pub async fn launch(&self, id: &str, kind: &str, workspace: &QueueWorkspace, _resume: Option<HarnessSession>, _: &TerminalHub, _: &crate::settings::SettingsStore, bin: &Path, _: bool) -> AppResult<HarnessSession> {
+        self.request(workspace, bin, json!({"action":"ensure","id":id,"agent":kind,"cwd":workspace.cwd,"env":workspace.session_env})).await?;
         serde_json::from_value(json!({"kind":kind,"terminalId":id,"state":"attention","version":"acpx 0.19.3","remote":workspace.kind == "ssh"})).map_err(Into::into)
     }
 }
