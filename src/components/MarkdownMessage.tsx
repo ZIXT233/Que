@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, type ReactNode } from "react";
+import React, { memo, useMemo, useState, type ReactNode } from "react";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -338,6 +338,12 @@ export function renderInline(text: string, keyPrefix = "inline"): ReactNode[] {
   const nodes: ReactNode[] = [];
   let remaining = text;
   let keyIndex = 0;
+  // Plain text is split at every candidate token start; keep it one text node.
+  const pushText = (value: string) => {
+    const last = nodes.length - 1;
+    if (typeof nodes[last] === "string") nodes[last] += value;
+    else nodes.push(value);
+  };
 
   while (remaining.length > 0) {
     // 1. Inline code: `code`
@@ -438,13 +444,13 @@ export function renderInline(text: string, keyPrefix = "inline"): ReactNode[] {
     // 9. Plain text up to the next potential token
     const nextSpecial = remaining.search(/[`[h*_~\n]|https?:\/\//);
     if (nextSpecial === -1) {
-      nodes.push(remaining);
+      pushText(remaining);
       break;
     } else if (nextSpecial === 0) {
-      nodes.push(remaining[0]);
+      pushText(remaining[0]);
       remaining = remaining.slice(1);
     } else {
-      nodes.push(remaining.slice(0, nextSpecial));
+      pushText(remaining.slice(0, nextSpecial));
       remaining = remaining.slice(nextSpecial);
     }
   }
@@ -452,7 +458,8 @@ export function renderInline(text: string, keyPrefix = "inline"): ReactNode[] {
   return nodes;
 }
 
-export function MarkdownMessage({
+// Chat polls rebuild the transcript; unchanged messages must not be re-rendered.
+export const MarkdownMessage = memo(function MarkdownMessage({
   content,
   role,
 }: {
@@ -563,4 +570,4 @@ export function MarkdownMessage({
       })}
     </div>
   );
-}
+});

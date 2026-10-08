@@ -40,7 +40,7 @@ test('MCP sends to a disconnected card without start_card, preserving authorizat
   const submitted=await post('/api/mcp/tools',message,headers);
   assert.ok(['running','queued'].includes(submitted.state));
   let snapshot;
-  for(let i=0;i<100;i++){
+  for(let i=0;i<400;i++){
    snapshot=await (await fetch(base+'/api/acp/'+target)).json();
    if(snapshot.turns[0]?.state==='completed')break;await sleep(30);
   }

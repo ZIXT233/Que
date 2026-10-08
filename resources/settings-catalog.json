@@ -108,5 +108,38 @@
         "type": "boolean"
       }
     }
+  },
+  "butlerDigest": {
+    "storageKey": "que:butler-digest",
+    "type": "object",
+    "default": {
+      "mode": "off",
+      "time": "09:00",
+      "intervalHours": 4,
+      "cron": "0 9 * * 1-5"
+    },
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": [
+          "off",
+          "daily",
+          "weekdays",
+          "interval",
+          "custom"
+        ]
+      },
+      "time": {
+        "type": "string"
+      },
+      "intervalHours": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 12
+      },
+      "cron": {
+        "type": "string"
+      }
+    }
   }
 }

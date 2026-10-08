@@ -18,6 +18,8 @@ pub mod headless;
 mod hosts;
 mod live;
 mod mcp;
+mod mailbox;
+mod digest;
 mod mcp_cards;
 mod mcp_settings;
 mod butler;
@@ -228,18 +230,11 @@ pub fn run() {
                     ),
                 );
                 if window.label() == "main" {
-                    #[cfg(any(target_os = "macos", target_os = "windows"))]
-                    {
-                        if let Err(error) = window.hide() {
-                            crate::debuglog::warn(
-                                "app",
-                                &format!("could not hide main window: {error}"),
-                            );
-                        }
-                    }
-                    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-                    {
-                        let _ = window.minimize();
+                    if let Err(error) = window.hide() {
+                        crate::debuglog::warn(
+                            "app",
+                            &format!("could not hide main window: {error}"),
+                        );
                     }
                     api.prevent_close();
                 }
@@ -278,6 +273,11 @@ pub fn run() {
                 );
                 if let Some(hub) = app.try_state::<crate::terminal::TerminalHub>() {
                     hub.shutdown();
+                }
+                if let Some(state) = app.try_state::<crate::api::AppState>() {
+                    let harness = state.harness.clone();
+                    tauri::async_runtime::block_on(harness.shutdown());
+                    crate::debuglog::info("app", "acp-shutdown=complete");
                 }
                 crate::debuglog::info(
                     "app",

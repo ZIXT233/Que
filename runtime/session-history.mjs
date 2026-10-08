@@ -8,7 +8,7 @@ function parseToolContent(value) {try{return typeof value==='string'?JSON.parse(
 // this message. Never throw it away merely because an old messageId exists.
 export function turnReceipt(turn, persistedMessageIds) {
   return {id:turn.id,messageId:turn.messageId,hiddenPrefixLength:turn.hiddenPrefixLength,
-    fingerprint:turn.fingerprint,sender:turn.sender,source:turn.source,state:turn.state,withdrawn:turn.withdrawn,
+    fingerprint:turn.fingerprint,sender:turn.sender,source:turn.source,state:turn.state,withdrawn:turn.withdrawn,at:turn.at,endedAt:turn.endedAt,
     pending:turn.messageId && persistedMessageIds.has(turn.messageId) ? undefined : {text:turn.text,attachments:turn.attachments},
     result:turn.result?{status:turn.result.status,stopReason:turn.result.stopReason,error:turn.result.error}:undefined};
 }
@@ -16,10 +16,13 @@ export function turnReceipt(turn, persistedMessageIds) {
 export function projectRecord(record, receipts = []) {
   const turns=[];
   let turn;
+  // Long histories: look receipts up by message id instead of scanning per message.
+  const byMessage=new Map();
+  for(const r of receipts) if(r.messageId!==undefined && !byMessage.has(r.messageId))byMessage.set(r.messageId,r);
   for(const message of record.messages || []) {
     if(message.User) {
-      const user=message.User, receipt=receipts.find(r=>r.messageId===user.id);
-      turn={id:receipt?.id || user.id,messageId:user.id,hiddenPrefixLength:receipt?.hiddenPrefixLength,text:(user.content||[]).filter(c=>'Text' in c).map(c=>c.Text).join('\n').slice(receipt?.hiddenPrefixLength || 0),attachments:[],blocks:[],sender:receipt?.sender,source:receipt?.source || (receipt?.sender?'agent':'user'),state:receipt?.state === 'unknown' && !receipt.fingerprint && !receipt.result ? 'history' : receipt?.state || 'history',fingerprint:receipt?.fingerprint,withdrawn:receipt?.withdrawn,result:receipt?.result};
+      const user=message.User, receipt=byMessage.get(user.id);
+      turn={id:receipt?.id || user.id,messageId:user.id,hiddenPrefixLength:receipt?.hiddenPrefixLength,text:(user.content||[]).filter(c=>'Text' in c).map(c=>c.Text).join('\n').slice(receipt?.hiddenPrefixLength || 0),attachments:[],blocks:[],sender:receipt?.sender,source:receipt?.source || (receipt?.sender?'agent':'user'),state:receipt?.state === 'unknown' && !receipt.fingerprint && !receipt.result ? 'history' : receipt?.state || 'history',fingerprint:receipt?.fingerprint,withdrawn:receipt?.withdrawn,result:receipt?.result,at:receipt?.at,endedAt:receipt?.endedAt};
       for(const content of user.content||[]) { const media=content.Image||content.Audio;if(media)turn.attachments.push({mediaType:media.mime_type,data:media.source}); }
       turns.push(turn);
     }
@@ -34,24 +37,51 @@ export function projectRecord(record, receipts = []) {
   }
   // A submitted request may not have reached acpx before a crash. Keep its receipt
   // as unknown rather than silently permitting a duplicate submission.
-  for(const receipt of receipts) if(!turns.some(t=>t.id===receipt.id))turns.push({id:receipt.id,fingerprint:receipt.fingerprint,text:receipt.pending?.text || '',attachments:receipt.pending?.attachments || [],sender:receipt.sender,source:receipt.source,withdrawn:receipt.withdrawn,blocks:[],result:receipt.result,state:['completed','failed','cancelled'].includes(receipt.state)?receipt.state:'unknown'});
+  const known=new Set(turns.map(t=>t.id));
+  for(const receipt of receipts) if(!known.has(receipt.id)){known.add(receipt.id);turns.push({id:receipt.id,fingerprint:receipt.fingerprint,text:receipt.pending?.text || '',attachments:receipt.pending?.attachments || [],sender:receipt.sender,source:receipt.source,withdrawn:receipt.withdrawn,blocks:[],result:receipt.result,at:receipt.at,endedAt:receipt.endedAt,state:['completed','failed','cancelled'].includes(receipt.state)?receipt.state:'unknown'});}
   return turns;
 }
 
-export function sessionHistory(stateDir) {
-  const store=createFileSessionStore({stateDir});
+/** Run `task` over `items` with at most `limit` in flight; results keep input order. */
+export async function mapLimit(items, limit, task) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({length: Math.min(limit, items.length)}, async () => {
+    while(next < items.length) { const index = next++; results[index] = await task(items[index], index); }
+  }));
+  return results;
+}
+
+const summarize = r => ({acpxRecordId:r.acpxRecordId,cwd:r.cwd,title:r.title,name:r.name,lastUsedAt:r.lastUsedAt,acpSessionId:r.acpSessionId,agentArgv:r.agentArgv,agentCommand:r.agentCommand});
+
+export function sessionHistory(stateDir, {store=createFileSessionStore({stateDir})}={}) {
+  // Listing must not re-read every transcript: remember each record's summary
+  // until its file changes. A transcript can be many megabytes.
+  const summaries=new Map();
   return {
     store,
     async list(cwd) {
+      const dir=path.join(stateDir,'sessions');
       let names;
-      try {names=await fs.readdir(path.join(stateDir,'sessions'));}catch(error){if(error.code==='ENOENT')return [];throw error;}
-      const records=[];
-      for(const name of names.filter(n=>n.endsWith('.json'))) {
-        let id;try{id=decodeURIComponent(name.slice(0,-5));}catch{continue;}
-        const record=await store.load(id);
-        if(record && (!cwd || path.resolve(record.cwd)===path.resolve(cwd)))records.push(record);
-      }
-      return records.sort((a,b)=>String(b.lastUsedAt).localeCompare(String(a.lastUsedAt)));
+      try {names=await fs.readdir(dir);}catch(error){if(error.code==='ENOENT')return [];throw error;}
+      names=names.filter(n=>n.endsWith('.json'));
+      const live=new Set(names);
+      for(const name of summaries.keys())if(!live.has(name))summaries.delete(name);
+      const found=await mapLimit(names,8,async name=>{
+        let id;try{id=decodeURIComponent(name.slice(0,-5));}catch{return undefined;}
+        let stat;try{stat=await fs.stat(path.join(dir,name));}catch{summaries.delete(name);return undefined;}
+        const stamp=`${stat.mtimeMs}:${stat.size}`;
+        let entry=summaries.get(name);
+        if(entry?.stamp!==stamp){
+          const record=await store.load(id);
+          // A file without an id and workspace is not a usable session record.
+          entry={stamp,summary:record?.acpxRecordId && typeof record.cwd==='string' ? summarize(record) : undefined};
+          summaries.set(name,entry);
+        }
+        return entry.summary;
+      });
+      return found.filter(r=>r && (!cwd || path.resolve(r.cwd)===path.resolve(cwd)))
+        .sort((a,b)=>String(b.lastUsedAt).localeCompare(String(a.lastUsedAt)));
     }
   };
 }
@@ -64,6 +94,8 @@ export function preserveToolContent(record, turns) {
     const blocks=new Map((turn?.blocks||[]).filter(b=>b.type==='tool_call').map(b=>[b.toolCallId,b]));
     for (const [id,result] of Object.entries(message.Agent?.tool_results || {})) {
       const block=blocks.get(id);
+      // A finished tool call never changes again: serialize its content once.
+      if (block && result.flat_content_json !== undefined && result.flat_status === block.status && ['completed','failed'].includes(block.status)) continue;
       if (block?.content !== undefined) result.flat_content_json=JSON.stringify(block.content);
       if (block?.status) result.flat_status=block.status;
     }

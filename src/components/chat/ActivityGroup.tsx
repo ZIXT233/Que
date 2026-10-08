@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useI18n } from '@/hooks/useI18n';
 import { AcpToolResult } from '../AcpToolResult';
 import { MarkdownMessage } from '../MarkdownMessage';
@@ -14,7 +15,9 @@ export function groupActivityBlocks<T extends Activity>(blocks: T[]) {
   }
   return groups;
 }
-export function ActivityGroup({ blocks, running }: { blocks: Activity[]; running: boolean }) {
+// Grouping rebuilds the array every render; compare its items, which keep their
+// identity while a poll leaves them unchanged.
+export const ActivityGroup = memo(function ActivityGroup({ blocks, running }: { blocks: Activity[]; running: boolean }) {
   const { t } = useI18n();
   const tools = blocks.filter(block => block.type === 'tool_call');
   const active = running ? [...tools].reverse().find(block => ['pending','in_progress'].includes(block.status || '')) : undefined;
@@ -30,4 +33,4 @@ export function ActivityGroup({ blocks, running }: { blocks: Activity[]; running
       ? <AcpToolResult key={block.toolCallId || index} block={block}/>
       : <MarkdownMessage key={index} content={block.text || ''} role="assistant"/>)}</div>
   </details>;
-}
+}, (a, b) => a.running === b.running && a.blocks.length === b.blocks.length && a.blocks.every((block, index) => block === b.blocks[index]));

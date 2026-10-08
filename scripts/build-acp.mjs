@@ -1,5 +1,21 @@
 import { build } from 'esbuild';
-import { copyFile, stat, readFile } from 'node:fs/promises';
+import { copyFile, stat, readFile, readdir } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+// acpx exposes native session discovery only on AcpClient, which lives in an internal
+// chunk whose file name and export alias change with every release. Locate both here,
+// so an upgrade either keeps working or fails the build with a clear message.
+const acpxInternals = { name: 'acpx-internals', setup(build) {
+  build.onResolve({filter: /^acpx-internals$/}, () => ({path: 'acpx-internals', namespace: 'acpx-internals'}));
+  build.onLoad({filter: /.*/, namespace: 'acpx-internals'}, async () => {
+    const dist = path.join(path.dirname(createRequire(import.meta.url).resolve('acpx/package.json')), 'dist');
+    const chunks = (await readdir(dist)).filter(name => /^queue-owner-runtime-[\w-]+\.js$/.test(name));
+    if (chunks.length !== 1) throw Error(`acpx internals: expected one queue-owner-runtime chunk in ${dist}, found ${chunks.length}; review before upgrading`);
+    const alias = (await readFile(path.join(dist, chunks[0]), 'utf8')).match(/\bAcpClient as ([A-Za-z_$][\w$]*)/)?.[1];
+    if (!alias) throw Error(`acpx internals: ${chunks[0]} no longer exports AcpClient; native session discovery needs a new seam`);
+    return {contents: `export { ${alias} as AcpClient } from ${JSON.stringify(path.join(dist, chunks[0]))};`, loader: 'js', resolveDir: dist};
+  });
+}};
 // acpx 0.19.3 prefers resume (no transcript replay) when adopting a native
 // session. First import into Flat needs load so acpx stores the replayed messages.
 const nativeHistoryReplay = { name: 'native-history-replay', setup(build) {
@@ -21,7 +37,7 @@ const nativeHistoryReplay = { name: 'native-history-replay', setup(build) {
     return {contents:source.replace(before,after),loader:'js'};
   });
 }};
-await build({ define:{FLAT_MCP_BRIDGE_SOURCE:JSON.stringify(await readFile('scripts/que-mcp.cjs','utf8'))}, plugins:[nativeHistoryReplay], entryPoints: ['runtime/acp-owner.mjs'], outfile: 'src-tauri/resources/bin/flat-acp.mjs', bundle: true, platform: 'node', format: 'esm', target: 'node22', banner: { js: 'import { createRequire as flatCreateRequire } from "node:module";const require=flatCreateRequire(import.meta.url);' } });
+await build({ define:{FLAT_MCP_BRIDGE_SOURCE:JSON.stringify(await readFile('scripts/que-mcp.cjs','utf8'))}, plugins:[nativeHistoryReplay, acpxInternals], entryPoints: ['runtime/acp-owner.mjs'], outfile: 'src-tauri/resources/bin/flat-acp.mjs', bundle: true, platform: 'node', format: 'esm', target: 'node22', banner: { js: 'import { createRequire as flatCreateRequire } from "node:module";const require=flatCreateRequire(import.meta.url);' } });
 
 // Tauri's existing development executable resolves resources from target/debug.
 // Refresh that copy too; a running owner still needs to reconnect to load it.

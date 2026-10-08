@@ -1,6 +1,6 @@
-// acpx 0.19.3 exposes discovery on its client, not its public embedded runtime.
-// Keep this version-pinned seam isolated; the build and fixture test verify it.
-import { Y as AcpClient } from 'acpx/dist/queue-owner-runtime-Dhr4gxNE.js';
+// acpx exposes discovery on its client, not its public embedded runtime.
+// `acpx-internals` is resolved by scripts/build-acp.mjs; the fixture test verifies it.
+import { AcpClient } from 'acpx-internals';
 
 export async function discoverSessions({registry,agent,cwd,filterCwd=cwd,cursor,env={}}) {
   if (!registry.list().includes(agent)) throw Error('Unknown agent');

@@ -13,6 +13,9 @@ export interface HarnessCatalogEntry {
   id: HarnessId;
   name: string;
   description: string;
+  /** From the machine's ACP catalog: whether the agent's CLI was found. */
+  available?: boolean;
+  missing?: string;
   /** Picker only; a hidden id still resolves names, icons and quirks. */
   hidden?: boolean;
   /** Vendor line, shown in the external-sessions settings. */

@@ -30,6 +30,7 @@ export function acpChoiceLabel(option: Option, name: string, t: Translate): stri
 export function acpStartupLabel(stage: string, t: Translate): string {
   const aliases: Record<string,string> = {
     preparing: 'preparing', '正在准备 Agent 环境': 'preparing',
+    installing: 'installing',
     spawning: 'spawning', '正在启动 Agent': 'spawning',
     connecting: 'connecting', '正在连接并恢复会话': 'connecting',
     failed: 'failed', '启动失败': 'failed',

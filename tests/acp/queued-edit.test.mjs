@@ -1,3 +1,4 @@
+import { installEventSource } from './event-source.mjs';
 import { JSDOM } from "jsdom";
 import { build } from "esbuild";
 import { writeFile, mkdtemp, rm } from "node:fs/promises";
@@ -24,6 +25,8 @@ globalThis.ResizeObserver = class {
   disconnect() {}
 };
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const streams = installEventSource();
+globalThis.__streams = streams;
 const channels = [];
 const NativeChannel = globalThis.MessageChannel;
 globalThis.MessageChannel = class extends NativeChannel {
@@ -54,7 +57,9 @@ export async function run(){
    return {ok:true,json:async()=>structuredClone(snapshot)};
  };
  const root=createRoot(document.getElementById('root'));const click=async e=>{assert.ok(e);await act(async()=>e.click())};
+ const push=async()=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot));await new Promise(resolve=>setTimeout(resolve,30))});
  await act(async()=>root.render(<I18nProvider><AcpConversation card={{id:'card'}} active={true} onResume={async()=>{}}/></I18nProvider>));
+ await push();
  assert.equal(document.querySelectorAll('.cq-acp-turn').length,1);
  deny=true;await click(document.querySelector('[aria-label="Edit queued message"]'));assert.equal(document.querySelector('textarea').value,'original draft');
  deny=false;await click(document.querySelector('[aria-label="Edit queued message"]'));
@@ -65,7 +70,7 @@ export async function run(){
  const restoreId=requests.at(-1).requestId;denyRestore=false;
  await click(document.querySelector('.fc-editing-draft button'));assert.equal(requests.at(-1).requestId,restoreId);assert.equal(requests.at(-1).text,'queued draft');assert.equal(requests.at(-1).attachments[0].name,'test.txt');assert.equal(queued.withdrawn,false);assert.equal(document.querySelector('textarea').value,'original draft');
  queued.withdrawn=false;queued.state='queued';
- await act(async()=>{await new Promise(resolve=>setTimeout(resolve,950))});
+ await push(); // the stream reports the requeued message
  await click(document.querySelector('[aria-label="Edit queued message"]'));
  await click(document.querySelector('.fc-send'));
  assert.equal(requests.at(-1).action,'send');assert.equal(requests.at(-1).text,'queued draft');assert.equal(requests.at(-1).attachments[0].name,'test.txt');

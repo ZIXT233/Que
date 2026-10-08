@@ -1596,7 +1596,16 @@ pub async fn acp_channel(host: &str, command: &str, mut input: tokio::sync::mpsc
         tokio::select! {
             data = input.recv() => match data {
                 Some(data) => writer.data_bytes(data).await.map_err(|e| AppError::msg(e.to_string()))?,
-                None => break,
+                None => {
+                    // EOF lets the remote owner stop its agents before the channel closes.
+                    let _ = writer.eof().await;
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(6), async {
+                        while let Some(message) = reader.wait().await {
+                            if matches!(message, ChannelMsg::Close | ChannelMsg::ExitStatus { .. }) { break; }
+                        }
+                    }).await;
+                    break;
+                }
             },
             message = reader.wait() => match message {
                 Some(ChannelMsg::Data { data }) => { if output.send(data.to_vec()).is_err() { break; } },

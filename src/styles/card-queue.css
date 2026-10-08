@@ -2127,3 +2127,7 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-butler-launch:disabled{opacity:.5;cursor:wait}
 .cq-large-card[data-butler="true"] .cq-card-header{background:linear-gradient(110deg,#fbf0cc,#efda96);border-bottom-color:#dbc47f;color:#604d21}
 .cq-large-card[data-butler="true"] .cq-card-header h2{color:#604d21}
+/* Agents whose CLI was not found on this machine: still selectable, de-emphasized. */
+.cq-harness-missing-head { margin:26px 0 0; font-size:12px; color:var(--cq-muted); }
+.cq-harness-options[data-missing] { margin-top:10px; opacity:.6; }
+.cq-harness-options[data-missing]:hover { opacity:.85; }

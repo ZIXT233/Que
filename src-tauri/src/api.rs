@@ -60,6 +60,7 @@ pub fn router(state: AppState) -> Router {
             post(crate::mcp::tools).layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .route("/api/acp/{id}", get(acp_read).post(acp_action))
+        .route("/api/acp/{id}/events", get(acp_events))
         .route("/api/speech/settings", get(crate::speech::settings).put(crate::speech::save_settings))
         .route("/api/speech/transcribe", post(crate::speech::transcribe).layer(DefaultBodyLimit::max(10_100_000)))
         .route("/api/acp-catalog", get(acp_catalog))
@@ -73,6 +74,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/cwd/browse", get(browse_cwd))
         .route("/api/preferences", get(crate::mcp_settings::get_preferences).put(crate::mcp_settings::put_preferences))
+        .route("/api/butler/digest", post(butler_digest))
         .route("/api/tools/settings", get(get_tools).put(put_tools))
         .route("/api/logs", get(get_logs).post(post_log))
         .route(
@@ -155,9 +157,20 @@ pub(crate) async fn post_queue(
         state.queue.with_queue(false, |q| crate::butler::ensure(q)).await?;
         let queue=state.queue.read_snapshot()?;
         let card=queue.cards.iter().find(|c|c.id==crate::butler::CARD_ID).unwrap();
-        if !state.harness.is_live(crate::butler::CARD_ID) {
-            let action=if card.harness.is_some() {"harness_resume"} else {"harness_start"};
-            return launch_harness(&state,&json!({"id":crate::butler::CARD_ID,"kind":"codex"}),action).await.map(|q|Json(with_cwd(q,&state)));
+        // The button never starts an agent by itself: an inactive Butler is just
+        // opened so the user decides. One that never got a working session (e.g.
+        // its CLI is missing) is reset to the picker instead of retrying that agent.
+        if card.harness.is_some() && !state.harness.is_live(crate::butler::CARD_ID) {
+            let ws=acp_workspace(&state,crate::butler::CARD_ID).await?;
+            let conversation=state.harness.request(&ws,&state.bin_dir,json!({"action":"read","id":crate::butler::CARD_ID})).await
+                .ok().and_then(|s|s["turns"].as_array().map(|t|!t.is_empty())).unwrap_or(false);
+            if !conversation {
+                state.queue.with_queue(false,|q|{
+                    if let Some(card)=q.cards.iter_mut().find(|c|c.id==crate::butler::CARD_ID) {card.harness=None;card.phase=crate::models::CardPhase::Draft;}
+                    Ok(())
+                }).await?;
+                return Ok(Json(with_cwd(state.queue.read_snapshot()?,&state)));
+            }
         }
         return Ok(Json(with_cwd(queue,&state)));
     }
@@ -352,9 +365,35 @@ async fn acp_history_open(State(state): State<AppState>, Json(body): Json<Value>
     }
     Ok(Json(json!({"cardId":id})))
 }
+// "Summarize now" from settings; same request the schedule sends.
+async fn butler_digest(State(state): State<AppState>) -> AppResult<Json<Value>> {
+    let sent = crate::digest::run(&state, &format!("digest:manual:{}", uuid::Uuid::new_v4())).await?;
+    if !sent { return Err(crate::error::AppError::msg("管家还没有启动：先在管家卡里选择 Agent 并开始一次对话")); }
+    Ok(Json(json!({"sent":true})))
+}
+
 async fn acp_read(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
     let ws = acp_workspace(&state, &id).await?;
     Ok(Json(state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":id})).await?))
+}
+/// One conversation as a stream: its current snapshot, then every change in order
+/// (`snapshot` events replace the state, `delta` events extend it; see
+/// runtime/session-wire.mjs). Reconnecting simply starts again from a snapshot.
+async fn acp_events(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>> {
+    let ws = acp_workspace(&state, &id).await?;
+    // Subscribe before reading so nothing in between is lost; the UI skips what the snapshot already holds.
+    let updates = state.harness.updates();
+    let first = state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":id})).await?;
+    let runtime = state.harness.clone();
+    let watched = id.clone();
+    let initial = stream::once(async move { Ok::<Event, Infallible>(Event::default().event("snapshot").data(first.to_string())) });
+    let changes = BroadcastStream::new(updates).filter_map(move |item| match item {
+        Ok(update) if update.id == watched => Some(Ok::<Event, Infallible>(Event::default().event(update.event).data(update.data))),
+        Ok(_) => None,
+        // Updates were missed: the current state replaces them.
+        Err(_) => runtime.cached(&watched).map(|snapshot| Ok(Event::default().event("snapshot").data(snapshot.to_string()))),
+    });
+    Ok(Sse::new(initial.chain(changes)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
 }
 async fn acp_action(State(state): State<AppState>, Path(id): Path<String>, Json(mut body): Json<Value>) -> AppResult<Json<Value>> {
     let queue = state.queue.read_snapshot()?;
@@ -2253,6 +2292,7 @@ pub async fn start_server(state: AppState) -> AppResult<u16> {
     crate::mcp::migrate_legacy_cards(&state).await?;
     crate::mcp::publish(&state, port)?;
     crate::acp_supervisor::start(state.clone());
+    crate::digest::start(state.clone());
     let app = router(state);
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

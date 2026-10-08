@@ -59,12 +59,17 @@ export function HarnessCard({ card, active, sshHost, sshHostName, onAction }: {
       finally { setBusy(false); }
     }} />}
     {card.harness ? <AcpConversation card={card} active={active} onResume={() => start(card.harness!.kind)} /> : busy ? <div className="cq-harness-empty"><AcpStartup agent={starting} stage={stage} /></div> : <div className="cq-harness-empty"><div className="cq-harness-picker">
-      <div className="cq-harness-picker-head"><div><h3>选择 Agent</h3><p>选择 Agent，在当前工作区开始会话</p></div></div>
+      <div className="cq-harness-picker-head"><div>{card.workspaceId === "flat-butler"
+        ? <><h3>选择管家使用的 Agent</h3><p>之后点管家按钮会直接用它；这里列出的是这台机器上检测到的 Agent</p></>
+        : <><h3>选择 Agent</h3><p>选择 Agent，在当前工作区开始会话</p></>}</div></div>
       <label className="cq-harness-nickname"><span>{t("harness.nicknameOptional")}</span><input autoComplete="off" maxLength={48} value={nickname} placeholder={t("harness.nicknamePlaceholder")} onChange={e => setNickname(e.target.value)} /></label>
-    <div className="cq-harness-options">{catalog.map(item => <button key={item.id} type="button" className="cq-harness-option" onClick={() => void start(item.id)}>
+    {[catalog.filter(item => item.available !== false), catalog.filter(item => item.available === false)].map((items, group) => items.length > 0 && <div key={group}>
+      {group === 1 && <p className="cq-harness-missing-head">未检测到（需要先安装并登录对应的命令行工具）</p>}
+      <div className="cq-harness-options" data-missing={group === 1 || undefined}>{items.map(item => <button key={item.id} type="button" className="cq-harness-option" onClick={() => void start(item.id)}>
         <span className="cq-harness-option-icon"><ProviderIcon id={providerIconId(item.id)} size={28} /></span>
-        <span className="cq-harness-option-copy"><span className="cq-harness-option-title"><strong>{harnessName(item.id)}</strong></span><small>{item.description}</small></span><span className="cq-harness-option-arrow">↗</span>
+        <span className="cq-harness-option-copy"><span className="cq-harness-option-title"><strong>{harnessName(item.id)}</strong></span><small>{item.available === false && item.missing ? `未找到 ${item.missing}` : item.description}</small></span><span className="cq-harness-option-arrow">↗</span>
       </button>)}</div>
+    </div>)}
       {!catalog.length && <p role="status">正在读取这台机器的 Agent 列表… <button type="button" onClick={() => setRetry(v => v+1)}>重试</button></p>}
     </div></div>}
   </>;

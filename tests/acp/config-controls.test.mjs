@@ -1,3 +1,4 @@
+import { installEventSource } from './event-source.mjs';
 import { JSDOM } from "jsdom";
 import { build } from "esbuild";
 import { writeFile, mkdtemp, rm } from "node:fs/promises";
@@ -24,6 +25,8 @@ globalThis.ResizeObserver = class {
   disconnect() {}
 };
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const streams = installEventSource();
+globalThis.__streams = streams;
 const channels = [];
 const NativeChannel = globalThis.MessageChannel;
 globalThis.MessageChannel = class extends NativeChannel {
@@ -44,26 +47,26 @@ export async function run(){
  globalThis.sessionStorage=window.sessionStorage;
  const id='config-card';
  const option={id:'fast-mode',name:'Fast mode',category:'model_config',currentValue:'off',options:[{value:'off',name:'Off'},{value:'on',name:'On'}]};
- const snapshot={state:'attention',turns:[],commands:[{name:'compact'}],status:{details:{configOptions:[option]}}};
- let releaseRead; let initialRead=true;
+ const snapshot={ownerEpoch:'e',revision:5,state:'attention',turns:[],commands:[{name:'compact'}],status:{details:{configOptions:[option]}}};
  const requests=[];
+ const push=async(data)=>act(async()=>{globalThis.__streams.latest().emit('snapshot',data);await new Promise(r=>setTimeout(r,30))});
  globalThis.fetch=async(url,init)=>{
- if(!init?.body && initialRead){initialRead=false;await new Promise(resolve=>releaseRead=resolve);}
- if(init?.body){const body=JSON.parse(init.body);requests.push(body);if(body.action==='config')option.currentValue=body.value;if(body.action==='send'){const turn={id:body.requestId,text:body.text,attachments:body.attachments,state:'running',blocks:[]};snapshot.turns.push(turn);return {ok:true,json:async()=>structuredClone(turn)};}}
+ if(init?.body){const body=JSON.parse(init.body);requests.push(body);if(body.action==='config'){option.currentValue=body.value;snapshot.revision++;}if(body.action==='send'){const turn={id:body.requestId,text:body.text,attachments:body.attachments,state:'running',blocks:[]};snapshot.turns.push(turn);return {ok:true,json:async()=>structuredClone(turn)};}}
  return {ok:true,json:async()=>structuredClone(snapshot)};
  };
  const root=createRoot(document.getElementById('root'));
  try {
  await act(async()=>{root.render(<I18nProvider><AcpConversation card={{id}} active={true} onResume={async()=>{}}/></I18nProvider>)});
  assert.ok(document.querySelector('.cq-acp-loading'));assert.equal(document.querySelector('.cq-acp-welcome'),null);
- await act(async()=>{releaseRead();await new Promise(r=>setTimeout(r,300))});
+ await push(structuredClone(snapshot));
  assert.equal(document.querySelector('.cq-acp-loading'),null);
  await act(async()=>document.querySelector('.fc-model-button').click());
 
  await act(async()=>{document.querySelector('.fc-speed').click();await new Promise(r=>setTimeout(r,300))});
  assert.deepEqual(requests,[{action:'config',key:'fast-mode',value:'on'}]);
  assert.equal(document.querySelector('.fc-speed').getAttribute('aria-pressed'),'true');
- await act(async()=>{await new Promise(r=>setTimeout(r,1200))});
+ // The stream must never roll a confirmed change back: an older snapshot of the same owner is ignored.
+ await push({...structuredClone(snapshot),revision:5,status:{details:{configOptions:[{...option,currentValue:'off'}]}}});
  assert.equal(document.querySelector('.fc-speed').getAttribute('aria-pressed'),'true');
  await act(async()=>{document.querySelector('.fc-speed').click();await new Promise(r=>setTimeout(r,50))});
  assert.equal(document.querySelector('.fc-speed').getAttribute('aria-pressed'),'false');
@@ -74,7 +77,7 @@ export async function run(){
  const compact=Array.from(document.querySelectorAll('.fc-usage button')).find(b=>b.textContent==='Compact context');
  assert.ok(compact);await act(async()=>compact.click());
  assert.equal(requests.at(-1).text,'/compact');assert.deepEqual(requests.at(-1).attachments,[]);
- console.log('PASS: conversation Fast toggle round trip, polling and advertised compact command');
+ console.log('PASS: conversation Fast toggle round trip, ordered stream and advertised compact command');
  } finally {
  await act(async()=>root.unmount());
 

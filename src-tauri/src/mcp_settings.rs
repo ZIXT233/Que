@@ -41,7 +41,7 @@ fn valid(value: &Value, schema: &Value) -> bool {
         .as_array()
         .is_none_or(|choices| choices.contains(value))
 }
-fn read_preferences() -> AppResult<Value> {
+pub(crate) fn read_preferences() -> AppResult<Value> {
     let file = crate::paths::data_dir().join("preferences.json");
     match std::fs::read(file) {
         Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),

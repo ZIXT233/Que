@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { FileDiff } from './chat/FileDiff';
 import { MarkdownMessage, MarkdownLink } from './MarkdownMessage';
 import { useI18n } from '@/hooks/useI18n';
@@ -10,7 +11,7 @@ const printable = (value: unknown) => typeof value === 'string' ? value : JSON.s
 const webLink = (value: unknown) => typeof value === 'string' && /^https?:\/\//i.test(value);
 
 /** Render the ACP tool content envelope, retaining unsupported payloads for inspection. */
-export function AcpToolResult({ block }: { block: ToolBlock }) {
+export const AcpToolResult = memo(function AcpToolResult({ block }: { block: ToolBlock }) {
   const { t } = useI18n();
   const content = Array.isArray(block.content) ? block.content : [];
   function render(value: unknown, index: number) {
@@ -41,4 +42,4 @@ export function AcpToolResult({ block }: { block: ToolBlock }) {
       </details>}
     </div>
   </details>;
-}
+});

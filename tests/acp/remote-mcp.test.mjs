@@ -41,7 +41,7 @@ test('reverse MCP routes one card, rejects spoofed replies and never replays unc
  }finally{await hub.close();await rm(root,{recursive:true,force:true});}
 });
 
-test('real owner injects remote bridge and reconnects reverse calls over its existing stdio stream',async()=>{
+test('real owner injects remote bridge and relays reverse calls over its stdio stream',async()=>{
  const root=await mkdtemp(path.join(tmpdir(),'flat-mcp-owner-'));const children=[];let ownerPid;
  await writeFile(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
  const env={...process.env,FLAT_ACP_ROOT:root,FLAT_ACP_STORE_DIR:path.join(root,'acpx'),FLAT_TEST_MCP_FILE:path.join(root,'mcp.json')};
@@ -71,11 +71,10 @@ test('real owner injects remote bridge and reconnects reverse calls over its exi
   a.reply({requestId:request.requestId,result:{content:[{type:'text',text:'fixture cards'}],isError:false}});
   assert.equal((await result).content[0].text,'fixture cards');
   const uncertain=call({name:'send_message',arguments:{cardId:'target',sessionId:'target',text:'fixture only',requestId:'once'}});
-  await waitReverse(a);a.child.kill();assert.equal((await uncertain).isError,true);
-  const b=connect();const health=await b.rpc({action:'health',ids:['remote-card'],mcpRelay:true});assert.equal(health['remote-card'].connected,true);assert.equal(b.reverse.length,0,'background heartbeat rebinds MCP without replaying calls');
-  const after=call({name:'list_cards',arguments:{}});const newRequest=await waitReverse(b);
-  b.reply({requestId:newRequest.requestId,result:{content:[],isError:false}});assert.equal((await after).isError,false);
-  await b.rpc({action:'close',id:'remote-card'});
+  // The app going away ends the owner; an in-flight call reports an unknown result, never a retry.
+  await waitReverse(a);a.child.stdin.end();assert.equal((await uncertain).isError,true);
+  for(let i=0;i<300&&a.child.exitCode===null;i++)await sleep(20);
+  assert.equal(a.child.exitCode,0);
  }finally{
   for(const child of children)child.kill();if(ownerPid)try{process.kill(ownerPid)}catch{}
   for(let i=0;i<220&&existsSync(path.join(root,'owner.pid'));i++)await sleep(50);

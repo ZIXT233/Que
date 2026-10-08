@@ -1,0 +1,89 @@
+[
+  {
+    "name": "append extends the addressed text block and advances the revision",
+    "before": {"ownerEpoch":"e","revision":5,"state":"working","turns":[{"id":"t","blocks":[{"type":"text_delta","stream":"message","text":"ab"}]}]},
+    "delta": {"epoch":"e","base":5,"rev":7,"ops":[{"op":"append","turn":"t","block":0,"text":"cd"}]},
+    "after": {"ownerEpoch":"e","revision":7,"state":"working","turns":[{"id":"t","blocks":[{"type":"text_delta","stream":"message","text":"abcd"}]}]}
+  },
+  {
+    "name": "block at the end appends a new block, block inside replaces one",
+    "before": {"ownerEpoch":"e","revision":1,"turns":[{"id":"t","blocks":[{"type":"tool_call","toolCallId":"a","status":"in_progress"}]}]},
+    "delta": {"epoch":"e","base":1,"rev":2,"ops":[
+      {"op":"block","turn":"t","block":0,"value":{"type":"tool_call","toolCallId":"a","status":"completed"}},
+      {"op":"block","turn":"t","block":1,"value":{"type":"text_delta","stream":"message","text":"done"}}
+    ]},
+    "after": {"ownerEpoch":"e","revision":2,"turns":[{"id":"t","blocks":[{"type":"tool_call","toolCallId":"a","status":"completed"},{"type":"text_delta","stream":"message","text":"done"}]}]}
+  },
+  {
+    "name": "several ops on several turns, and session-level set",
+    "before": {"ownerEpoch":"e","revision":3,"context":{"used":1},"turns":[{"id":"x","blocks":[]},{"id":"y","blocks":[{"type":"text_delta","stream":"message","text":"1"}]}]},
+    "delta": {"epoch":"e","base":3,"rev":9,"ops":[
+      {"op":"append","turn":"y","block":0,"text":"2"},
+      {"op":"block","turn":"x","block":0,"value":{"type":"text_delta","stream":"thought","text":"hm"}},
+      {"op":"append","turn":"y","block":0,"text":"3"},
+      {"op":"set","key":"context","value":{"used":50,"size":100}},
+      {"op":"set","key":"commands","value":[{"name":"compact"}]}
+    ]},
+    "after": {"ownerEpoch":"e","revision":9,"context":{"used":50,"size":100},"commands":[{"name":"compact"}],"turns":[{"id":"x","blocks":[{"type":"text_delta","stream":"thought","text":"hm"}]},{"id":"y","blocks":[{"type":"text_delta","stream":"message","text":"123"}]}]}
+  },
+  {
+    "name": "a delta already included in the snapshot is stale",
+    "before": {"ownerEpoch":"e","revision":8,"turns":[{"id":"t","blocks":[{"type":"text_delta","text":"abcd"}]}]},
+    "delta": {"epoch":"e","base":5,"rev":8,"ops":[{"op":"append","turn":"t","block":0,"text":"cd"}]},
+    "after": "stale"
+  },
+  {
+    "name": "a base that does not match is a gap",
+    "before": {"ownerEpoch":"e","revision":5,"turns":[{"id":"t","blocks":[{"type":"text_delta","text":"ab"}]}]},
+    "delta": {"epoch":"e","base":6,"rev":7,"ops":[{"op":"append","turn":"t","block":0,"text":"cd"}]},
+    "after": "gap"
+  },
+  {
+    "name": "a partially overlapping delta is a gap",
+    "before": {"ownerEpoch":"e","revision":6,"turns":[{"id":"t","blocks":[{"type":"text_delta","text":"ab"}]}]},
+    "delta": {"epoch":"e","base":5,"rev":8,"ops":[{"op":"append","turn":"t","block":0,"text":"cd"}]},
+    "after": "gap"
+  },
+  {
+    "name": "another owner epoch is a gap",
+    "before": {"ownerEpoch":"old","revision":5,"turns":[]},
+    "delta": {"epoch":"new","base":5,"rev":6,"ops":[]},
+    "after": "gap"
+  },
+  {
+    "name": "a snapshot without a revision cannot take deltas",
+    "before": {"ownerEpoch":"e","turns":[]},
+    "delta": {"epoch":"e","base":0,"rev":1,"ops":[]},
+    "after": "gap"
+  },
+  {
+    "name": "an unknown turn is a gap",
+    "before": {"ownerEpoch":"e","revision":1,"turns":[{"id":"t","blocks":[]}]},
+    "delta": {"epoch":"e","base":1,"rev":2,"ops":[{"op":"block","turn":"missing","block":0,"value":{}}]},
+    "after": "gap"
+  },
+  {
+    "name": "a block index past the end is a gap",
+    "before": {"ownerEpoch":"e","revision":1,"turns":[{"id":"t","blocks":[]}]},
+    "delta": {"epoch":"e","base":1,"rev":2,"ops":[{"op":"block","turn":"t","block":2,"value":{}}]},
+    "after": "gap"
+  },
+  {
+    "name": "append to a block without text is a gap",
+    "before": {"ownerEpoch":"e","revision":1,"turns":[{"id":"t","blocks":[{"type":"tool_call"}]}]},
+    "delta": {"epoch":"e","base":1,"rev":2,"ops":[{"op":"append","turn":"t","block":0,"text":"x"}]},
+    "after": "gap"
+  },
+  {
+    "name": "set of an unknown key is a gap",
+    "before": {"ownerEpoch":"e","revision":1,"turns":[]},
+    "delta": {"epoch":"e","base":1,"rev":2,"ops":[{"op":"set","key":"state","value":"idle"}]},
+    "after": "gap"
+  },
+  {
+    "name": "an unknown op is a gap",
+    "before": {"ownerEpoch":"e","revision":1,"turns":[{"id":"t","blocks":[]}]},
+    "delta": {"epoch":"e","base":1,"rev":2,"ops":[{"op":"delete","turn":"t","block":0}]},
+    "after": "gap"
+  }
+]

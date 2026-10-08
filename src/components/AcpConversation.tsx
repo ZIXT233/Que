@@ -1,9 +1,12 @@
+import { CardRecap } from "./chat/CardRecap";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { PermissionCard } from './chat/PermissionCard';
 import { useI18n } from '@/hooks/useI18n';
 import { createRetainedConversationView } from '@/hooks/retainedConversationView';
 import { admissionId, acknowledgeAdmission } from '@/lib/acp-admission';
+import { shareStructure } from '@/lib/structural-share';
+import { foldEvents, type StreamEvent } from '@/lib/acp-delta';
 import { PendingMessages } from './chat/PendingMessages';
 import { MessageActions } from './chat/MessageActions';
 import { MissingReceiptsNotice } from './chat/MissingReceiptsNotice';
@@ -14,7 +17,7 @@ import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
 
 type Block = { type: string; text?: string; stream?: string; toolCallId?: string; title?: string; status?: string; content?: unknown; rawInput?: unknown; rawOutput?: unknown; entries?: { content: string; status: string }[]; id?: string; kind?: string; state?: string; request?: any; answer?: any };
-type Turn = { withdrawn?: boolean; source?: 'event' | 'user' | 'agent'; sender?:{cardId:string;name:string;epoch:string}; id: string; text: string; state: string; blocks: Block[]; attachments: { mediaType: string; data: string; name?: string }[]; result?: { stopReason?: string; error?: { message: string } } };
+type Turn = { withdrawn?: boolean; source?: 'event' | 'user' | 'agent'; sender?:{cardId:string;name:string;epoch:string}; at?: number; endedAt?: number; id: string; text: string; state: string; blocks: Block[]; attachments: { mediaType: string; data: string; name?: string }[]; result?: { stopReason?: string; error?: { message: string } } };
 type Snapshot = { ownerEpoch?:string;revision?:number; hostAccess?: boolean; promptCapabilities?: { image?: boolean; audio?: boolean }; state: string; stage?: string; error?: string; turns: Turn[]; commands?: { name: string; description?: string }[]; context?: { used?: number; size?: number }; status?: { models?: { currentModelId?: string; availableModelIds: string[]; availableModels?: { modelId: string; name: string }[] }; availableCommands?: { name: string; description?: string }[]; usage?: SessionUsage; details?: { configOptions?: Config[] } } };
 const busyTurn = (t: Turn) => ['queued','running','cancelling'].includes(t.state);
 type EditingDraft = {text:string;quote:string;attachments:Turn['attachments']; original:Turn; restoreId:string};
@@ -28,8 +31,8 @@ const useConversationView = createRetainedConversationView(key => {
     attachments: [] as Turn['attachments'],
     editingDraft: null as EditingDraft | null,
     error: '', connectionError: '', sending: false, controlBusy: false, follow: true,
-    controlEpoch: {current: 0}, mutationActive: {current: false},
-    pollHealth: {failures: 0, epoch: 0},
+    mutationActive: {current: false},
+    streamHealth: {failures: 0},
     admission: {current: null as Admission | null},
   };
 }, value => value.sending || value.controlBusy || !!value.admission.current);
@@ -65,14 +68,15 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const {t}=useI18n();
   const viewKey=JSON.stringify([card.id, card.workspaceId, card.cwd, card.harness?.kind]);
   const view = useConversationView(viewKey);
-  const {controlEpoch, mutationActive, admission, pollHealth} = view.value;
+  const {mutationActive, admission, streamHealth} = view.value;
   const [editingDraft,setEditingDraft] = view.field('editingDraft');
   const [snapshot,updateSnapshot] = view.field('snapshot');
   const setSnapshot=useCallback((next:Snapshot | ((previous:Snapshot | undefined)=>Snapshot | undefined))=>updateSnapshot(previous=>{
     const updated=typeof next==='function'?next(previous):next;
     if(previous?.ownerEpoch && updated?.ownerEpoch===previous.ownerEpoch
       && (updated.revision ?? 0)<(previous.revision ?? 0))return previous;
-    return updated;
+    // An unchanged poll keeps the previous reference, so nothing re-renders.
+    return shareStructure(previous,updated);
   }),[updateSnapshot]);
   const [draft,setDraft] = view.field('draft');
   const [quote,setQuote] = view.field('quote');
@@ -87,40 +91,54 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const archived = card.archivedAt !== undefined;
   useEffect(() => { if(quote) sessionStorage.setItem(`flat:quote:${card.id}`,quote); else sessionStorage.removeItem(`flat:quote:${card.id}`); },[card.id,quote]);
   useEffect(() => { sessionStorage.setItem(`flat:draft:${card.id}`, draft); }, [card.id,draft]);
+  // The conversation is a subscription: a snapshot first, then ordered deltas
+  // (see runtime/session-wire.mjs). A delta that does not fit means a missed
+  // event, repaired by fetching one full snapshot.
   useEffect(() => {
     if (!active) return;
-    let cancelled=false, timer:ReturnType<typeof setTimeout>;
-    const poll=async()=>{
-      if(mutationActive.current) {timer=setTimeout(poll,900);return;}
-      const epoch=controlEpoch.current;
-      if(pollHealth.epoch!==epoch) {pollHealth.epoch=epoch;pollHealth.failures=0;}
-      const current=()=>!cancelled && !mutationActive.current && epoch===controlEpoch.current;
-      try {
-        const s=await request(card.id);
-        if(current()) {pollHealth.failures=0;setSnapshot(s);setConnectionError('');}
-      } catch(e) {
-        // A late failure from before a successful send/configuration is stale too.
-        if(current()) {
-          pollHealth.failures++;
-          if(pollHealth.failures>=3) setConnectionError('暂时无法刷新会话状态，正在重试…');
-          // A failed status read says nothing about the turn or selected model.
-          // Keep the last authoritative snapshot until a new one arrives.
-        }
-      } finally {if(!cancelled) timer=setTimeout(poll,900);}
+    let closed=false, resyncing=false, source:EventSource|undefined, retry:ReturnType<typeof setTimeout>|undefined, frame:ReturnType<typeof setTimeout>|undefined;
+    let queue:StreamEvent<Snapshot>[]=[];
+    const resync=async()=>{
+      if(resyncing)return;resyncing=true;
+      try{const fresh=await request(card.id);if(!closed)setSnapshot(fresh);}catch{/* the stream keeps trying */}finally{resyncing=false;}
     };
-    void poll(); return()=>{cancelled=true;clearTimeout(timer)};
-  },[active,card.id,setSnapshot,setConnectionError,controlEpoch,mutationActive,pollHealth]);
+    // Everything that arrives within a frame is applied together: a burst renders once.
+    const flush=()=>{
+      frame=undefined;
+      const events=queue;queue=[];
+      let gap=false;
+      setSnapshot(previous=>{const folded=foldEvents(previous,events);gap=folded.gap;return folded.snapshot;});
+      if(gap)void resync();
+    };
+    const enqueue=(event:StreamEvent<Snapshot>)=>{queue.push(event);frame??=setTimeout(flush,16);};
+    const connect=()=>{
+      const opened=new EventSource(`/api/acp/${encodeURIComponent(card.id)}/events`);
+      source=opened;
+      const parse=(event:Event)=>JSON.parse((event as MessageEvent).data);
+      opened.addEventListener('snapshot',event=>{streamHealth.failures=0;setConnectionError('');enqueue({event:'snapshot',data:parse(event)});});
+      opened.addEventListener('delta',event=>enqueue({event:'delta',data:parse(event)}));
+      opened.onerror=()=>{
+        if(closed||source!==opened)return;
+        // A failed read says nothing about the turn or selected model: keep the last state.
+        if(++streamHealth.failures>=3)setConnectionError('暂时无法刷新会话状态，正在重试…');
+        // EventSource gives up on a refused stream; reopen it with a short backoff.
+        if(opened.readyState===EventSource.CLOSED){source=undefined;retry=setTimeout(connect,Math.min(1000*streamHealth.failures,8000));}
+      };
+    };
+    connect();
+    return()=>{closed=true;clearTimeout(retry);clearTimeout(frame);source?.close();};
+  },[active,card.id,setSnapshot,setConnectionError,streamHealth]);
   useEffect(() => { if(follow && scroll.current) scroll.current.scrollTop=scroll.current.scrollHeight; },[snapshot,follow]);
   const command=async(body:{action:string;[key:string]:unknown})=> {
     if(mutationActive.current)return;
-    controlEpoch.current++;mutationActive.current=true;setControlBusy(true);
+    mutationActive.current=true;setControlBusy(true);
     try {
       const updated=await request(card.id,body);
       if(body.action==='send')setSnapshot(previous=>({...previous,state:'working',turns:previous?.turns.some(t=>t.id===updated.id)?previous.turns:[...(previous?.turns || []),updated]}));
       else setSnapshot(updated);
       setError('');setConnectionError('');
     } catch(e){setError((e as Error).message)}
-    finally{controlEpoch.current++;mutationActive.current=false;setControlBusy(false)}
+    finally{mutationActive.current=false;setControlBusy(false)}
   };
   const compact = async () => {
     if (mutationActive.current || sending || archived || !snapshot || snapshot.turns.some(busyTurn)
@@ -131,25 +149,25 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const editQueued=async(id:string)=>{
     const turn=snapshot?.turns.find(turn=>turn.id===id && turn.state==='queued');
     if(!turn || controlBusy || editingDraft)return;
-    controlEpoch.current++;mutationActive.current=true;setControlBusy(true);
+    mutationActive.current=true;setControlBusy(true);
     try {
       await request(card.id,{action:'cancel',requestId:id,queuedOnly:true});
       setEditingDraft({...draftNow.current,original:turn,restoreId:crypto.randomUUID()});setDraft(turn.text);setQuote('');setAttachments(turn.attachments || []);
       setSnapshot(await request(card.id));setError('');
       requestAnimationFrame(()=>scroll.current?.parentElement?.querySelector('textarea')?.focus());
-    }catch(e){setError((e as Error).message)}finally{controlEpoch.current++;mutationActive.current=false;setControlBusy(false)}
+    }catch(e){setError((e as Error).message)}finally{mutationActive.current=false;setControlBusy(false)}
   };
   const cancelEdit=async()=>{
     if(!editingDraft || sending || mutationActive.current)return;
     const editing=editingDraft;
-    controlEpoch.current++;mutationActive.current=true;setControlBusy(true);
+    mutationActive.current=true;setControlBusy(true);
     try {
       // Retain the ID across retries: a lost response must not enqueue twice.
       await request(card.id,{action:'send',requestId:editing.restoreId,text:editing.original.text,attachments:editing.original.attachments || []});
       setDraft(editing.text);setQuote(editing.quote);setAttachments(editing.attachments);setEditingDraft(null);
       setSnapshot(await request(card.id));setError('');
     }catch(e){setError((e as Error).message)}
-    finally{controlEpoch.current++;mutationActive.current=false;setControlBusy(false)}
+    finally{mutationActive.current=false;setControlBusy(false)}
   };
   const send=async(draftOverride?:string)=>{
     const messageDraft=draftOverride ?? draft;
@@ -157,14 +175,11 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     const text=quote ? `${quote.split('\n').map(line=>`> ${line}`).join('\n')}\n\n${messageDraft}` : messageDraft;
     const current=admission.current;
     const message=current && current.text===text && JSON.stringify(current.attachments)===JSON.stringify(attachments) ? current : {id:'',text,attachments};
-    // Persist admission across a card move. Invalidate polls that started before
-    // this send, but keep polling during startup so history stays visible.
-    controlEpoch.current++;
+    // Persist admission across a card move; the stream keeps history visible during startup.
     admission.current=message;setSending(true);setFollow(true);
     try {
       if(!message.id)message.id=await admissionId(viewKey,text,attachments);
       const admitted:Turn=await request(card.id,{action:'send',requestId:message.id,text:message.text,attachments:message.attachments});
-      controlEpoch.current++;
       setSnapshot(previous=>({
         ...previous,
         state:previous?.turns.some(turn=>turn.id===admitted.id)?previous.state:busyTurn(admitted)?'working':previous?.state || 'attention',
@@ -179,7 +194,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       acknowledgeAdmission(viewKey,message.id);setError('');setConnectionError('');
       // The admission response is sufficient. A later history read failing must
       // not make a successfully accepted message look like a failed submission.
-    } catch(e) {controlEpoch.current++;setError((e as Error).message)}
+    } catch(e) {setError((e as Error).message)}
     finally{setSending(false)}
   };
   const addFiles=async(files:FileList | File[])=>{
@@ -198,6 +213,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const disconnected=['not_running','error','unknown'].includes(snapshot?.state || '');
   const missingReceipts=turns.filter(turn=>!turn.withdrawn && missingReceipt(turn)).map(turn=>turn.id);
   return <div className="cq-harness-body cq-acp">
+    <CardRecap turns={turns}/>
     <div ref={scroll} className="cq-acp-transcript" onScroll={e=>{const n=e.currentTarget;setFollow(n.scrollHeight-n.scrollTop-n.clientHeight<80)}}>
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}

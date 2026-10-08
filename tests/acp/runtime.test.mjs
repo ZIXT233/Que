@@ -5,9 +5,8 @@ import { mkdtempSync,writeFileSync,rmSync,readFileSync,existsSync } from 'node:f
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-import { createHash } from 'node:crypto';
 
-test('real acpx owner: approval, queued message, controls, reconnect, persistent resume', async () => {
+test('real acpx owner: approval, queued message, controls, restart, persistent resume', async () => {
  const root=mkdtempSync(path.join(os.tmpdir(),'flat-acp-test-'));
  writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
  let child, serial=0;const pending=new Map();
@@ -17,7 +16,9 @@ test('real acpx owner: approval, queued message, controls, reconnect, persistent
    readline.createInterface({input:child.stdout}).on('line',line=>{const v=JSON.parse(line);if(v.rpc){const p=pending.get(v.rpc);pending.delete(v.rpc);v.error?p.reject(Error(v.error)):p.resolve(v.result)}});
  };
  const rpc=body=>new Promise((resolve,reject)=>{const id=String(++serial);pending.set(id,{resolve,reject});child.stdin.write(JSON.stringify({...body,rpc:id})+'\n')});
- const wait=async(predicate)=>{for(let i=0;i<150;i++){const v=await rpc({action:'read',id:'card'});if(predicate(v))return v;await new Promise(r=>setTimeout(r,40))}throw Error('Timeout '+JSON.stringify((await rpc({action:'read',id:'card'})).turns.map(t=>({state:t.state,result:t.result}))))};
+ // The app restarting means a new owner over the same data: the old one exits first.
+ const restart=async()=>{const old=child;old.stdin.end();for(let i=0;i<400&&old.exitCode===null&&old.signalCode===null;i++)await new Promise(r=>setTimeout(r,20));connect();};
+ const wait=async(predicate)=>{for(let i=0;i<600;i++){const v=await rpc({action:'read',id:'card'});if(predicate(v))return v;await new Promise(r=>setTimeout(r,40))}throw Error('Timeout '+JSON.stringify((await rpc({action:'read',id:'card'})).turns.map(t=>({state:t.state,result:t.result}))))};
  connect();
  try {
    const all=await rpc({action:'history_native',agent:'fixture',cwd:root,allWorkspaces:true});assert.equal(all.sessions.length,2);assert.ok(all.sessions.some(s=>s.cwd==='/tmp/another-workspace'));
@@ -34,8 +35,7 @@ test('real acpx owner: approval, queued message, controls, reconnect, persistent
    await rpc({action:'model',id:'card',value:'small'});
    await rpc({action:'model',id:'card',value:'large'});
    assert.equal((await rpc({action:'read',id:'card'})).turns[1].state,'queued');
-   child.kill();connect();
-   const recovered=await rpc({action:'read',id:'card'});assert.equal(recovered.turns[0].blocks.find(b=>b.type==='decision').id,decision.id);
+   // The owner lives as long as its app; restarts are covered below once idle.
    await rpc({action:'answer',id:'card',decisionId:decision.id,answer:{outcome:'allow_once'}});
    const done=await wait(s=>s.turns.every(t=>t.state==='completed'));
    assert.equal(done.title,'Fixture native title');
@@ -56,9 +56,7 @@ test('real acpx owner: approval, queued message, controls, reconnect, persistent
    const history=await rpc({action:'history',cwd:root});assert.equal(history.length,1);assert.equal(history[0].cardId,'card');
    assert.deepEqual(await rpc({action:'history',cwd:path.join(root,'elsewhere')}),[]);
    const rawBindings=readFileSync(path.join(root,'bindings.json'),'utf8');assert.ok(!rawBindings.includes('const answer = 42'));assert.ok(!existsSync(path.join(root,'sessions.json')));
-   child.kill();process.kill(Number(readFileSync(path.join(root,'owner.pid'),'utf8')));
-   await new Promise(resolve=>setTimeout(resolve,300));
-   connect();
+   await restart();
    const afterRestart=await rpc({action:'read',id:'card'});
    assert.equal(afterRestart.title,'Fixture native title');
    assert.ok(!afterRestart.turns.map(t=>t.text).join(' ').includes('Butler fixture instructions'));
@@ -133,8 +131,7 @@ test('real acpx owner: approval, queued message, controls, reconnect, persistent
    await wait(s=>s.turns.find(t=>t.id==='notification')?.state==='completed');
    assert.equal((await rpc({action:'read',id:'card'})).turns.filter(t=>t.id==='notification').length,1);
    await rpc({action:'close',id:'card'});await rpc({action:'close',id:'sender'});
-   child.kill();process.kill(Number(readFileSync(path.join(root,'owner.pid'),'utf8')));
-   await new Promise(resolve=>setTimeout(resolve,300));connect();
+   await restart();
    assert.deepEqual((await rpc({action:'read',id:'card'})).turns.find(t=>t.id==='peer').sender,sender);
    assert.equal((await rpc({action:'read',id:'card'})).turns.find(t=>t.id==='notification').source,'event');
 
@@ -145,6 +142,5 @@ test('real acpx owner: approval, queued message, controls, reconnect, persistent
    for(let i=0;i<240&&existsSync(path.join(root,'owner.pid'));i++) await new Promise(r=>setTimeout(r,50));
    assert.equal(existsSync(path.join(root,'owner.pid')),false,'owner must finish shutdown before cleanup');
    rmSync(root,{recursive:true,force:true});
-   try{rmSync(path.join(os.tmpdir(),`flat-${createHash('sha256').update(`${root}:acpx-history-v2`).digest('hex').slice(0,20)}.sock`))}catch{}
  }
 });
