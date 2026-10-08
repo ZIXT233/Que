@@ -87,6 +87,10 @@ pub struct HarnessSession {
     pub kind: String,
     pub terminal_id: String,
     pub state: String,
+    /// Whether the agent may use this machine's terminal and files. A card
+    /// setting, so Que keeps it; the owner applies it per agent connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_access: Option<bool>,
     #[serde(default)]
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

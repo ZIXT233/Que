@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { sessionHistory, projectRecord, preserveToolContent, mapLimit } from '../../runtime/session-history.mjs';
+import { sessionHistory, projectRecord, messageHeader, parseMessage, mapLimit } from '../../runtime/session-history.mjs';
 
 const record = (id, cwd, lastUsedAt, extra = {}) => ({ acpxRecordId: id, cwd, title: `title ${id}`, lastUsedAt, agentCommand: 'agent', messages: [{ big: 'x'.repeat(1000) }], ...extra });
 
@@ -18,28 +18,28 @@ test('history listing re-reads only the transcripts that changed', async () => {
     await write('bad%', { ignored: true });
     let loads = [];
     const store = { async load(id) { loads.push(id); return JSON.parse(await (await import('node:fs/promises')).readFile(path.join(dir, 'sessions', `${encodeURIComponent(id)}.json`), 'utf8')); } };
-    const history = sessionHistory(dir, { store });
+    const list = sessionHistory(dir, store);
 
-    const first = await history.list('/work');
+    const first = await list('/work');
     assert.deepEqual(first.map(r => r.acpxRecordId), ['b', 'a'], 'filtered by workspace, newest first');
     assert.ok(!('messages' in first[0]), 'a summary never carries the transcript');
     assert.equal(loads.length, 4);
 
     loads = [];
-    assert.deepEqual((await history.list('/work')).map(r => r.acpxRecordId), ['b', 'a']);
-    assert.deepEqual((await history.list()).map(r => r.acpxRecordId), ['b', 'c', 'a']);
+    assert.deepEqual((await list('/work')).map(r => r.acpxRecordId), ['b', 'a']);
+    assert.deepEqual((await list()).map(r => r.acpxRecordId), ['b', 'c', 'a']);
     assert.equal(loads.length, 0, 'unchanged transcripts are not read again');
 
     await write('a', record('a', '/work', '2026-05-01', { title: 'renamed' }), new Date(Date.now() + 5000));
-    const updated = await history.list('/work');
+    const updated = await list('/work');
     assert.deepEqual(loads, ['a'], 'only the changed file is re-read');
     assert.deepEqual(updated.map(r => [r.acpxRecordId, r.title]), [['a', 'renamed'], ['b', 'title b']]);
 
     await rm(path.join(dir, 'sessions', 'b.json'));
     loads = [];
-    assert.deepEqual((await history.list('/work')).map(r => r.acpxRecordId), ['a'], 'a deleted transcript disappears');
+    assert.deepEqual((await list('/work')).map(r => r.acpxRecordId), ['a'], 'a deleted transcript disappears');
     assert.equal(loads.length, 0);
-    assert.deepEqual(await sessionHistory(path.join(dir, 'missing'), { store }).list(), [], 'no sessions directory is an empty list');
+    assert.deepEqual(await sessionHistory(path.join(dir, 'missing'), store)(), [], 'no sessions directory is an empty list');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -56,53 +56,42 @@ test('mapLimit keeps order and never exceeds its concurrency', async () => {
   await assert.rejects(mapLimit([1, 2], 2, async n => { if (n === 2) throw Error('boom'); }), /boom/);
 });
 
-const user = (id, text) => ({ User: { id, content: [{ Text: text }] } });
+const user = (id, text, extra = []) => ({ User: { id, content: [{ Text: text }, ...extra] } });
 const agent = text => ({ Agent: { content: [{ Text: text }], tool_results: {} } });
 
-test('projecting a transcript matches receipts by message and keeps unmatched ones', () => {
-  const messages = [user('m1', 'one'), agent('A1'), user('m2', 'two'), agent('A2')];
-  const receipts = [
-    { id: 'req-1', messageId: 'm1', state: 'completed', source: 'user' },
-    { id: 'req-1-dup', messageId: 'm1', state: 'failed' },
-    { id: 'req-pending', state: 'queued', pending: { text: 'never reached acpx', attachments: [] } },
-    { id: 'req-pending', state: 'queued', pending: { text: 'duplicate id', attachments: [] } },
-  ];
-  const turns = projectRecord({ messages }, receipts);
-  assert.deepEqual(turns.map(t => t.id), ['req-1', 'm2', 'req-1-dup', 'req-pending'], 'the first receipt for a message wins, others are kept once by id');
-  assert.equal(turns[0].state, 'completed');
-  assert.equal(turns[1].state, 'history');
-  assert.equal(turns[2].state, 'failed');
-  assert.equal(turns[3].text, 'never reached acpx');
-  assert.equal(turns[3].state, 'unknown');
+test('who sent a message survives in the message itself', () => {
+  const sender = { cardId: 'card-b', name: 'Backend "api"' };
+  assert.deepEqual(parseMessage(messageHeader({ sender }) + 'pull and restart'),
+    { text: 'pull and restart', source: 'agent', sender: { cardId: 'card-b', name: "Backend 'api'" } });
+  assert.deepEqual(parseMessage(messageHeader({ notification: true }) + 'status data'), { text: 'status data', source: 'event' });
+  assert.deepEqual(parseMessage('[Que: not really a header]\n\nhi'), { text: '[Que: not really a header]\n\nhi', source: 'user' });
+  assert.equal(messageHeader({}), '');
+});
+
+test('the acpx record projects to one turn per user message', () => {
+  const turns = projectRecord({ messages: [
+    agent('greeting before any prompt'),
+    'Resume',
+    user('m1', messageHeader({ sender: { cardId: 'b', name: 'B' } }) + 'do it', [{ Image: { mime_type: 'image/png', source: 'AAA' } }]),
+    { Agent: { content: [{ Thinking: { text: 'hmm' } }, { ToolUse: { id: 't1', name: 'Read', input: { path: 'a' }, is_input_complete: true } }, { Text: 'done' }],
+      tool_results: { t1: { output: 'contents', is_error: false } } } },
+    user('m2', 'thanks'),
+  ] });
+  assert.equal(turns.length, 3);
+  assert.equal(turns[0].text, '');
+  assert.deepEqual(turns[1].sender, { cardId: 'b', name: 'B' });
+  assert.equal(turns[1].text, 'do it');
+  assert.deepEqual(turns[1].attachments, [{ mediaType: 'image/png', data: 'AAA' }]);
+  assert.deepEqual(turns[1].blocks.map(b => [b.type, b.stream ?? b.status]), [['text_delta', 'thought'], ['tool_call', 'completed'], ['text_delta', 'message']]);
+  assert.equal(turns[1].blocks[1].rawOutput, 'contents');
+  assert.ok(turns.every(t => t.state === 'history'));
+  assert.deepEqual(projectRecord(undefined), []);
 });
 
 test('a very long transcript projects quickly', () => {
-  const messages = [], receipts = [];
-  for (let i = 0; i < 4000; i++) { messages.push(user(`m${i}`, `q${i}`), agent(`a${i}`)); receipts.push({ id: `r${i}`, messageId: `m${i}`, state: 'completed' }); }
+  const messages = [];
+  for (let i = 0; i < 4000; i++) messages.push(user(`m${i}`, `q${i}`), agent(`a${i}`));
   const started = performance.now();
-  const turns = projectRecord({ messages }, receipts);
-  assert.equal(turns.length, 4000);
-  assert.ok(performance.now() - started < 1500, 'receipt matching is not quadratic');
-});
-
-test('a finished tool call is serialized into the record once', () => {
-  let serialized = 0;
-  const content = { toJSON() { serialized++; return [{ type: 'text', text: 'ok' }]; } };
-  const record = { messages: [user('m1', 'go'), { Agent: { content: [], tool_results: { t1: {}, t2: {} } } }] };
-  const turns = [{ messageId: 'm1', blocks: [
-    { type: 'tool_call', toolCallId: 't1', status: 'completed', content },
-    { type: 'tool_call', toolCallId: 't2', status: 'in_progress', content },
-  ] }];
-  preserveToolContent(record, turns);
-  assert.equal(serialized, 2);
-  assert.equal(record.messages[1].Agent.tool_results.t1.flat_status, 'completed');
-  preserveToolContent(record, turns);
-  assert.equal(serialized, 3, 'only the running call is serialized again');
-  turns[0].blocks[1].status = 'completed';
-  preserveToolContent(record, turns);
-  assert.equal(serialized, 4, 'it is serialized once more when it finishes');
-  preserveToolContent(record, turns);
-  assert.equal(serialized, 4);
-  assert.equal(record.messages[1].Agent.tool_results.t2.flat_status, 'completed');
-  assert.deepEqual(JSON.parse(record.messages[1].Agent.tool_results.t2.flat_content_json), [{ type: 'text', text: 'ok' }]);
+  assert.equal(projectRecord({ messages }).length, 4000);
+  assert.ok(performance.now() - started < 1500);
 });

@@ -62,7 +62,7 @@ async fn connect_guarded(state: &AppState, captured: &Target) -> AppResult<()> {
     let id = &captured.card.id;
     let snapshot = state.harness.request(&captured.workspace, &state.bin_dir, json!({
         "action":"ensure", "id":id, "agent":captured.card.harness.as_ref().unwrap().kind,
-        "cwd":captured.workspace.cwd,
+        "cwd":captured.workspace.cwd, "hostAccess":captured.card.harness.as_ref().unwrap().host_access,
     })).await?;
     // Archive/delete/retarget can race a slow startup. Release only the
     // connection we opened, never a newer connection with the same card id.

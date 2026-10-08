@@ -1025,6 +1025,7 @@ async fn run_tool(
             let ws = crate::api::acp_workspace(state, card_id).await?;
             let command = if tool == "send_text" {
                 json!({"action":"send","id":card_id,"requestId":format!("mcp:{}:{}",principal,request_id),"text":required(body,"text")?,"env":ws.session_env,
+                    "hostAccess":card.harness.as_ref().and_then(|h|h.host_access),
                     "sender":source_card.map(|source|json!({"cardId":source.id,"name":source_label(source),"epoch":state.harness.epoch(&source.id)}))})
             } else {
                 json!({"action":"cancel","id":card_id,"requestId":required(body,"turnId")?})

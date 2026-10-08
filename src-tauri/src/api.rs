@@ -387,7 +387,17 @@ async fn acp_action(State(state): State<AppState>, Path(id): Path<String>, Json(
     let ws = acp_workspace(&state, &id).await?;
     if let Some(object)=body.as_object_mut() { object.remove("sender"); }
     body["id"] = json!(id); body["env"] = json!(ws.session_env);
-    Ok(Json(state.harness.request(&ws, &state.bin_dir, body).await?))
+    body["hostAccess"] = json!(card.harness.as_ref().and_then(|h| h.host_access));
+    let changed = (body["action"] == "host_access").then(|| body["enabled"].as_bool()).flatten();
+    let result = state.harness.request(&ws, &state.bin_dir, body).await?;
+    // Host access is a card setting: remember it with the card once applied.
+    if let Some(enabled) = changed {
+        state.queue.with_queue(false, |queue| {
+            if let Some(harness) = queue.cards.iter_mut().find(|c| c.id == id).and_then(|c| c.harness.as_mut()) { harness.host_access = Some(enabled); }
+            Ok(())
+        }).await?;
+    }
+    Ok(Json(result))
 }
 
 pub(crate) struct LaunchGuard {

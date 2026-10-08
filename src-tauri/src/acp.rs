@@ -322,10 +322,6 @@ impl AcpRuntime {
             body["mcpRelay"]=json!(true);
             body.as_object_mut().map(|v|v.remove("mcpBridge"));
         }
-        body.as_object_mut().map(|v|v.remove("butlerContext"));
-        if workspace.id==crate::butler::WORKSPACE_ID && workspace.kind=="local" && std::path::Path::new(&workspace.cwd)==crate::butler::root() && body["action"]=="send" {
-            body["butlerContext"]=json!(include_str!("../../resources/butler/ROLE.md"));
-        }
         let link = self.link(workspace, bin).await?;
         let id = uuid::Uuid::new_v4().to_string();
         body["rpc"] = json!(id);
@@ -370,8 +366,9 @@ impl AcpRuntime {
         }
         Ok(result)
     }
-    pub async fn launch(&self, id: &str, kind: &str, workspace: &QueueWorkspace, _resume: Option<HarnessSession>, _: &TerminalHub, _: &crate::settings::SettingsStore, bin: &Path, _: bool) -> AppResult<HarnessSession> {
-        self.request(workspace, bin, json!({"action":"ensure","id":id,"agent":kind,"cwd":workspace.cwd,"env":workspace.session_env})).await?;
+    pub async fn launch(&self, id: &str, kind: &str, workspace: &QueueWorkspace, resume: Option<HarnessSession>, _: &TerminalHub, _: &crate::settings::SettingsStore, bin: &Path, _: bool) -> AppResult<HarnessSession> {
+        let host_access = resume.as_ref().and_then(|h| h.host_access);
+        self.request(workspace, bin, json!({"action":"ensure","id":id,"agent":kind,"cwd":workspace.cwd,"env":workspace.session_env,"hostAccess":host_access})).await?;
         serde_json::from_value(json!({"kind":kind,"terminalId":id,"state":"attention","version":"acpx 0.19.3","remote":workspace.kind == "ssh"})).map_err(Into::into)
     }
 }

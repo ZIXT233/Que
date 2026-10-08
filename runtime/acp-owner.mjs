@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
+import net from 'node:net';
+import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { createAcpRuntime, createAgentRegistry, createFileSessionStore } from 'acpx/runtime';
 import { remoteMcpHub } from './remote-mcp.mjs';
@@ -24,6 +26,52 @@ import { missingAgentCommand, agentAvailability } from './preflight.mjs';
 if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Flat requires Node.js 22.13 or newer');
 const root = process.env.FLAT_ACP_ROOT || path.join(os.homedir(), '.flat', 'acp');
 fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+const ownerSocket = path.join(root, 'owner.sock');
+const build = createHash('sha256').update(fs.readFileSync(fileURLToPath(import.meta.url))).digest('hex');
+const serveMode = process.argv.includes('--serve');
+if (process.argv.includes('--connect')) await relay(process.argv.includes('--wait'));
+
+/**
+ * Pipes stdio to a running `--serve` owner. Exit 3: no owner is running.
+ * Exit 4: an idle owner of another build was stopped; start this build instead.
+ * A busy owner of another build keeps serving until a later reconnect finds it idle.
+ */
+async function relay(wait) {
+  let socket;
+  for (let attempt = 0; !socket; attempt++) {
+    try { socket = await new Promise((resolve, reject) => { const s = net.createConnection(ownerSocket); s.once('connect', () => resolve(s)); s.once('error', reject); }); }
+    catch (error) {
+      if (!wait || attempt >= 100) { process.stderr.write(`no owner at ${ownerSocket}: ${error.code}\n`); process.exit(3); }
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+  socket.write(JSON.stringify({ action: '_hello', rpc: '_relay' }) + '\n');
+  let buffered = '', hello;
+  socket.setEncoding('utf8');
+  await new Promise(resolve => {
+    const read = chunk => {
+      buffered += chunk;
+      const lines = buffered.split('\n'); buffered = lines.pop();
+      for (const line of lines) {
+        let value; try { value = JSON.parse(line); } catch {}
+        if (value?.rpc === '_relay') hello = value.result; else process.stdout.write(line + '\n');
+      }
+      if (hello) { socket.off('data', read); socket.off('close', lost); resolve(); }
+    };
+    const lost = () => process.exit(1);
+    socket.on('data', read);
+    socket.once('close', lost);
+  });
+  if (hello.build !== build && !hello.busy) {
+    socket.write(JSON.stringify({ action: '_shutdown' }) + '\n');
+    socket.once('close', () => process.exit(4));
+    return new Promise(() => {});
+  }
+  if (buffered) process.stdout.write(buffered);
+  process.stdin.pipe(socket); socket.pipe(process.stdout);
+  socket.once('close', () => process.exit(0));
+  return new Promise(() => {});
+}
 
 // One owner per data directory; wait for a previous one that is still stopping its agents.
 const pidFile = path.join(root, 'owner.pid');
@@ -42,7 +90,23 @@ const reaper = agentReaper(path.join(root, 'agent-pids.json'));
 reaper.reapStale();
 
 const storeDir = process.env.FLAT_ACP_STORE_DIR || path.join(os.homedir(), '.acpx');
-const store = createFileSessionStore({ stateDir: storeDir });
+const files = createFileSessionStore({ stateDir: storeDir });
+/** Agents change mode or options mid-turn; their status is re-read once acpx has saved it. */
+const statusDirty = new Set();
+// acpx persists through this store; watching saves keeps title and status
+// current without reading the record again or changing what acpx writes.
+const store = {
+  load: key => files.load(key),
+  async save(record) {
+    await files.save(record);
+    const s = sessions[record.acpxRecordId];
+    if (!s) return;
+    s.title = record.title || s.title;
+    s.promptCapabilities = record.agentCapabilities?.promptCapabilities || s.promptCapabilities;
+    publish(s.id);
+    if (statusDirty.delete(s.id)) setImmediate(() => void metadata(s.id).catch(() => {}));
+  },
+};
 const listHistory = sessionHistory(storeDir, store);
 const customAgents = path.join(root, 'agents.json');
 const registry = createAgentRegistry({ overrides: fs.existsSync(customAgents) ? JSON.parse(fs.readFileSync(customAgents, 'utf8')) : {} });
@@ -307,8 +371,8 @@ async function follow(id, l, turn, running) {
       if (event.tag === 'usage_update') { s.context = { used: event.used, size: event.size, cost: event.cost }; ops.push({ op: 'set', key: 'context', value: plain(s.context) }); }
       if (event.availableCommands) { s.commands = event.availableCommands; ops.push({ op: 'set', key: 'commands', value: plain(s.commands) }); }
       publish(id, false, ops);
-      // The agent changed its own mode or options mid-turn; show it now.
-      if (event.tag === 'current_mode_update' || event.tag === 'config_option_update') void metadata(id).catch(() => {});
+      // The agent changed its own mode or options mid-turn; show it once acpx saved it.
+      if (event.tag === 'current_mode_update' || event.tag === 'config_option_update') statusDirty.add(id);
     }
     const result = await running.result;
     turn.result = result; turn.state = turn.withdrawn ? 'cancelled' : result.status;
@@ -316,8 +380,6 @@ async function follow(id, l, turn, running) {
     turn.state = 'failed'; turn.result = { status: 'failed', error: { message: sessionErrorMessage(e) } };
   } finally {
     l.turns.delete(turn.id); turn.endedAt = Date.now();
-    const record = await store.load(id).catch(() => undefined);
-    if (record?.title) s.title = record.title;
     // The result is visible now; the status refresh below reads acpx's saved state.
     settle(id); publish(id);
     await metadata(id).catch(() => {});
@@ -428,31 +490,67 @@ async function dispatch(req, client) {
   return control(id, req);
 }
 
-// stdout carries the protocol only; route stray library logging to stderr.
+// Logging must never reach a protocol stream.
 console.log = console.info = console.error;
-const app = { revs: undefined, destroyed: false, write: line => { if (!app.destroyed) process.stdout.write(line); return true; }, end() {}, destroy() {} };
-clients.add(app);
 fs.writeFileSync(remoteBridgePath, FLAT_MCP_BRIDGE_SOURCE, { mode: 0o600 });
 try { fs.unlinkSync(mcpSocketPath); } catch {}
 await mcpHub.listen();
-wire.attach(app);
-const lines = readline.createInterface({ input: process.stdin });
-lines.on('line', async line => {
-  let req;
-  try {
-    req = JSON.parse(line);
-    if (req.action === '_mcp_bind') { for (const card of req.cards || []) if (sessions[card]?.mcpRelay) mcpHub.bind(card, app); return; }
-    if (req.action === '_mcp_result') { mcpHub.receive(app, req); return; }
-    const result = await dispatch(req, app);
-    wire.flushAll();
-    app.write(JSON.stringify({ rpc: req.rpc, result }) + '\n');
-  } catch (e) { app.write(JSON.stringify({ rpc: req?.rpc, error: sessionErrorMessage(e) }) + '\n'); }
-});
+
+/** One connected Que: requests in, responses and session events out. */
+function serve(input, output, onGone) {
+  const client = { revs: undefined, destroyed: false, write: line => { if (!client.destroyed) output.write(line); return true; } };
+  clients.add(client);
+  wire.attach(client);
+  const lines = readline.createInterface({ input });
+  lines.on('line', async line => {
+    let req;
+    try {
+      req = JSON.parse(line);
+      if (req.action === '_mcp_bind') { for (const card of req.cards || []) if (sessions[card]?.mcpRelay) mcpHub.bind(card, client); return; }
+      if (req.action === '_mcp_result') { mcpHub.receive(client, req); return; }
+      if (req.action === '_shutdown') { void stop('replaced by a new build'); return; }
+      const result = req.action === '_hello'
+        ? { build, busy: [...live.values()].some(l => l.starting || l.turns.size) }
+        : await dispatch(req, client);
+      wire.flushAll();
+      client.write(JSON.stringify({ rpc: req.rpc, result }) + '\n');
+    } catch (e) { client.write(JSON.stringify({ rpc: req?.rpc, error: sessionErrorMessage(e) }) + '\n'); }
+  });
+  const gone = () => {
+    if (client.destroyed) return;
+    client.destroyed = true; clients.delete(client); mcpHub.unbind(client); lines.close(); onGone?.();
+  };
+  // A dropped connection (ECONNRESET) is a client leaving, never a reason to crash.
+  lines.on('error', gone);
+  return gone;
+}
+
+let server;
+if (serveMode) {
+  // Remote keepalive: run inside tmux and outlive the SSH connection, like a
+  // terminal card's tmux session. Que reconnects through `--connect`.
+  try { fs.unlinkSync(ownerSocket); } catch {}
+  server = net.createServer(socket => {
+    socket.on('error', () => {});
+    const gone = serve(socket, socket);
+    socket.on('close', gone);
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(ownerSocket, resolve); });
+  fs.chmodSync(ownerSocket, 0o600);
+} else {
+  // Local: a child of Que. Que closing the pipe (exit, crash or kill) ends everything.
+  serve(process.stdin, process.stdout, () => void stop('Que closed the connection'));
+  process.stdin.on('end', () => void stop('Que closed the connection'));
+  process.stdout.on('error', () => void stop('Que closed the connection'));
+}
 
 let shutdown;
-function stop() {
+function stop(reason) {
   return shutdown ||= (async () => {
-    stopping = true; app.destroyed = true; lines.close();
+    process.stderr.write(`owner stopping: ${reason}\n`);
+    stopping = true;
+    for (const client of clients) client.destroyed = true;
+    server?.close();
     // Agents get a grace period to exit; anything left is killed outright.
     const deadline = setTimeout(() => { reaper.killAll(); try { fs.unlinkSync(pidFile); } catch {} process.exit(1); }, 5000);
     try {
@@ -468,12 +566,10 @@ function stop() {
       await Promise.race([stopped, new Promise(resolve => setTimeout(resolve, 2000))]);
     } catch (error) { process.stderr.write(sessionErrorMessage(error)); }
     reaper.killAll();
+    if (serveMode) try { fs.unlinkSync(ownerSocket); } catch {}
     try { fs.unlinkSync(pidFile); } catch {}
     clearTimeout(deadline); process.exit(0);
   })();
 }
-process.stdin.on('end', () => void stop());
-process.stdin.on('close', () => void stop());
-process.stdout.on('error', () => void stop());
 // Keep handling repeated signals: a second SIGTERM must not abort the cleanup the first started.
-for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => void stop());
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => void stop(signal));
