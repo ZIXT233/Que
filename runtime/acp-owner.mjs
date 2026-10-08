@@ -407,7 +407,6 @@ async function dispatch(req, client) {
   const { action, id } = req;
   if (stopping) throw Error('会话服务正在退出');
   if (req.mcpRelay === true && ['ensure', 'attach', 'host_access', 'send', 'read'].includes(action)) mcpHub.bind(id, client);
-  if (action === 'resync') { wire.resync(client, id); return { ok: true }; }
   if (action === 'catalog') {
     const env = { ...process.env, ...(req.env || {}) };
     // Installed agents first; the rest stay selectable (an API key may suffice).

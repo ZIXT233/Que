@@ -25,7 +25,7 @@ const append = (sessions, wire, text) => {
   sessions.a.turns[0].blocks[0].text += text;
   wire.publish('a', { ops: [{ op: 'append', turn: 't', block: 0, text }] });
 };
-// What a client does with the stream: snapshots replace, deltas apply or demand a resync.
+// What a client does with the stream: snapshots replace, deltas apply or call for a fresh read.
 const replay = lines => lines.reduce((state, line) => {
   if (line.event === 'snapshot') return line.snapshot;
   const next = applyDelta(state, line);
@@ -83,10 +83,6 @@ test('a client that joins mid-stream or lost sync gets a snapshot, never a delta
   await sleep(60);
   assert.ok(joiner.lines.slice(1).every(event => event.event === 'snapshot'));
   assert.deepEqual(replay(joiner.lines), JSON.parse(JSON.stringify(sessions.a)));
-  // Explicit repair.
-  const stale = client(); clients.add(stale); wire.attach(stale);
-  sessions.a.turns[0].blocks[0].text = 'rewritten'; wire.resync(stale, 'a');
-  assert.equal(stale.lines.at(-1).snapshot.turns[0].blocks[0].text, 'rewritten');
 });
 
 test('flushAll delivers pending deltas before an RPC response that carries the session', async () => {

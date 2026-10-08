@@ -64,7 +64,7 @@ owner 与 Que 之间是按行 JSON：请求带 `rpc`，响应带同一个 `rpc`�
 | `ensure` | 连接卡片的会话（新建或恢复） |
 | `send` / `cancel` / `answer` | 发消息（含通知）、取消或撤回排队、回答待确认请求 |
 | `config` / `model` / `mode` / `host_access` / `close` | 会话控制 |
-| `read` / `resync` | 取完整快照 |
+| `read` | 取完整快照 |
 | `catalog` / `health` | 可用 Agent（已安装的在前）、连接状态 |
 | `history` / `history_native` / `attach` | 历史对话、Agent 自己的会话、接回为卡片 |
 

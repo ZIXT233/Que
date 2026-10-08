@@ -7,11 +7,11 @@
 //   {event:'delta', id, epoch, base, rev, ops}        applies only to revision `base`
 //
 // A client holding revision `base` of the same epoch applies `ops` and moves to
-// `rev`. Any other client state is a gap and is repaired with a full snapshot
-// (the `resync` action). Revisions only ever increase within an epoch; they may
+// `rev`. Any other client state is a gap, repaired by reading a full snapshot
+// (the `read` action). Revisions only ever increase within an epoch; they may
 // skip numbers, so only `base` ever has to match.
 //
-// Delta ops (the contract mirrored by src/lib/acp-delta.ts and acp.rs):
+// Delta ops (the contract applied by src/lib/acp-delta.ts in the UI):
 //   {op:'append', turn, block, text}   turn.blocks[block].text += text
 //   {op:'block',  turn, block, value}  turn.blocks[block] = value (block <= length)
 //   {op:'set',    key, value}          session[key] = value, key in SET_KEYS
@@ -79,16 +79,9 @@ export function createSessionWire({ sessions: getSessions, clients, epoch, windo
       flush(id); arm(id);
     },
     flushAll,
-    forget(id) { const state = states.get(id); clearTimeout(state?.timer); states.delete(id); },
     attach(client) {
       client.revs = new Map();
       for (const [id, session] of Object.entries(getSessions())) { client.write(snapshotLine(id)); client.revs.set(id, session.revision); }
-    },
-    resync(client, id) {
-      const session = getSessions()[id];
-      if (!session) return;
-      flush(id);
-      client.write(snapshotLine(id)); client.revs?.set(id, session.revision);
     },
   };
 }
