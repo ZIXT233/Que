@@ -6,9 +6,9 @@ import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-const binary=process.env.FLAT_SETTINGS_TEST_BINARY;
+const binary=process.env.QUEACP_SETTINGS_TEST_BINARY;
 test('settings MCP uses real API, validates scopes, redacts secrets and creates workspaces idempotently',{skip:!binary},async()=>{
- const root=await mkdtemp(path.join(tmpdir(),'flat-settings-api-'));
+ const root=await mkdtemp(path.join(tmpdir(),'queacp-settings-api-'));
  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin')},stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',d=>stderr+=d);
  const lines=readline.createInterface({input:child.stdout});
  const address=new Promise((resolve,reject)=>{lines.on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v.base)}catch{}});child.once('exit',()=>reject(Error(stderr)))});
@@ -22,9 +22,9 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
   await request('/api/card-queue',{action:'harness_start',id:card,kind:'codex'});
   const session=await request('/api/acp/'+card);ownerPid=Number(await readFile(path.join(acpRoot,'owner.pid'),'utf8'));
   const discovery=JSON.parse(await readFile(path.join(root,'que','mcp','endpoint.json'),'utf8'));
-  const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-Flat-Source-Epoch':session.connectionId};
+  const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-QueACP-Source-Epoch':session.connectionId};
   const call=(tool,args={})=>request('/api/mcp/tools',{tool,...args},headers);
-  const denied={...headers};delete denied['X-Que-Source-Terminal'];delete denied['X-Flat-Source-Epoch'];
+  const denied={...headers};delete denied['X-Que-Source-Terminal'];delete denied['X-QueACP-Source-Epoch'];
   await assert.rejects(request('/api/mcp/tools',{tool:'update_settings',scope:'ui',patch:{theme:'dark'}},denied),/all-card/);
   assert.ok((await call('list_settings')).ui.theme);
   await call('update_settings',{scope:'ui',patch:{theme:'dark',fontSize:18}});

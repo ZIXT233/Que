@@ -2,7 +2,7 @@
 export async function admissionId(key: string, text: string, attachments: unknown[]): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify([text, attachments]));
   const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('');
-  const storageKey = `flat:admission:${key}`;
+  const storageKey = `queacp:admission:${key}`;
   let saved: {id?: string; fingerprint?: string} = {};
   try { saved = JSON.parse(sessionStorage.getItem(storageKey) || '{}'); } catch { /* invalid receipt */ }
   if (saved?.fingerprint === fingerprint && saved.id) return saved.id;
@@ -12,7 +12,7 @@ export async function admissionId(key: string, text: string, attachments: unknow
   return id;
 }
 export function acknowledgeAdmission(key: string, id: string) {
-  const storageKey = `flat:admission:${key}`;
+  const storageKey = `queacp:admission:${key}`;
   try {
     if (JSON.parse(sessionStorage.getItem(storageKey) || '{}').id === id) sessionStorage.removeItem(storageKey);
   } catch { /* an invalid receipt cannot identify an accepted message */ }

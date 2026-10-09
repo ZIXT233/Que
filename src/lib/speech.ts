@@ -47,9 +47,9 @@ export async function startRecorder(signal: AbortSignal, onLimit: () => void, on
   signal.addEventListener('abort', cleanup, { once: true });
   try {
     context = new AudioContext({ sampleRate: 16000 });
-    await context.audioWorklet.addModule('/flat-pcm-recorder.js');
+    await context.audioWorklet.addModule('/queacp-pcm-recorder.js');
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-    source = context.createMediaStreamSource(stream); node = new AudioWorkletNode(context, 'flat-pcm-recorder');
+    source = context.createMediaStreamSource(stream); node = new AudioWorkletNode(context, 'queacp-pcm-recorder');
     const maxSamples = Math.min(context.sampleRate * 120, 3_500_000);
     let levelSamples = 0, levelEnergy = 0, smoothedLevel = 0;
     node.port.onmessage = event => {

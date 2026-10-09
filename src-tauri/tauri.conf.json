@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Flat",
+  "productName": "QueACP",
   "version": "0.2.1",
-  "identifier": "app.flat.desktop",
+  "identifier": "app.queacp.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1435",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Flat",
+        "title": "QueACP",
         "width": 1320,
         "height": 860,
         "minWidth": 880,

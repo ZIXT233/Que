@@ -10,7 +10,7 @@ const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
 async function until(predicate,ms=8000){for(let i=0;i<ms/25;i++){if(predicate())return true;await sleep(25);}return predicate();}
 
 function start(root,pidFile,env={}){
-  const child=spawn(process.execPath,['src-tauri/resources/bin/flat-acp.mjs'],{env:{...process.env,FLAT_ACP_ROOT:root,FLAT_ACP_STORE_DIR:path.join(root,'acpx'),FLAT_TEST_PID_FILE:pidFile,...env},stdio:['pipe','pipe','pipe']});
+  const child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env:{...process.env,QUEACP_ACP_ROOT:root,QUEACP_ACP_STORE_DIR:path.join(root,'acpx'),QUEACP_TEST_PID_FILE:pidFile,...env},stdio:['pipe','pipe','pipe']});
   const pending=new Map();let serial=0,errors='';
   child.stderr.on('data',d=>errors+=d);child.stdin.on('error',()=>{});
   readline.createInterface({input:child.stdout}).on('line',line=>{const v=JSON.parse(line),p=pending.get(v.rpc);if(p){pending.delete(v.rpc);v.error?p.reject(Error(v.error)):p.resolve(v.result)}});
@@ -21,11 +21,11 @@ function start(root,pidFile,env={}){
 const agentPids=file=>existsSync(file)?readFileSync(file,'utf8').trim().split('\n').filter(Boolean).map(Number):[];
 
 test('the owner and its agents end when the app closes the pipe, even mid-turn',async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
+  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-life-'));const pidFile=path.join(root,'fixture-pids');
   writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   try{
     // A stubborn agent proves the owner kills agents rather than relying on EOF.
-    const {child,rpc}=start(root,pidFile,{FLAT_TEST_IGNORE_EOF:'1'});
+    const {child,rpc}=start(root,pidFile,{QUEACP_TEST_IGNORE_EOF:'1'});
     await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
     await rpc({action:'send',id:'card',requestId:'hold',text:'permission'});
     const [agent]=agentPids(pidFile);assert.ok(agent&&alive(agent),'agent is running');
@@ -45,10 +45,10 @@ test('the owner and its agents end when the app closes the pipe, even mid-turn',
 });
 
 test('a hard-killed owner leaves no agents behind once the next owner starts',{skip:process.platform!=='linux'&&'stale PIDs are only provable on Linux'},async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
+  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-life-'));const pidFile=path.join(root,'fixture-pids');
   writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   try{
-    const first=start(root,pidFile,{FLAT_TEST_IGNORE_EOF:'1'});
+    const first=start(root,pidFile,{QUEACP_TEST_IGNORE_EOF:'1'});
     await first.rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
     const [agent]=agentPids(pidFile);assert.ok(alive(agent));
     first.child.kill('SIGKILL');await until(()=>first.child.exitCode!==null||first.child.signalCode!==null);
@@ -61,7 +61,7 @@ test('a hard-killed owner leaves no agents behind once the next owner starts',{s
 });
 
 test('a second owner on the same data waits for the first instead of sharing it',async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
+  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-life-'));const pidFile=path.join(root,'fixture-pids');
   try{
     const first=start(root,pidFile);await first.rpc({action:'health',ids:[]});
     const second=start(root,pidFile);
@@ -76,10 +76,10 @@ test('a second owner on the same data waits for the first instead of sharing it'
 });
 
 test('a card is one session: never rebound, and an empty one is started fresh instead of restored', async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'flat-life-'));const pidFile=path.join(root,'fixture-pids');
+  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-life-'));const pidFile=path.join(root,'fixture-pids');
   writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')],other:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   // Like Devin, the fixture cannot load a session that never received a prompt.
-  const {child,rpc}=start(root,pidFile,{FLAT_TEST_EMPTY_ROLLOUT:path.join(root,'rollout'),FLAT_TEST_LOAD_ERROR:'not-found'});
+  const {child,rpc}=start(root,pidFile,{QUEACP_TEST_EMPTY_ROLLOUT:path.join(root,'rollout'),QUEACP_TEST_LOAD_ERROR:'not-found'});
   try{
     const session=await rpc({action:'ensure',id:'card',cwd:root,agent:'fixture'});
     assert.equal(session.recordId,'card','the card id is the acpx session key');

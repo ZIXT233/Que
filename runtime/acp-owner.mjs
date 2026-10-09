@@ -29,8 +29,8 @@ import { agentReaper } from './agent-reaper.mjs';
 import { missingAgentCommand, agentAvailability } from './preflight.mjs';
 import { relay } from './relay.mjs';
 
-if (Number(process.versions.node.split('.')[0]) < 22) throw Error('Flat requires Node.js 22.13 or newer');
-const root = process.env.FLAT_ACP_ROOT || path.join(os.homedir(), '.flat', 'acp');
+if (Number(process.versions.node.split('.')[0]) < 22) throw Error('QueACP requires Node.js 22.13 or newer');
+const root = process.env.QUEACP_ACP_ROOT || path.join(os.homedir(), '.queacp', 'acp');
 fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 const ownerSocket = path.join(root, 'owner.sock');
 const build = createHash('sha256').update(fs.readFileSync(fileURLToPath(import.meta.url))).digest('hex');
@@ -53,7 +53,7 @@ await acquireOwnership();
 const reaper = agentReaper(path.join(root, 'agent-pids.json'));
 reaper.reapStale();
 
-const storeDir = process.env.FLAT_ACP_STORE_DIR || path.join(os.homedir(), '.acpx');
+const storeDir = process.env.QUEACP_ACP_STORE_DIR || path.join(os.homedir(), '.acpx');
 const files = createFileSessionStore({ stateDir: storeDir });
 /** Agents change mode or options mid-turn; their status is re-read once acpx has saved it. */
 const statusDirty = new Set();
@@ -74,7 +74,7 @@ const store = {
 const listHistory = sessionHistory(storeDir, store);
 const customAgents = path.join(root, 'agents.json');
 const registry = createAgentRegistry({ overrides: fs.existsSync(customAgents) ? JSON.parse(fs.readFileSync(customAgents, 'utf8')) : {} });
-const mcpSocketPath = process.platform === 'win32' ? `\\\\.\\pipe\\flat-mcp-${createHash('sha256').update(root).digest('hex').slice(0, 20)}` : path.join(root, 'mcp.sock');
+const mcpSocketPath = process.platform === 'win32' ? `\\\\.\\pipe\\queacp-mcp-${createHash('sha256').update(root).digest('hex').slice(0, 20)}` : path.join(root, 'mcp.sock');
 const remoteBridgePath = path.join(root, 'remote-mcp.cjs');
 
 /** What clients see, one per card: the acpx record plus turns submitted in this run. */
@@ -118,8 +118,8 @@ async function loadCard(id) {
 
 function mcpServers(id) {
   const s = sessions[id];
-  if (s?.mcpRelay) return [{ name: 'flat', command: process.execPath, args: [remoteBridgePath], env: [{ name: 'FLAT_MCP_SOCKET', value: mcpSocketPath }, { name: 'FLAT_MCP_CAPABILITY', value: mcpHub.capability(id, s.connectionId) }] }];
-  if (s?.mcpBridge) return [{ name: 'flat', command: process.execPath, args: [s.mcpBridge], env: [{ name: 'FLAT_SOURCE_CARD', value: id }, { name: 'FLAT_SOURCE_EPOCH', value: s.connectionId }] }];
+  if (s?.mcpRelay) return [{ name: 'queacp', command: process.execPath, args: [remoteBridgePath], env: [{ name: 'QUEACP_MCP_SOCKET', value: mcpSocketPath }, { name: 'QUEACP_MCP_CAPABILITY', value: mcpHub.capability(id, s.connectionId) }] }];
+  if (s?.mcpBridge) return [{ name: 'queacp', command: process.execPath, args: [s.mcpBridge], env: [{ name: 'QUEACP_SOURCE_CARD', value: id }, { name: 'QUEACP_SOURCE_EPOCH', value: s.connectionId }] }];
   return [];
 }
 
@@ -462,7 +462,7 @@ async function dispatch(req, client) {
 // end of stderr is gone (EPIPE) — that is exactly when agents must be stopped.
 console.log = console.info = console.error;
 process.stderr.on('error', () => {});
-fs.writeFileSync(remoteBridgePath, FLAT_MCP_BRIDGE_SOURCE, { mode: 0o600 });
+fs.writeFileSync(remoteBridgePath, QUEACP_MCP_BRIDGE_SOURCE, { mode: 0o600 });
 try { fs.unlinkSync(mcpSocketPath); } catch {}
 await mcpHub.listen();
 

@@ -5,7 +5,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync} from
 import readline from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
-const binary=process.env.FLAT_HEADLESS_TEST_BINARY;
+const binary=process.env.QUEACP_HEADLESS_TEST_BINARY;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
 async function until(predicate,ms=10000){for(let i=0;i<ms/25;i++){if(predicate())return true;await sleep(25);}return predicate();}
@@ -14,8 +14,8 @@ async function until(predicate,ms=10000){for(let i=0;i<ms/25;i++){if(predicate()
 // outright — no shutdown hook runs — must still leave nothing behind.
 for(const signal of ['SIGTERM','SIGKILL'])
 test(`app ${signal}: owner and agents do not outlive the app`, {skip:!binary}, async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'flat-app-life-'));const pidFile=path.join(root,'fixture-pids');
-  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),FLAT_ACP_STORE_DIR:path.join(root,'acpx'),FLAT_TEST_PID_FILE:pidFile,FLAT_TEST_IGNORE_EOF:'1'},stdio:['pipe','pipe','pipe']});
+  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-app-life-'));const pidFile=path.join(root,'fixture-pids');
+  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx'),QUEACP_TEST_PID_FILE:pidFile,QUEACP_TEST_IGNORE_EOF:'1'},stdio:['pipe','pipe','pipe']});
   let ownerPid,agentPid;
   try {
     const {base}=await new Promise((resolve,reject)=>{

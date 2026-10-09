@@ -8,7 +8,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 test('MCP bridge sends ACP card UUID and source run identity without rewriting message',async()=>{
- const root=await mkdtemp(path.join(tmpdir(),'flat-peer-'));
+ const root=await mkdtemp(path.join(tmpdir(),'queacp-peer-'));
  const card='01234567-0123-4123-8123-0123456789ab',epoch='run-one';
  let received;
  const server=http.createServer((req,res)=>{let data='';req.on('data',d=>data+=d);req.on('end',()=>{received={headers:req.headers,body:JSON.parse(data)};res.setHeader('Content-Type','application/json');res.end(JSON.stringify({state:'queued',id:'request-one'}));});});
@@ -17,12 +17,12 @@ test('MCP bridge sends ACP card UUID and source run identity without rewriting m
  try {
   const config=path.join(root,'endpoint.json');
   await writeFile(config,JSON.stringify({url:`http://127.0.0.1:${server.address().port}/api/mcp/tools`,token:'a'.repeat(32)}));
-  child=spawn(process.execPath,['scripts/que-mcp.cjs'],{env:{...process.env,FLAT_SOURCE_CARD:card,FLAT_SOURCE_EPOCH:epoch,QUE_MCP_ENDPOINT_FILE:config}});
+  child=spawn(process.execPath,['scripts/que-mcp.cjs'],{env:{...process.env,QUEACP_SOURCE_CARD:card,QUEACP_SOURCE_EPOCH:epoch,QUE_MCP_ENDPOINT_FILE:config}});
   const response=new Promise((resolve,reject)=>{readline.createInterface({input:child.stdout}).on('line',line=>resolve(JSON.parse(line)));child.on('error',reject);child.once('exit',code=>reject(new Error(`MCP bridge exited before responding: ${code}`)));});
   child.stdin.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'send_message',arguments:{cardId:'target',sessionId:'target',requestId:'request-one',text:'Hello B'}}})+'\n');
   assert.equal((await response).result.isError,false);
   assert.equal(received.headers['x-que-source-terminal'],card);
-  assert.equal(received.headers['x-flat-source-epoch'],epoch);
+  assert.equal(received.headers['x-queacp-source-epoch'],epoch);
   assert.equal(received.body.text,'Hello B');assert.equal(received.body.tool,'send_message');
  }finally{child?.kill();await new Promise(r=>server.close(r));await rm(root,{recursive:true,force:true});}
 });

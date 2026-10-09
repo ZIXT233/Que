@@ -10,7 +10,7 @@ test('native history selects agent, loads pages, filters active cards and opens 
  for(const k of ['window','document','HTMLElement','Element','Node','Event','MouseEvent'])globalThis[k]=dom.window[k];
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;
  const channels=[],NativeChannel=globalThis.MessageChannel;globalThis.MessageChannel=class extends NativeChannel{constructor(){super();channels.push(this);}};
- const dir=await mkdtemp(join(tmpdir(),'flat-native-ui-'));
+ const dir=await mkdtemp(join(tmpdir(),'queacp-native-ui-'));
  try{
  const compiled=await build({stdin:{resolveDir:process.cwd(),loader:'tsx',contents:`
  import React,{act} from 'react';import {createRoot} from 'react-dom/client';import assert from 'node:assert/strict';

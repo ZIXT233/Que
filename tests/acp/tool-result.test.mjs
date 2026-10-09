@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 test('ACP tool envelopes render readable results and preserve unknown formats', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'flat-tool-render-'));
+  const dir = await mkdtemp(join(tmpdir(), 'queacp-tool-render-'));
   try {
     const result = await build({ stdin: { contents: `
       import React from 'react';

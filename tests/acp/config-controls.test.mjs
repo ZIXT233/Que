@@ -72,7 +72,7 @@ export async function run(){
  assert.equal(document.querySelector('.fc-speed').getAttribute('aria-pressed'),'false');
  assert.equal(requests.at(-1).value,'off');
  await act(async()=>document.querySelector('.fc-model-button').click());
- sessionStorage.setItem('flat:draft:'+id,'keep draft');
+ sessionStorage.setItem('queacp:draft:'+id,'keep draft');
  await act(async()=>document.querySelector('.fc-toolbar-right .fc-icon-button').click());
  const compact=Array.from(document.querySelectorAll('.fc-usage button')).find(b=>b.textContent==='Compact context');
  assert.ok(compact);await act(async()=>compact.click());
@@ -98,7 +98,7 @@ export async function run(){
     js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);",
   },
 });
-const dir = await mkdtemp(join(tmpdir(), "flat-composer-"));
+const dir = await mkdtemp(join(tmpdir(), "queacp-composer-"));
 try {
   const entry = join(dir, "test.mjs");
   await writeFile(entry, result.outputFiles[0].text);

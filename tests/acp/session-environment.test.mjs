@@ -9,20 +9,20 @@ import {sessionEnvironment} from '../../runtime/session-environment.mjs';
 const run = promisify(execFile);
 
 test('machine RC applies overrides before sourcing and preserves Codex aliases and argv', {skip:process.platform==='win32'}, async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(), 'flat-rc-'));
+  const root=mkdtempSync(path.join(os.tmpdir(), 'queacp-rc-'));
   try {
-    const terminalRc=`echo 'startup banner'; export FLAT_RC_VALUE="$FLAT_TEST_INPUT/from-rc"; tcodex() { printf '%s\\n' "$FLAT_RC_VALUE" "$@"; }; alias codex=tcodex`;
-    const options={root,cwd:root,shell:'/bin/bash',terminalRc,env:{FLAT_TEST_INPUT:'configured'}};
+    const terminalRc=`echo 'startup banner'; export QUEACP_RC_VALUE="$QUEACP_TEST_INPUT/from-rc"; tcodex() { printf '%s\\n' "$QUEACP_RC_VALUE" "$@"; }; alias codex=tcodex`;
+    const options={root,cwd:root,shell:'/bin/bash',terminalRc,env:{QUEACP_TEST_INPUT:'configured'}};
     const env=await sessionEnvironment(options);
-    assert.equal(env.FLAT_RC_VALUE,'configured/from-rc');
+    assert.equal(env.QUEACP_RC_VALUE,'configured/from-rc');
     assert.ok(env.CODEX_PATH);
     const result=await run(env.CODEX_PATH,['app-server',"a b'c",'$(echo unsafe)'],{env});
     assert.equal(result.stdout,"configured/from-rc\napp-server\na b'c\n$(echo unsafe)\n");
     assert.match(result.stderr,/startup banner/,'RC output stays off the protocol stream');
-    assert.equal(process.env.FLAT_RC_VALUE,undefined,'owner environment stays isolated');
-    const next=await sessionEnvironment({...options,env:{FLAT_TEST_INPUT:'updated'}});
-    assert.equal(next.FLAT_RC_VALUE,'updated/from-rc');
-    const defaults=await sessionEnvironment({...options,terminalRc:'export FLAT_TEST=ok'});
+    assert.equal(process.env.QUEACP_RC_VALUE,undefined,'owner environment stays isolated');
+    const next=await sessionEnvironment({...options,env:{QUEACP_TEST_INPUT:'updated'}});
+    assert.equal(next.QUEACP_RC_VALUE,'updated/from-rc');
+    const defaults=await sessionEnvironment({...options,terminalRc:'export QUEACP_TEST=ok'});
     assert.equal(defaults.CODEX_PATH,process.env.CODEX_PATH,'no alias preserves the bundled Codex default');
     const explicit=await sessionEnvironment({...options,env:{CODEX_PATH:'/custom/codex'}});
     assert.equal(explicit.CODEX_PATH,'/custom/codex');

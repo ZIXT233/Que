@@ -12,13 +12,13 @@ async function until(predicate,ms=10000){for(let i=0;i<ms/25;i++){if(await predi
 // tmux only keeps the `--serve` owner alive on the remote host; a detached
 // process stands in for it here. Que reaches it through `--connect`.
 function setup(){
-  const root=mkdtempSync(path.join(os.tmpdir(),'flat-keep-'));
+  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-keep-'));
   writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-  const env={...process.env,FLAT_ACP_ROOT:root,FLAT_ACP_STORE_DIR:path.join(root,'acpx')};
+  const env={...process.env,QUEACP_ACP_ROOT:root,QUEACP_ACP_STORE_DIR:path.join(root,'acpx')};
   return {root,env};
 }
 function daemon(bundle,env){
-  const log=openSync(path.join(env.FLAT_ACP_ROOT,'owner.log'),'a');
+  const log=openSync(path.join(env.QUEACP_ACP_ROOT,'owner.log'),'a');
   const child=spawn(process.execPath,[bundle,'--serve'],{env,stdio:['ignore',log,log],detached:true});child.unref();return child;
 }
 function relay(bundle,env,args=['--connect']){
@@ -30,7 +30,7 @@ function relay(bundle,env,args=['--connect']){
   const rpc=body=>new Promise((resolve,reject)=>{const id=String(++serial);pending.set(id,{resolve,reject});child.stdin.write(JSON.stringify({...body,rpc:id})+'\n')});
   return {child,rpc,exited};
 }
-const bundle=path.resolve('src-tauri/resources/bin/flat-acp.mjs');
+const bundle=path.resolve('src-tauri/resources/bin/acp-owner.mjs');
 const stopDaemon=async root=>{const file=path.join(root,'owner.pid');if(existsSync(file))try{process.kill(Number(readFileSync(file,'utf8')))}catch{};await until(()=>!existsSync(file));};
 
 test('a remote owner keeps working when Que disconnects, and Que picks up where it was', async()=>{

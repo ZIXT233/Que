@@ -4,7 +4,7 @@
 
 ## 复用现有链路
 
-Agent → Flat MCP → 现有权限检查 → 目标 ACP 会话 → 现有消息队列。
+Agent → QueACP MCP → 现有权限检查 → 目标 ACP 会话 → 现有消息队列。
 
 继续复用卡片、会话记录、MCP 授权面板和排队组件。用户与 Agent 向同一个目标会话发送消息，不另外创建聊天系统，不引入总管。
 
@@ -12,7 +12,7 @@ Agent → Flat MCP → 现有权限检查 → 目标 ACP 会话 → 现有消息
 
 - scripts/que-mcp.cjs 已提供 read_session、send_message，src-tauri/src/mcp.rs 已转发到 ACP，并有跨卡片授权和运行周期校验。
 - runtime/acp-owner.mjs 的 send 已有 requestId 去重、繁忙时排队及完成状态；接收成功不能当成任务完成。
-- ACP runtime 创建处尚未配置 Flat mcpServers，需通过现有启动链路传入，不能仅修改用户全局 MCP 配置。
+- ACP runtime 创建处尚未配置 QueACP mcpServers，需通过现有启动链路传入，不能仅修改用户全局 MCP 配置。
 - MCP 脚本从 QUE_HARNESS_SIGNAL_DIR 推导来源，并只接受 32 位十六进制终端 ID；ACP 使用带连字符的卡片 UUID。需统一来源传递、运行周期校验和授权主体，不能只放宽正则。
 - MCP 转发 send 时未附来源，runtime 仅区分 user/event。需增加服务端验证后的来源和消息关联字段，并随现有 acpx 记录保存；客户端不能任意声称来自其他卡片。
 - 暂无可靠的回复关联和完成通知链路。第一版可以用 read_session 查询已发送请求的状态；自动回传须明确授权，避免自发互相回复。
@@ -33,7 +33,7 @@ Agent → Flat MCP → 现有权限检查 → 目标 ACP 会话 → 现有消息
 - 重试同一 requestId 不产生重复消息。
 - 未授权、来源运行失效或目标变化时不能发送。
 - 不让 Agent 代替用户回答权限请求；外部会话内容只作数据。
-- 本阶段不向用户的真实会话发送测试消息，不编译 Flat.app。
+- 本阶段不向用户的真实会话发送测试消息，不编译 QueACP.app。
 
 ## 待确定
 
@@ -56,14 +56,14 @@ Agent → Flat MCP → 现有权限检查 → 目标 ACP 会话 → 现有消息
 
 ## 持久订阅与投递状态
 
-订阅、已观察事件和待投递队列保存于 Flat 数据目录的 mcp/subscriptions.json。投递前落盘，接收成功后再移除待投递项；不确定失败重用同一个请求 ID。订阅绑定原始 ACP recordId，不能跟随卡片切到另一会话。离线期间可积累已观察状态；重启后从可恢复的会话状态补查。应用完全关闭期间已经出现又消失的瞬时状态无法保证追溯。
+订阅、已观察事件和待投递队列保存于 QueACP 数据目录的 mcp/subscriptions.json。投递前落盘，接收成功后再移除待投递项；不确定失败重用同一个请求 ID。订阅绑定原始 ACP recordId，不能跟随卡片切到另一会话。离线期间可积累已观察状态；重启后从可恢复的会话状态补查。应用完全关闭期间已经出现又消失的瞬时状态无法保证追溯。
 
 运行标识变化不删除订阅，而是暂停投递。list_subscriptions 返回 needsAuthorization、pendingNotifications、lastAcceptedTurnId。重新调用 subscribe_session 走当前运行的授权后，继续投递原会话积压事件。get_turn_status(cardId, sessionId, turnId) 查询消息执行状态；接受通知不等于总管已完成处理。
 
 
 ## 远程 MCP：复用现有 SSH 通信
 
-链路为：远程 Agent → stdio MCP 桥 → 远程 owner 的专用本机 IPC socket → 当前 SSH exec 标准输出 → 本机 Flat 工具服务；结果从同一 SSH exec 标准输入返回。没有新增 TCP 监听、SSH `-R`、公网接口或防火墙设置。远程主机仍需要原有 SSH 登录和 Node 环境。
+链路为：远程 Agent → stdio MCP 桥 → 远程 owner 的专用本机 IPC socket → 当前 SSH exec 标准输出 → 本机 QueACP 工具服务；结果从同一 SSH exec 标准输入返回。没有新增 TCP 监听、SSH `-R`、公网接口或防火墙设置。远程主机仍需要原有 SSH 登录和 Node 环境。
 
 - 桥接代码随 ACP runtime 自动部署，Agent 会话通过 ACP 的 `mcpServers` 获得工具。不改用户全局 Agent 配置。
 - 每次 Agent 启动生成独立的 MCP capability，只能代表该卡片当前运行。此凭据不进入会话快照和绑定文件；本机 MCP 总令牌不下发。
@@ -71,7 +71,7 @@ Agent → Flat MCP → 现有权限检查 → 目标 ACP 会话 → 现有消息
 - 本机根据实际 SSH 链路核验主机、注册工作区、来源卡片、当前运行和连接代次，然后复用本机 MCP 授权与执行逻辑。远程卡片不会自动获得全卡片权限。
 - 请求使用独立编号，工具请求与普通 ACP 回复并行处理。结果只返回发起该请求的 relay，不向其他连接广播。
 - 连接断开或替换会使等待中的调用失败；不自动重放工具操作。结果不确定时先查状态，不能另造请求编号重新发送。
-- 建立新连接后，Flat 为该主机上已注册的活动卡片恢复 MCP 路由；仍在运行的 Agent 无须重建即可发起新调用。未确认的旧调用不会随恢复重新执行。
+- 建立新连接后，QueACP 为该主机上已注册的活动卡片恢复 MCP 路由；仍在运行的 Agent 无须重建即可发起新调用。未确认的旧调用不会随恢复重新执行。
 - 更新前已经运行的旧 owner 按现有生命周期规则在空闲后升级，不为加载工具中断正在执行的任务。旧会话需要在空闲后重新连接才能加载新增 MCP。
 
 验证：隔离 owner + fixture Agent 验证实际 MCP 配置、stdio 桥、反向请求／响应、普通 ACP 并行回复、断线不重发和同一 Agent 重连后继续调用；IPC 测试覆盖无效凭据、跨连接伪造回复、超时和过期运行；Rust 测试覆盖来源主机与卡片绑定。未以用户的远程主机进行端到端实机验收。

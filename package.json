@@ -1,16 +1,16 @@
 {
-  "name": "flat",
+  "name": "queacp",
   "private": true,
   "version": "0.2.1",
   "description": "Queue of Agent Cues — schedule your attention with a unified queue of waiting Agent sessions.",
   "type": "module",
   "scripts": {
     "dev": "npm run build:acp && vite",
-    "dev:que": "FLAT_DATA_DIR=\"$HOME/.flat-dev\" tauri dev",
+    "dev:que": "QUEACP_DATA_DIR=\"$HOME/.queacp-dev\" tauri dev",
     "build": "npm run build:acp && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "FLAT_DATA_DIR=\"$HOME/.flat-dev\" tauri dev",
+    "tauri:dev": "QUEACP_DATA_DIR=\"$HOME/.queacp-dev\" tauri dev",
     "build:acp": "node scripts/build-acp.mjs",
     "predev": "npm run build:acp",
     "test:acp": "npm run build:acp && node --test --test-timeout=30000 tests/acp/*.test.mjs"

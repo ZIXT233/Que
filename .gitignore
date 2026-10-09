@@ -54,4 +54,4 @@ src-tauri/target-before-path-rename-*/
 /scripts/render-promo.py
 
 # Bundled from runtime/acp-owner.mjs by npm run build:acp
-/src-tauri/resources/bin/flat-acp.mjs
+/src-tauri/resources/bin/acp-owner.mjs

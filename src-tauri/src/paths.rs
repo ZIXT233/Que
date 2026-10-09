@@ -32,22 +32,22 @@ pub(crate) fn set_test_home(home: PathBuf) {
 pub fn data_dir() -> PathBuf {
     // Unit tests never touch the user's data, logs included.
     #[cfg(test)]
-    return std::env::temp_dir().join("flat-unit-tests");
+    return std::env::temp_dir().join("queacp-unit-tests");
     #[allow(unreachable_code)]
-    if let Ok(path) = std::env::var("FLAT_DATA_DIR") {
+    if let Ok(path) = std::env::var("QUEACP_DATA_DIR") {
         return expand_user(&path);
     }
     #[cfg(debug_assertions)]
     {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".flat-dev")
+            .join(".queacp-dev")
     }
     #[cfg(not(debug_assertions))]
     {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".flat")
+            .join(".queacp")
     }
 }
 

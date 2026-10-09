@@ -5,12 +5,12 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync} from
 import readline from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
-const binary=process.env.FLAT_HEADLESS_TEST_BINARY;
+const binary=process.env.QUEACP_HEADLESS_TEST_BINARY;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 test('MCP sends to a disconnected card without start_card, preserving authorization and deduplication', {skip:!binary}, async()=>{
- const root=mkdtempSync(path.join(os.tmpdir(),'flat-mcp-reconnect-'));
- const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),FLAT_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
+ const root=mkdtempSync(path.join(os.tmpdir(),'queacp-mcp-reconnect-'));
+ const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
  let ownerPid;
  try {
   const {base}=await new Promise((resolve,reject)=>{
@@ -19,11 +19,11 @@ test('MCP sends to a disconnected card without start_card, preserving authorizat
    child.once('exit',code=>reject(Error('headless exited '+code)));
    child.stderr.on('data',()=>{});
   });
-  const data=path.join(root,'que'),cwd=path.join(root,'home','.flat','butler');mkdirSync(cwd,{recursive:true});mkdirSync(path.join(data,'acp'),{recursive:true});
+  const data=path.join(root,'que'),cwd=path.join(root,'home','.queacp','butler');mkdirSync(cwd,{recursive:true});mkdirSync(path.join(data,'acp'),{recursive:true});
   writeFileSync(path.join(data,'acp','agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   const source='b071e000-0000-4000-8000-000000000001',target='test-target';
-  const card=id=>({id,cwd,workspaceId:'flat-butler',phase:'attention',createdAt:0,harness:{kind:'fixture',terminalId:id,state:'not_running'}});
-  const queue={version:1,revision:0,order:[source,target],cards:[card(source),card(target)],workspaces:[{id:'flat-butler',name:'Butler',kind:'local',cwd,runtimeCwd:cwd}]};
+  const card=id=>({id,cwd,workspaceId:'queacp-butler',phase:'attention',createdAt:0,harness:{kind:'fixture',terminalId:id,state:'not_running'}});
+  const queue={version:1,revision:0,order:[source,target],cards:[card(source),card(target)],workspaces:[{id:'queacp-butler',name:'Butler',kind:'local',cwd,runtimeCwd:cwd}]};
   writeFileSync(path.join(data,'queue.json'),JSON.stringify(queue));
   const post=async(url,body,headers={})=>{
    const r=await fetch(base+url,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
@@ -35,7 +35,7 @@ test('MCP sends to a disconnected card without start_card, preserving authorizat
   const first=await api(target,{action:'ensure',agent:'fixture',cwd});
   await api(target,{action:'close'});
   const {token}=JSON.parse(readFileSync(path.join(data,'mcp','endpoint.json'),'utf8'));
-  const headers={authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':source,'x-flat-source-epoch':sourceSession.connectionId};
+  const headers={authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':source,'x-queacp-source-epoch':sourceSession.connectionId};
   const message={tool:'send_message',cardId:target,sessionId:target,requestId:'once',text:'fixture message'};
   const submitted=await post('/api/mcp/tools',message,headers);
   assert.ok(['running','queued'].includes(submitted.state));
@@ -52,7 +52,7 @@ test('MCP sends to a disconnected card without start_card, preserving authorizat
   const approval=await post('/api/mcp/tools',{...message,requestId:'needs-permission'},outsider);
   assert.equal(approval.delivery,'approval-required','automatic connection must not bypass cross-card approval');
   assert.equal((await (await fetch(base+'/api/acp/'+target)).json()).turns.length,1);
-  await assert.rejects(post('/api/mcp/tools',{...message,requestId:'stale'}, {...headers,'x-flat-source-epoch':'stale-source'}),/Source agent run ended/);
+  await assert.rejects(post('/api/mcp/tools',{...message,requestId:'stale'}, {...headers,'x-queacp-source-epoch':'stale-source'}),/Source agent run ended/);
   await api(target,{action:'close'});
   queue.cards[1].archivedAt=1;writeFileSync(path.join(data,'queue.json'),JSON.stringify(queue));
   await assert.rejects(post('/api/mcp/tools',{...message,requestId:'archived'},headers),/archived/);

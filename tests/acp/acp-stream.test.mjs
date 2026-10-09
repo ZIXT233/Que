@@ -9,7 +9,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
-const binary = process.env.FLAT_HEADLESS_TEST_BINARY;
+const binary = process.env.QUEACP_HEADLESS_TEST_BINARY;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const until = async (check, what, ms = 60000) => {
   for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) { const value = await check(); if (value) return value; }
@@ -46,7 +46,7 @@ async function subscribe(url) {
 test('a conversation stream rebuilds the exact server state from a snapshot and a few deltas', { skip: !binary, timeout: 120000 }, async () => {
   const bundled = await build({ entryPoints: ['src/lib/acp-delta.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
   const { applyDelta } = await import('data:text/javascript;base64,' + Buffer.from(bundled.outputFiles[0].text).toString('base64'));
-  const root = await mkdtemp(path.join(tmpdir(), 'flat-acp-stream-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'queacp-acp-stream-'));
   const child = spawn(binary, [root], { env: { ...process.env, QUE_BIN_DIR: path.resolve('src-tauri/resources/bin') }, stdio: ['pipe', 'pipe', 'pipe'] });
   let stderr = ''; child.stderr.on('data', d => stderr += d);
   const lines = readline.createInterface({ input: child.stdout });

@@ -8,7 +8,7 @@ import { sessionHistory, projectRecord, messageHeader, parseMessage, mapLimit } 
 const record = (id, cwd, lastUsedAt, extra = {}) => ({ acpxRecordId: id, cwd, title: `title ${id}`, lastUsedAt, agentCommand: 'agent', messages: [{ big: 'x'.repeat(1000) }], ...extra });
 
 test('history listing re-reads only the transcripts that changed', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'flat-history-'));
+  const dir = await mkdtemp(path.join(tmpdir(), 'queacp-history-'));
   try {
     await mkdir(path.join(dir, 'sessions'));
     const write = async (id, value, mtime) => { const file = path.join(dir, 'sessions', `${encodeURIComponent(id)}.json`); await writeFile(file, JSON.stringify(value)); if (mtime) await utimes(file, mtime, mtime); };

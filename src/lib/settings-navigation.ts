@@ -66,7 +66,7 @@ export function getLastSettingsSelection(): string | null {
 
 export function setLastSettingsSelection(): void {}
 
-export const OPEN_SETTINGS_EVENT = "flat:open-settings";
+export const OPEN_SETTINGS_EVENT = "queacp:open-settings";
 export function openSettingsSection(section: SettingsSection): void {
   window.dispatchEvent(new CustomEvent(OPEN_SETTINGS_EVENT, { detail: { section } }));
 }

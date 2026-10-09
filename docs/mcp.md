@@ -1,17 +1,17 @@
-# Flat MCP
+# QueACP MCP
 
-Flat MCP lets an agent — the Butler, another card, or your own MCP client — read and talk to Flat's cards. Every session it reaches is still an ordinary card in the queue that you can operate directly.
+QueACP MCP lets an agent — the Butler, another card, or your own MCP client — read and talk to QueACP's cards. Every session it reaches is still an ordinary card in the queue that you can operate directly.
 
 ## Connect
 
-Cards started by Flat get the server automatically. For your own MCP client, copy the JSON from **Settings → General → MCP**; the generated config is also written to `client.json` in the data directory (`~/.flat/mcp`, development builds `~/.flat-dev/mcp`, or `$FLAT_DATA_DIR/mcp`).
+Cards started by QueACP get the server automatically. For your own MCP client, copy the JSON from **Settings → General → MCP**; the generated config is also written to `client.json` in the data directory (`~/.queacp/mcp`, development builds `~/.queacp-dev/mcp`, or `$QUEACP_DATA_DIR/mcp`).
 
-The stdio bridge needs Node.js. It reads the private `endpoint.json` on each call, so Flat can rotate its port and credentials at every start without changing your configuration. While Flat is not running, calls fail explicitly; nothing is retried automatically.
+The stdio bridge needs Node.js. It reads the private `endpoint.json` on each call, so QueACP can rotate its port and credentials at every start without changing your configuration. While QueACP is not running, calls fail explicitly; nothing is retried automatically.
 
 ## Access
 
 - **All-card access**: the Butler always has it (see [butler.md](butler.md)); the user can also grant it to another card when approving a request.
-- **Any other caller** must be approved in Flat for each target card and run. A call that needs approval returns `delivery: "approval-required"` with an `approvalId`; wait for the user, then call `get_request_status`. A denial applies to that request only — do not repeat it automatically.
+- **Any other caller** must be approved in QueACP for each target card and run. A call that needs approval returns `delivery: "approval-required"` with an `approvalId`; wait for the user, then call `get_request_status`. A denial applies to that request only — do not repeat it automatically.
 - Decisions inside a session (permission and form requests) belong to the user. No tool answers them.
 
 ## Tools

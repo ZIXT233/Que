@@ -82,7 +82,7 @@ export async function run(){
     js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);",
   },
 });
-const dir = await mkdtemp(join(tmpdir(), "flat-composer-"));
+const dir = await mkdtemp(join(tmpdir(), "queacp-composer-"));
 try {
   const entry = join(dir, "test.mjs");
   await writeFile(entry, result.outputFiles[0].text);

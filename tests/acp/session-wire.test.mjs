@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 // The TypeScript applier is the one the UI uses; bundle it for the Node test.
-const dir = mkdtempSync(join(tmpdir(), 'flat-wire-'));
+const dir = mkdtempSync(join(tmpdir(), 'queacp-wire-'));
 const out = await build({ entryPoints: ['src/lib/acp-delta.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
 writeFileSync(join(dir, 'acp-delta.mjs'), out.outputFiles[0].text);
 const { applyDelta } = await import(pathToFileURL(join(dir, 'acp-delta.mjs')));

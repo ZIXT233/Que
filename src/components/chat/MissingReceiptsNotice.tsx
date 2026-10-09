@@ -14,7 +14,7 @@ function readDismissed(key: string): string[] {
 // never conversation content or a replacement for the agent's history.
 export function MissingReceiptsNotice({identity, receiptIds}: {identity: string; receiptIds: string[]}) {
   const {t} = useI18n();
-  const storageKey = `flat:dismissed-missing-receipts:${identity}`;
+  const storageKey = `queacp:dismissed-missing-receipts:${identity}`;
   const [dismissed, setDismissed] = useState(() => readDismissed(storageKey));
   const visible = receiptIds.filter(id => !dismissed.includes(id));
   if (!visible.length) return null;

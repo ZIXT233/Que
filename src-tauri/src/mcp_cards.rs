@@ -13,11 +13,11 @@ fn identity(source:&str,body:&Value)->AppResult<(String,String)> {
 fn created_id(key:&str)->String {let hash=Sha256::digest(key.as_bytes());let mut bytes=[0u8;16];bytes.copy_from_slice(&hash[..16]);uuid::Uuid::from_bytes(bytes).to_string()}
 fn insert_card(queue:&mut CardQueue,id:&str,workspace:&str,kind:&str,nickname:Option<&str>,key:&str,fingerprint:&str)->AppResult<()> {
  if let Some(card)=queue.cards.iter().find(|c|c.id==id) {
-  if card.prompt_sources.as_ref().map(|p|&p["flatMcpCreate"]["fingerprint"])!=Some(&json!(fingerprint)) {return Err(AppError::msg("requestId was already used for another creation"));}
+  if card.prompt_sources.as_ref().map(|p|&p["queacpMcpCreate"]["fingerprint"])!=Some(&json!(fingerprint)) {return Err(AppError::msg("requestId was already used for another creation"));}
   return Ok(());
  }
  let ws=queue.workspaces.as_ref().and_then(|items|items.iter().find(|w|w.id==workspace)).ok_or_else(||AppError::msg("Workspace not found; use list_workspaces"))?;
- let card:QueueCard=serde_json::from_value(json!({"id":id,"cwd":ws.runtime_cwd,"workspaceId":ws.id,"nickname":nickname,"phase":"attention","createdAt":crate::queue::now_ms(),"harness":{"kind":kind,"terminalId":id,"state":"not_running","remote":ws.kind=="ssh"},"promptSources":{"flatMcpCreate":{"key":key,"fingerprint":fingerprint}}}))?;
+ let card:QueueCard=serde_json::from_value(json!({"id":id,"cwd":ws.runtime_cwd,"workspaceId":ws.id,"nickname":nickname,"phase":"attention","createdAt":crate::queue::now_ms(),"harness":{"kind":kind,"terminalId":id,"state":"not_running","remote":ws.kind=="ssh"},"promptSources":{"queacpMcpCreate":{"key":key,"fingerprint":fingerprint}}}))?;
  queue.cards.push(card);queue.order.push(id.into());Ok(())
 }
 pub async fn create(state:&AppState,source:&str,body:&Value)->AppResult<Value> {
@@ -46,7 +46,7 @@ pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> 
  let _lifecycle_guard=crate::api::try_acquire_launch(state,id)?;
  let queue=state.queue.read_snapshot()?;
  let card=queue.cards.iter().find(|c|c.id==id).ok_or_else(||AppError::msg("Card not found"))?;
- if let Some(prior)=card.prompt_sources.as_ref().and_then(|p|p["flatMcpArchives"].get(&key)) {
+ if let Some(prior)=card.prompt_sources.as_ref().and_then(|p|p["queacpMcpArchives"].get(&key)) {
   if prior!=&json!(fingerprint){return Err(AppError::msg("requestId conflict"));}
   return Ok(json!({"cardId":id,"delivery":"archived","replayed":true}));
  }
@@ -64,15 +64,15 @@ pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> 
   crate::queue::archive_card(q,id)?;
   let card=q.cards.iter_mut().find(|c|c.id==id).unwrap();
   let meta=card.prompt_sources.get_or_insert_with(||json!({}));
-  if !meta["flatMcpArchives"].is_object(){meta["flatMcpArchives"]=json!({});}
-  meta["flatMcpArchives"][&key]=json!(fingerprint);Ok(())
+  if !meta["queacpMcpArchives"].is_object(){meta["queacpMcpArchives"]=json!({});}
+  meta["queacpMcpArchives"][&key]=json!(fingerprint);Ok(())
  }).await?;
  Ok(json!({"cardId":id,"delivery":"archived","historyPreserved":true}))
 }
 #[cfg(test)] mod tests {
  use super::*;
  #[test] fn creation_is_durable_and_does_not_reuse_draft(){
-  let mut q=CardQueue::empty();let cwd="/tmp/flat-card-test";
+  let mut q=CardQueue::empty();let cwd="/tmp/queacp-card-test";
   q.workspaces=Some(vec![serde_json::from_value(json!({"id":"ws","name":"test","kind":"local","cwd":cwd,"runtimeCwd":cwd})).unwrap()]);
   q.cards.push(serde_json::from_value(json!({"id":"draft","cwd":cwd,"phase":"draft","createdAt":1})).unwrap());
   insert_card(&mut q,"new","ws","codex",None,"key","fp").unwrap();

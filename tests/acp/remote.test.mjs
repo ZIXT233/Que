@@ -3,19 +3,19 @@ import assert from 'node:assert/strict';
 import {spawn,execFileSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
 import readline from 'node:readline';
-const host=process.env.FLAT_TEST_SSH;
+const host=process.env.QUEACP_TEST_SSH;
 test('remote owner survives SSH relay disconnect with pending approval', {skip:!host,timeout:30000},async()=>{
  const ssh=(command,input)=>execFileSync('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=8',host,command],{input,encoding:'utf8'});
- const root=ssh('mktemp -d /tmp/flat-acp-remote-XXXXXXXX').trim();
- assert.match(root,/^\/tmp\/flat-acp-remote-[A-Za-z0-9]+$/);
+ const root=ssh('mktemp -d /tmp/queacp-acp-remote-XXXXXXXX').trim();
+ assert.match(root,/^\/tmp\/queacp-acp-remote-[A-Za-z0-9]+$/);
  let child,serial=0; const pending=new Map();
  const connect=()=>{
-  child=spawn('ssh',['-T','-o','BatchMode=yes',host,`FLAT_ACP_ROOT='${root}/state' FLAT_ACP_STORE_DIR='${root}/acpx' node '${root}/owner.mjs'`]);
+  child=spawn('ssh',['-T','-o','BatchMode=yes',host,`QUEACP_ACP_ROOT='${root}/state' QUEACP_ACP_STORE_DIR='${root}/acpx' node '${root}/owner.mjs'`]);
   readline.createInterface({input:child.stdout}).on('line',line=>{const v=JSON.parse(line);if(v.rpc){const p=pending.get(v.rpc);pending.delete(v.rpc);v.error?p.reject(Error(v.error)):p.resolve(v.result)}});
  };
  const rpc=body=>new Promise((resolve,reject)=>{const rpc=String(++serial);pending.set(rpc,{resolve,reject});child.stdin.write(JSON.stringify({...body,rpc})+'\n')});
  try{
-  ssh(`cat > '${root}/owner.mjs'`,readFileSync('src-tauri/resources/bin/flat-acp.mjs'));
+  ssh(`cat > '${root}/owner.mjs'`,readFileSync('src-tauri/resources/bin/acp-owner.mjs'));
   ssh(`cat > '${root}/agent.mjs'`,readFileSync('tests/acp/agent.mjs'));
   ssh(`mkdir -m 700 '${root}/state'; cat > '${root}/state/agents.json'`,JSON.stringify({fixture:['node',`${root}/agent.mjs`],missing:[`${root}/missing-agent`]}));
   connect();
