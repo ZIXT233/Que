@@ -6,7 +6,7 @@ QueACP 是 Que 的 ACP 版本：卡片里的 Agent 通过 ACP（经由 acpx）�
 
 | 层 | 负责 | 不负责 |
 | --- | --- | --- |
-| **Que**（Rust，`src-tauri`） | 卡片与队列（`queue.json`）、卡片设置（用哪个 Agent、主机访问）、MCP 鉴权、卡片的收件箱、管家的汇总、把会话事件转给界面 | 对话内容、Agent 进程 |
+| **Que**（Rust，`src-tauri`） | 卡片与队列（`queue.json`）、卡片设置（用哪个 Agent、主机访问）、卡片之间的信道、MCP 鉴权、卡片的收件箱、管家的汇总、把会话事件转给界面 | 对话内容、Agent 进程 |
 | **owner**（Node，`runtime/acp-owner.mjs`） | 调用 acpx；本次运行中提交的回合；等人回答的请求；由这些推导出的卡片状态 | 卡片排序、卡片设置、保存对话 |
 | **acpx** | Agent 进程、ACP 会话、对话记录（`~/.acpx/sessions`）、回合排队、恢复会话 | 一切 Que 概念 |
 
@@ -52,6 +52,7 @@ Que（Rust）
 管家就是管家工作区（`~/.queacp/butler`）里的一张卡，遵守同样的规则：可以有多个管家会话，旧的归档，按钮打开现有的或新建一张；按钮自己从不启动 Agent。管家的延续靠工作区里的文件（`AGENTS.md` 让 Agent 先读 `ROLE.md`、`USER.md`、`MEMORY.md`、`STATE.md`），不靠某一段会话。
 
 - **不被逐个事件唤醒**：其他卡片的完成、失败只被收集，到设置里的汇总时间（下拉预设，底层为 cron）一次交给管家；汇总后管家卡排进队列。
+- **信道**：两张卡有信道才能互相发消息、读会话；你在卡片上连接，或者在 Agent 请求时允许。管家和所有卡连通。
 - **消息**：卡片之间用 `send_message` 发消息（一张、几张或全部），放进对方的收件箱，只交付一次：对方空闲时成为它的下一轮；正忙时随它下一次 QueACP 工具结果或 `wait_messages` 交给它。回复也是消息，没有自动回传；防循环靠限速和去重。见 [agent-interaction.md](agent-interaction.md)。
 - **精简读取**：`read_session` 默认只给最近几轮的消息和最终回复摘录。
 

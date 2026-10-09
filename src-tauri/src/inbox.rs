@@ -18,6 +18,9 @@ pub struct Letter {
     pub from: Value,
     pub text: String,
     pub at: i64,
+    /// Waiting for the user to open a channel between sender and recipient.
+    #[serde(default)]
+    pub held: bool,
 }
 
 pub const WAIT_DEFAULT_SECS: u64 = 50;
@@ -48,6 +51,30 @@ async fn with_inbox<T>(change: impl FnOnce(&mut Vec<Letter>) -> T) -> AppResult<
     Ok(value)
 }
 
+/// Messages waiting for a channel, oldest first.
+pub async fn held() -> AppResult<Vec<Letter>> {
+    with_inbox(|letters| letters.iter().filter(|l| l.held).cloned().collect()).await
+}
+
+/// A channel opened between `a` and `b`: what waited for it may go.
+pub async fn release(a: &str, b: &str) -> AppResult<()> {
+    with_inbox(|letters| for letter in letters.iter_mut().filter(|l| l.held) {
+        let from = letter.from["cardId"].as_str().unwrap_or_default();
+        if (from == a && letter.to == b) || (from == b && letter.to == a) { letter.held = false; }
+    }).await?;
+    ARRIVED.notify_waiters();
+    Ok(())
+}
+
+/// The user refused a channel: drops what waited for it, returning how many.
+pub async fn drop_held(from: &str, to: &str) -> AppResult<usize> {
+    with_inbox(|letters| {
+        let before = letters.len();
+        letters.retain(|l| !(l.held && l.to == to && l.from["cardId"] == from));
+        before - letters.len()
+    }).await
+}
+
 pub async fn post(letter: Letter) -> AppResult<()> {
     with_inbox(|letters| {
         if letters.iter().any(|l| l.id == letter.id) { return; }
@@ -62,11 +89,11 @@ pub async fn post(letter: Letter) -> AppResult<()> {
     Ok(())
 }
 
-/// Removes everything waiting for `card`, oldest first.
+/// Removes everything ready for `card`, oldest first.
 async fn take(card: &str) -> AppResult<Vec<Letter>> {
     let _delivery = DELIVERY.lock().await;
     with_inbox(|letters| {
-        let (mine, rest) = std::mem::take(letters).into_iter().partition(|l| l.to == card);
+        let (mine, rest) = std::mem::take(letters).into_iter().partition(|l| l.to == card && !l.held);
         *letters = rest;
         mine
     }).await
@@ -114,7 +141,7 @@ fn busy(snapshot: &Value) -> bool {
 
 /// Starts a turn with the oldest message of each idle recipient.
 async fn deliver(state: &AppState) {
-    let recipients: Vec<String> = match with_inbox(|letters| letters.iter().map(|l| l.to.clone()).collect::<Vec<_>>()).await {
+    let recipients: Vec<String> = match with_inbox(|letters| letters.iter().filter(|l| !l.held).map(|l| l.to.clone()).collect::<Vec<_>>()).await {
         Ok(mut ids) => { ids.sort(); ids.dedup(); ids }
         Err(_) => return,
     };
@@ -141,7 +168,7 @@ async fn deliver_one(state: &AppState, card_id: &str) -> AppResult<()> {
     if !state.harness.is_live(&session) { crate::acp_supervisor::ensure_card(state, card_id, &session).await?; }
     let _delivery = DELIVERY.lock().await;
     if busy(&state.harness.debug_snapshot(card_id, &state.terminals)) { return Ok(()); }
-    let Some(letter) = with_inbox(|letters| letters.iter().find(|l| l.to == card_id).cloned()).await? else { return Ok(()) };
+    let Some(letter) = with_inbox(|letters| letters.iter().find(|l| l.to == card_id && !l.held).cloned()).await? else { return Ok(()) };
     let ws = crate::api::acp_workspace(state, card_id).await?;
     // The letter id is the request id: a repeated delivery is the same turn.
     state.harness.request(&ws, &state.bin_dir, json!({"action":"send","id":card_id,"requestId":format!("letter:{}",letter.id),

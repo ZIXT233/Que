@@ -57,9 +57,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let terminals = state.terminals.clone();
         let port = crate::api::start_server(state.clone()).await?;
         println!("{}", serde_json::json!({"base":format!("http://127.0.0.1:{port}"),"profile":root,"home":home}));
-        // The parent owns stdin. EOF cleanly stops only this test instance.
-        tokio::task::spawn_blocking(|| {
-            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+        // The parent owns stdin: it stands in for the main window's native
+        // commands, one JSON line each. EOF cleanly stops only this instance.
+        let handle = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            use std::io::BufRead;
+            for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+                let Ok(body) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                let text = |key: &str| body[key].as_str().unwrap_or_default().to_string();
+                let result = handle.block_on(async {
+                    match body["method"].as_str() {
+                        Some("channel_requests") => crate::channels::requests(&state).await,
+                        Some("channel_decide") => crate::channels::decide(&state, &text("from"), &text("to"), body["allow"] == true).await.map(|_| serde_json::Value::Null),
+                        Some("channel_set") => crate::channels::set(&state, &text("a"), &text("b"), body["joined"] == true).await.map(|_| serde_json::Value::Null),
+                        _ => Err(crate::error::AppError::msg("Unknown test control")),
+                    }
+                });
+                println!("{}", serde_json::json!({"controlId":body["controlId"],"result":result.as_ref().ok(),"error":result.as_ref().err().map(|e|e.to_string())}));
+            }
         }).await.ok();
         terminals.shutdown();
         Ok::<(), Box<dyn std::error::Error>>(())

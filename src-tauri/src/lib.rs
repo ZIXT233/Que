@@ -21,6 +21,7 @@ mod mcp;
 mod digest;
 mod mcp_cards;
 mod mcp_settings;
+mod channels;
 mod inbox;
 mod session_view;
 mod butler;
@@ -45,6 +46,27 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 struct ApiPort(Mutex<u16>);
+
+// Channels change only from the main window: the local HTTP API is not
+// authenticated, and an Agent must not open its own channels.
+fn main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() == "main" { Ok(()) } else { Err("Use the main QueACP window".into()) }
+}
+#[tauri::command]
+async fn channel_requests(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
+    main_window(&window)?;
+    channels::requests(&state).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn channel_decide(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow, from: String, to: String, allow: bool) -> Result<(), String> {
+    main_window(&window)?;
+    channels::decide(&state, &from, &to, allow).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn channel_set(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow, a: String, b: String, joined: bool) -> Result<(), String> {
+    main_window(&window)?;
+    channels::set(&state, &a, &b, joined).await.map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 fn api_base(port: tauri::State<ApiPort>) -> String {
@@ -183,6 +205,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             api_base,
+            channel_requests,
+            channel_decide,
+            channel_set,
             editor::open_in_vscode,
             open_devtools,
             reveal_log,

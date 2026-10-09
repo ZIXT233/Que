@@ -10,6 +10,7 @@ for(const key of ['window','document','HTMLElement','Element','Node','Event','Mo
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 globalThis.__streams=installEventSource();
 globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);
+globalThis.ResizeObserver=class{observe(){}disconnect(){}};
 const channels=[];const NativeChannel=globalThis.MessageChannel;
 globalThis.MessageChannel=class extends NativeChannel{constructor(){super();channels.push(this)}};
 const result=await build({stdin:{contents:`

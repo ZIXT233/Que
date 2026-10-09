@@ -291,6 +291,10 @@ pub struct CardQueue {
     pub workspaces: Option<Vec<QueueWorkspace>>,
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub machine_settings: std::collections::HashMap<String, MachineSessionSettings>,
+    /// Pairs of cards whose Agents may message and read each other, in either
+    /// direction. Kept in id order; see `channels.rs`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channels: Vec<[String; 2]>,
 }
 
 impl CardQueue {
@@ -306,6 +310,7 @@ impl CardQueue {
             insertion_position: Some("bottom".into()),
             workspaces: Some(vec![]),
             machine_settings: Default::default(),
+            channels: vec![],
         }
     }
 }

@@ -13,6 +13,7 @@ import { MissingReceiptsNotice } from './chat/MissingReceiptsNotice';
 import { Composer } from './chat/Composer';
 import type { Config, Usage as SessionUsage } from './chat/model';
 import { ActivityGroup, groupActivityBlocks } from './chat/ActivityGroup';
+import { useCardName } from '@/lib/card-names';
 import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
 
@@ -41,7 +42,9 @@ const useConversationView = createRetainedConversationView(key => {
 // delivered (a turn of its own, a tool result) does not matter.
 type Peer = { cardId: string; name: string };
 function CardMessage({ direction, peers, all, text }: { direction: 'in' | 'out'; peers: Peer[]; all?: boolean; text: string }) {
-  const names = all ? '全部' : peers.map(p => p.name).join('、');
+  // The name the card has now; the one saved with the message once it is gone.
+  const nameOf = useCardName();
+  const names = all ? '全部' : peers.map(p => (p.cardId && nameOf(p.cardId)) || p.name).join('、');
   return <div className={`cq-acp-msg cq-acp-msg--${direction}`}><small className="cq-acp-msg-label">{direction === 'in' ? `来自 ${names}` : `发给 ${names}`}</small><MarkdownMessage content={text} role="assistant"/></div>;
 }
 const hasUserContent = (turn: Turn) => !!turn.text?.trim() || !!turn.attachments?.length;
@@ -94,7 +97,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const [sending,setSending] = view.field('sending');
   const [controlBusy,setControlBusy] = view.field('controlBusy');
   const [follow,setFollow] = view.field('follow');
-  const scroll = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
   const draftNow=useRef({text:draft,quote,attachments});draftNow.current={text:draft,quote,attachments};
   const archived = card.archivedAt !== undefined;
   useEffect(() => { if(quote) sessionStorage.setItem(`queacp:quote:${card.id}`,quote); else sessionStorage.removeItem(`queacp:quote:${card.id}`); },[card.id,quote]);
@@ -137,6 +140,18 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     return()=>{closed=true;clearTimeout(retry);clearTimeout(frame);source?.close();};
   },[active,card.id,setSnapshot,setConnectionError,streamHealth]);
   useEffect(() => { if(follow && scroll.current) scroll.current.scrollTop=scroll.current.scrollHeight; },[snapshot,follow]);
+  // Following the end means staying there however the size changes: a card that
+  // moves to another place in the queue mounts again, gets its size late, and
+  // its messages finish laying out after the snapshot that brought them.
+  const following = useRef(follow); following.current = follow;
+  useEffect(() => {
+    const box = scroll.current, body = content.current;
+    if (!box || !body) return;
+    const stick = () => { if (following.current) box.scrollTop = box.scrollHeight; };
+    const observer = new ResizeObserver(stick);
+    observer.observe(box); observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
   const command=async(body:{action:string;[key:string]:unknown})=> {
     if(mutationActive.current)return;
     mutationActive.current=true;setControlBusy(true);
@@ -222,7 +237,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const missingReceipts=turns.filter(turn=>!turn.withdrawn && missingReceipt(turn)).map(turn=>turn.id);
   return <div className="cq-harness-body cq-acp">
     <CardRecap turns={turns}/>
-    <div ref={scroll} className="cq-acp-transcript" onScroll={e=>{const n=e.currentTarget;setFollow(n.scrollHeight-n.scrollTop-n.clientHeight<80)}}>
+    <div ref={scroll} className="cq-acp-transcript" onScroll={e=>{const n=e.currentTarget;setFollow(n.scrollHeight-n.scrollTop-n.clientHeight<80)}}><div ref={content}>
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}
       {turns.filter(turn=>turn.state!=='queued'&&!turn.withdrawn&&!missingReceipt(turn)).map(turn=><article key={turn.id} className="cq-acp-turn">{hasUserContent(turn) && turn.sender && <div className="cq-acp-msg-group"><CardMessage direction="in" peers={[turn.sender]} text={turn.text}/><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}{hasUserContent(turn) && !turn.sender && <div className="cq-acp-user-group"><div className="cq-acp-user">{turn.source === 'event' ? <details><summary>工作会话通知</summary><pre>{turn.text}</pre></details> : <MarkdownMessage content={turn.text} role="user" />}{turn.attachments?.map((a,i)=>a.mediaType.startsWith('image/')?<img key={i} alt="已发送的图片" src={`data:${a.mediaType};base64,${a.data}`}/>:a.mediaType === 'text/plain'?<details key={i}><summary>{a.name || '文本文件'}</summary><pre>{a.data}</pre></details>:<audio key={i} controls src={`data:${a.mediaType};base64,${a.data}`}/>)}</div><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}
@@ -233,7 +248,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
         {turn.result?.stopReason && !['end_turn','cancelled'].includes(turn.result.stopReason) && <p className="cq-acp-turn-state">结束原因：{turn.result.stopReason}</p>}
       </article>)}
       <MissingReceiptsNotice key={viewKey} identity={viewKey} receiptIds={missingReceipts}/>
-    </div>
+    </div></div>
     {!follow && <button className="cq-acp-latest" onClick={()=>setFollow(true)}>↓ 回到最新</button>}
     {(error||connectionError) && <div className="cq-acp-error" role="alert">{error||connectionError}</div>}
     {sending && (disconnected || snapshot?.state === "starting") && <div className="cq-acp-recovery" role="status">正在连接…</div>}

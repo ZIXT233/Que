@@ -147,6 +147,8 @@ export interface CardQueue {
   insertionPosition?: "top" | "bottom";
   workspaces?: QueueWorkspace[];
   machineSettings?: Record<string, MachineSessionSettings>;
+  /** Pairs of cards that may message and read each other. */
+  channels?: [string, string][];
   /** Read-only overlay computed on every snapshot; never persisted with the queue. */
   external?: ExternalNotice[];
 }

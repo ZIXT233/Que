@@ -396,7 +396,7 @@ async fn run_tool(
         }
         "create_card" => { butler_only()?; return crate::mcp_cards::create(state, source_terminal, body).await; }
         "archive_card" => { butler_only()?; return crate::mcp_cards::archive(state, source_terminal, body).await; }
-        "list_cards" => return Ok(list_cards(state, &queue)),
+        "list_cards" => return Ok(list_cards(state, &queue, source_card)),
         "wait_messages" => {
             let source = source_card.ok_or_else(|| AppError::msg("wait_messages is for a card's own Agent"))?;
             let seconds = body["timeoutSeconds"].as_u64().unwrap_or(crate::inbox::WAIT_DEFAULT_SECS);
@@ -421,6 +421,14 @@ async fn run_tool(
         return set_nickname(state, tools, body, client, card_id).await;
     }
     if card.harness.is_none() { return Err(AppError::msg("This card has not started an Agent yet")); }
+    if let Some(source) = source_card.filter(|source| source.id != card_id) {
+        if tool == "cancel_turn" && !butler {
+            return Err(AppError::msg("Only the user or the Butler can stop another card's turn; send it a message to ask it to stop"));
+        }
+        if !crate::channels::open(&queue, &source.id, card_id) {
+            return Err(AppError::msg("No channel with this card. Send it a message: the user is asked to open a channel, and the message goes once they do"));
+        }
+    }
     let ws = crate::api::acp_workspace(state, card_id).await?;
     if tool == "read_session" {
         let snapshot = state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":card_id})).await?;
@@ -442,10 +450,12 @@ async fn send_message(state: &AppState, tools: &Mutex<ToolState>, body: &Value, 
         _ => return Err(AppError::msg("to must be a card id, a list of card ids, or \"all\"")),
     };
     let everyone = named.contains(&"all");
+    // Without a channel a named card still gets the message, once the user opens one.
+    let joined = |card: &crate::models::QueueCard| source.is_none_or(|s| crate::channels::open(queue, &s.id, &card.id));
     let reachable = |c: &&crate::models::QueueCard| c.archived_at.is_none() && c.harness.is_some();
     let mut recipients: Vec<&crate::models::QueueCard> = Vec::new();
     if everyone {
-        recipients.extend(queue.cards.iter().filter(reachable).filter(|c| source.is_none_or(|s| s.id != c.id)));
+        recipients.extend(queue.cards.iter().filter(reachable).filter(|c| source.is_none_or(|s| s.id != c.id) && joined(c)));
     } else {
         for id in named {
             if source.is_some_and(|s| s.id == id) { return Err(AppError::msg("A card cannot message itself")); }
@@ -454,22 +464,24 @@ async fn send_message(state: &AppState, tools: &Mutex<ToolState>, body: &Value, 
             if !recipients.iter().any(|r| r.id == card.id) { recipients.push(card); }
         }
     }
-    if recipients.is_empty() { return Err(AppError::msg("No card to send to")); }
+    if recipients.is_empty() { return Err(AppError::msg(if everyone { "No card has a channel with you yet" } else { "No card to send to" })); }
     let name = |card: &crate::models::QueueCard| crate::session_view::card_name(card, &state.harness.debug_snapshot(&card.id, &state.terminals));
     let from = match source {
         Some(source) => json!({"cardId":source.id,"name":name(source)}),
         None => json!({"cardId":"","name":"External MCP client"}),
     };
-    let (mut sent, mut refused, mut fresh) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut sent, mut waiting, mut refused, mut fresh) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for card in recipients {
         // The request key names each letter, so a retried call posts it once.
         let key = format!("{principal}:{request_id}:{}", card.id);
         match admit(&mut tools.lock().await.sent, &key, principal, &card.id, text) {
             Ok(new) => {
                 let id = hex::encode(&sha2::Sha256::digest(key.as_bytes())[..16]);
-                crate::inbox::post(crate::inbox::Letter { id, to: card.id.clone(), from: from.clone(), text: text.into(), at: crate::queue::now_ms() }).await?;
-                sent.push(json!({"cardId":card.id,"name":name(card)}));
-                if new { fresh.push(json!({"cardId":card.id,"name":name(card)})); }
+                let held = !joined(card);
+                crate::inbox::post(crate::inbox::Letter { id, to: card.id.clone(), from: from.clone(), text: text.into(), at: crate::queue::now_ms(), held }).await?;
+                let who = json!({"cardId":card.id,"name":name(card)});
+                if new { fresh.push(who.clone()); }
+                if held { waiting.push(who); } else { sent.push(who); }
             }
             Err(error) => refused.push(json!({"cardId":card.id,"error":error.to_string()})),
         }
@@ -477,12 +489,13 @@ async fn send_message(state: &AppState, tools: &Mutex<ToolState>, body: &Value, 
     if let (Some(source), false) = (source, fresh.is_empty()) {
         crate::inbox::note(state, &source.id, json!({"direction":"out","to":fresh,"all":everyone,"text":text})).await;
     }
-    if sent.is_empty() { return Err(AppError::msg(refused[0]["error"].as_str().unwrap_or("Refused").to_string())); }
-    Ok(json!({"sent":sent,"refused":refused,
-        "note":"Each card reads it now if idle, otherwise at its next QueACP tool call or when its current turn ends. Answers come back as messages to you: call wait_messages to wait within this turn, or finish your turn and they start your next one. Do not poll read_session for them."}))
+    if !waiting.is_empty() { state.live.notify("channels"); }
+    if sent.is_empty() && waiting.is_empty() { return Err(AppError::msg(refused[0]["error"].as_str().unwrap_or("Refused").to_string())); }
+    Ok(json!({"sent":sent,"waitingForChannel":waiting,"refused":refused,
+        "note":"Cards in waitingForChannel get it once the user opens a channel to them; do not resend. Each card reads it now if idle, otherwise at its next QueACP tool call or when its current turn ends. Answers come back as messages to you: call wait_messages to wait within this turn, or finish your turn and they start your next one. Do not poll read_session for them."}))
 }
 
-fn list_cards(state: &AppState, queue: &crate::models::CardQueue) -> Value {
+fn list_cards(state: &AppState, queue: &crate::models::CardQueue, source: Option<&crate::models::QueueCard>) -> Value {
     let cards: Vec<Value> = queue
         .cards
         .iter()
@@ -503,11 +516,12 @@ fn list_cards(state: &AppState, queue: &crate::models::CardQueue) -> Value {
             "workspaceName":workspace.map(|w| &w.name),
             "kind":h.as_ref().map(|h| &h.kind), "state":h.as_ref().map(|h| h.state.as_str()).unwrap_or("not_started"),
             "butler":crate::butler::is_card(card),
+            "channel":source.is_none_or(|s| crate::channels::open(queue, &s.id, &card.id)),
             "remote":h.as_ref().and_then(|h| h.remote),
             "connected":h.as_ref().is_some_and(|h| state.harness.is_live(&h.terminal_id))})
         })
         .collect();
-    json!({"cards":cards,"note":"not_started cards have no Agent yet and cannot receive messages. Other states only describe the connection: read_session and send_message connect a stopped card by themselves."})
+    json!({"cards":cards,"note":"channel: whether you may message and read this card now; a message to a card without one asks the user to open it. not_started cards have no Agent yet and cannot receive messages. Other states only describe the connection: read_session and send_message connect a stopped card by themselves."})
 }
 
 async fn configure_remote_host(state: &AppState, body: &Value) -> AppResult<Value> {
