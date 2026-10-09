@@ -1,6 +1,6 @@
 "use client";
 
-export type QueueIconName = "plus" | "stack" | "out" | "maximize" | "down" | "close" | "settings" | "history" | "archive" | "arrow" | "undo" | "bell" | "bell-off" | "bell-filled" | "eye-off" | "tools" | "clock" | "copy" | "check";
+export type QueueIconName = "plus" | "stack" | "out" | "maximize" | "down" | "close" | "settings" | "history" | "archive" | "arrow" | "undo" | "bell" | "bell-off" | "bell-filled" | "eye-off" | "tools" | "clock" | "copy" | "check" | "link";
 
 const ICON_PATHS: Record<Exclude<QueueIconName, "bell-filled">, string> = {
   plus: "M12 5v14M5 12h14", stack: "m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4",
@@ -17,6 +17,7 @@ const ICON_PATHS: Record<Exclude<QueueIconName, "bell-filled">, string> = {
   clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3.5 2",
   copy: "M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.24a2 2 0 0 0-.6-1.43L16.1 2.57A2 2 0 0 0 14.7 2H10a2 2 0 0 0-2 2ZM4 8v12a2 2 0 0 0 2 2h8",
   check: "m5 13 4 4L19 7",
+  link: "M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5",
 };
 
 /** The queue's own icon set: cards, toolbar and dialogs draw the same marks. */

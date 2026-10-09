@@ -1,39 +1,50 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "@/hooks/useI18n";
 import type { QueueCard } from "@/lib/card-queue";
+import { ComposerPanel } from "./chat/ComposerPanel";
+import { ChatIcon } from "./chat/Icons";
+import { Icon } from "./QueueIcon";
+import "./chat/composer.css";
 
 const isButler = (card: QueueCard) => card.workspaceId === "queacp-butler";
 
-/** The cards this card may talk to, joined and parted by the user. */
+/** The cards this card may talk to. Each is a switch: joined or not. */
 export function CardChannels({ card, cards, channels, nameOf }: {
   card: QueueCard; cards: QueueCard[]; channels: [string, string][]; nameOf: (card: QueueCard) => string;
 }) {
   const { t } = useI18n();
+  const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   if (!card.harness || isButler(card)) return null;
   const others = cards.filter(c => c.id !== card.id && c.harness && c.archivedAt === undefined && !isButler(c));
-  const joined = others.filter(c => channels.some(([a, b]) => (a === card.id && b === c.id) || (b === card.id && a === c.id)));
-  const free = others.filter(c => !joined.includes(c));
-  const set = async (other: string, value: boolean) => {
-    setError("");
-    try { await invoke("channel_set", { a: card.id, b: other, joined: value }); }
+  const joined = (other: string) => channels.some(([a, b]) => (a === card.id && b === other) || (b === card.id && a === other));
+  const count = others.filter(c => joined(c.id)).length;
+  const toggle = async (other: string) => {
+    setBusy(other); setError("");
+    try { await invoke("channel_set", { a: card.id, b: other, joined: !joined(other) }); }
     catch (cause) { setError(String(cause)); }
+    finally { setBusy(""); }
   };
-  return <div className="cq-channels">
-    <button type="button" className="cq-channels-toggle" aria-expanded={open} title={t("channel.panelTitle")} onClick={() => setOpen(v => !v)}>⇄ {joined.length}</button>
-    {open && <div className="cq-channels-panel" role="dialog" aria-label={t("channel.panelTitle")}>
-      <strong>{t("channel.panelTitle")}</strong>
-      <p>{t("channel.panelHint")}</p>
-      {joined.length ? <ul>{joined.map(c => <li key={c.id}><span>{nameOf(c)}</span><button type="button" onClick={() => void set(c.id, false)}>{t("channel.disconnect")}</button></li>)}</ul>
-        : <p className="cq-channels-empty">{t("channel.none")}</p>}
-      {free.length > 0 && <select value="" aria-label={t("channel.connect")} onChange={event => { if (event.target.value) void set(event.target.value, true); }}>
-        <option value="">{t("channel.connect")}</option>
-        {free.map(c => <option key={c.id} value={c.id}>{nameOf(c)}</option>)}
-      </select>}
-      {error && <p role="alert">{error}</p>}
-    </div>}
-  </div>;
+  return <>
+    <button ref={anchor} type="button" className="cq-channels-toggle" data-joined={count > 0 || undefined}
+      aria-haspopup="dialog" aria-expanded={open} title={t("channel.panelTitle")} onClick={() => setOpen(v => !v)}>
+      <Icon name="link" size={13} /><span>{count}</span>
+    </button>
+    {open && anchor.current && <ComposerPanel anchor={anchor.current} align="start" title={t("channel.panelTitle")} updating={!!busy}
+      onClose={focus => { setOpen(false); if (focus) anchor.current?.focus(); }}>
+      <div className="fc-panel-heading">{t("channel.panelTitle")}</div>
+      <p className="fc-host-hint">{t("channel.panelHint")}</p>
+      {others.length ? <div className="fc-option-list" role="group" aria-label={t("channel.panelTitle")}>
+        {others.map(other => <button key={other.id} type="button" role="menuitemcheckbox" aria-checked={joined(other.id)}
+          disabled={!!busy} onClick={() => void toggle(other.id)}>
+          <span className="cq-channel-name">{nameOf(other)}</span>{joined(other.id) && <ChatIcon name="check" />}
+        </button>)}
+      </div> : <p className="fc-host-hint">{t("channel.none")}</p>}
+      {error && <p className="fc-host-hint" role="alert">{error}</p>}
+    </ComposerPanel>}
+  </>;
 }
