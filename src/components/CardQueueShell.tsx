@@ -30,7 +30,6 @@ import { PersistentTerminalProvider } from "./PersistentTerminalViews";
 import { SettingsPanel } from "./SettingsPanel";
 import { QUE_REPO_URL, releaseUrl, useAppUpdate } from "@/hooks/useAppUpdate";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { McpApprovals } from "./McpApprovals";
 import { useQueueScoreClock } from "@/hooks/useQueueScoreClock";
 import { completedCards } from "@/lib/card-completion";
 import { useCompletionNotifications } from "@/hooks/useCompletionNotifications";
@@ -1061,7 +1060,6 @@ function CardQueueShellContent() {
         }
       }} />}
 
-    {!detachedId && <McpApprovals />}
     <CardTransfers
       order={ready.map((card) => card.id)}
       locations={detachedId ? {} : Object.fromEntries(cards.filter((card) => !card.detached && !pendingDetach.has(card.id) && card.archivedAt === undefined).map((card) => [card.id, card.phase === "working" ? (inspecting === card.id ? "inspection" : "sidebar") : "deck"]))}

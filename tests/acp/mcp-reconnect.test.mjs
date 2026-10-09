@@ -8,7 +8,7 @@ import path from 'node:path';
 const binary=process.env.QUEACP_HEADLESS_TEST_BINARY;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-test('MCP sends to a disconnected card without start_card, preserving authorization and deduplication', {skip:!binary}, async()=>{
+test('a message to a disconnected card connects it, once per request', {skip:!binary}, async()=>{
  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-mcp-reconnect-'));
  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
  let ownerPid;
@@ -38,7 +38,7 @@ test('MCP sends to a disconnected card without start_card, preserving authorizat
   const headers={authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':source,'x-queacp-source-epoch':sourceSession.connectionId};
   const message={tool:'send_message',cardId:target,sessionId:target,requestId:'once',text:'fixture message'};
   const submitted=await post('/api/mcp/tools',message,headers);
-  assert.ok(['running','queued'].includes(submitted.state));
+  assert.equal(submitted.delivery,'inbox');
   let snapshot;
   for(let i=0;i<400;i++){
    snapshot=await (await fetch(base+'/api/acp/'+target)).json();
@@ -46,11 +46,8 @@ test('MCP sends to a disconnected card without start_card, preserving authorizat
   }
   assert.equal(snapshot.turns.length,1);assert.equal(snapshot.turns[0].state,'completed');
   assert.notEqual(snapshot.connectionId,first.connectionId);
-  assert.equal((await post('/api/mcp/tools',message,headers)).id,submitted.id);
-  assert.equal((await (await fetch(base+'/api/acp/'+target)).json()).turns.length,1);
-  const outsider={authorization:headers.authorization,'x-que-client-id':'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'};
-  const approval=await post('/api/mcp/tools',{...message,requestId:'needs-permission'},outsider);
-  assert.equal(approval.delivery,'approval-required','automatic connection must not bypass cross-card approval');
+  assert.equal((await post('/api/mcp/tools',message,headers)).messageId,submitted.messageId,'a retry is the same message');
+  await sleep(1500);
   assert.equal((await (await fetch(base+'/api/acp/'+target)).json()).turns.length,1);
   await assert.rejects(post('/api/mcp/tools',{...message,requestId:'stale'}, {...headers,'x-queacp-source-epoch':'stale-source'}),/Source agent run ended/);
   await api(target,{action:'close'});

@@ -58,20 +58,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let port = crate::api::start_server(state.clone()).await?;
         println!("{}", serde_json::json!({"base":format!("http://127.0.0.1:{port}"),"profile":root,"home":home}));
         // The parent owns stdin. EOF cleanly stops only this test instance.
-        let handle = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || {
-            use std::io::BufRead;
-            for line in std::io::stdin().lock().lines().map_while(Result::ok) {
-                let Ok(body) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-                let result = handle.block_on(async {
-                    if body["method"] == "mcp_pending" { return Ok(crate::mcp::pending(&state).await); }
-                    if body["method"] == "mcp_decide" {
-                        return crate::mcp::decide(&state, body["id"].as_str().unwrap_or(""), body["approve"].as_bool().unwrap_or(false), body["allCards"].as_bool().unwrap_or(false)).await;
-                    }
-                    Err(crate::error::AppError::msg("Unknown test control"))
-                });
-                println!("{}", serde_json::json!({"controlId":body["controlId"],"result":result.as_ref().ok(),"error":result.as_ref().err().map(|e|e.to_string())}));
-            }
+        tokio::task::spawn_blocking(|| {
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
         }).await.ok();
         terminals.shutdown();
         Ok::<(), Box<dyn std::error::Error>>(())

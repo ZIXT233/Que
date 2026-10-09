@@ -1,4 +1,4 @@
-//! Card lifecycle operations shared by MCP agents with all-card access.
+//! Card lifecycle operations for the Butler.
 use crate::{api::AppState,error::{AppError,AppResult},models::{CardQueue,QueueCard}};
 use serde_json::{json,Value};
 use sha2::{Digest,Sha256};
@@ -38,7 +38,7 @@ pub async fn create(state:&AppState,source:&str,body:&Value)->AppResult<Value> {
    return Ok(json!({"cardId":id,"sessionId":id,"delivery":"created","state":"not_started","error":e.to_string(),"next":"Retry create_card with the same requestId and arguments; no duplicate card will be created."}));
   }
  }
- Ok(json!({"cardId":id,"sessionId":id,"delivery":"started","next":"Use send_message for the user-authorized task, then get_turn_status to verify completion."}))
+ Ok(json!({"cardId":id,"sessionId":id,"delivery":"started","next":"Send the user-authorized task with send_message. The card answers with a message to you, if it answers."}))
 }
 pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> {
  let id=required(body,"cardId")?;let(key,fingerprint)=identity(source,body)?;

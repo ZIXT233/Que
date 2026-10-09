@@ -1,7 +1,7 @@
-//! Scheduled Butler digest. Work is tracked from turn events without waking the
-//! Butler; on schedule it gets one compact status table and writes the user a
-//! summary. Its reply puts the Butler card in the queue like any other card.
-use crate::{api::AppState, error::{AppError, AppResult}, mailbox::{excerpt, reply_text}, models::CardPhase};
+//! Scheduled Butler digest. Nothing wakes the Butler as cards work; on schedule
+//! it gets one compact status table and writes the user a summary. Its reply
+//! puts the Butler card in the queue like any other card.
+use crate::{api::AppState, error::{AppError, AppResult}, session_view::{card_name, excerpt, reply_text}, models::CardPhase};
 use chrono::{Datelike, Local, Timelike};
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -45,18 +45,26 @@ pub fn cron_matches(expr: &str, minute: u32, hour: u32, day: u32, month: u32, we
 pub fn cron_valid(expr: &str) -> bool { cron_matches(expr, 0, 0, 1, 1, 0).is_some() }
 
 fn state_file() -> std::path::PathBuf { crate::paths::data_dir().join("mcp").join("digest.json") }
+/// `lastMinute` claims a scheduled slot; `lastSentAt` is when the previous digest went out.
+fn load_state() -> Value {
+    std::fs::read(state_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}))
+}
+fn save_state(patch: Value) -> AppResult<()> {
+    let mut value = load_state();
+    if let (Some(value), Some(patch)) = (value.as_object_mut(), patch.as_object()) { value.extend(patch.clone()); }
+    std::fs::create_dir_all(crate::paths::data_dir().join("mcp"))?;
+    Ok(crate::paths::atomic_write(&state_file(), &value.to_string())?)
+}
 
 fn ago(ms: i64) -> String {
     let minutes = (crate::queue::now_ms() - ms).max(0) / 60_000;
     match minutes { 0 => "刚刚".into(), m if m < 60 => format!("{m} 分钟前"), m if m < 48 * 60 => format!("{} 小时前", m / 60), m => format!("{} 天前", m / 1440) }
 }
 
-fn card_line(state: &AppState, queue: &crate::models::CardQueue, card: &crate::models::QueueCard, backlog: &[(String, String, String, Value)]) -> String {
+fn card_line(state: &AppState, queue: &crate::models::CardQueue, card: &crate::models::QueueCard, since: i64) -> String {
     let snapshot = state.harness.debug_snapshot(&card.id, &state.terminals);
     let turns: Vec<&Value> = snapshot["turns"].as_array().map(|t| t.iter().filter(|t| t["withdrawn"] != true).collect()).unwrap_or_default();
-    let name = card.nickname.clone().or_else(|| snapshot["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string))
-        .or_else(|| turns.first().and_then(|t| t["text"].as_str()).map(|t| excerpt(t, 40)))
-        .unwrap_or_else(|| card.harness.as_ref().map(|h| h.kind.clone()).unwrap_or_default());
+    let name = card_name(card, &snapshot);
     let workspace = queue.workspaces.as_ref().and_then(|w| w.iter().find(|w| Some(&w.id) == card.workspace_id.as_ref())).map(|w| w.name.clone()).unwrap_or_default();
     let decisions = turns.iter().flat_map(|t| t["blocks"].as_array().into_iter().flatten()).filter(|b| b["type"] == "decision" && b["state"] == "pending").count();
     let status = match (&card.phase, snapshot["state"].as_str()) {
@@ -68,8 +76,8 @@ fn card_line(state: &AppState, queue: &crate::models::CardQueue, card: &crate::m
     let last = turns.iter().filter_map(|t| t["endedAt"].as_i64().or(t["at"].as_i64())).max();
     let ask = turns.iter().rev().find(|t| t["source"] != "event" && t["sender"].is_null()).and_then(|t| t["text"].as_str()).map(|t| excerpt(t, 100));
     let reply = turns.iter().rev().find(|t| t["source"] != "event").map(|t| excerpt(&reply_text(t), 240)).filter(|r| !r.is_empty());
-    let (done, failed) = backlog.iter().filter(|(_, _, target, _)| target == &card.id)
-        .fold((0, 0), |(d, f), (_, _, _, e)| match e["detail"]["status"].as_str() { Some("completed") => (d + 1, f), Some("failed") => (d, f + 1), _ => (d, f) });
+    let ended = |state: &str| turns.iter().filter(|t| t["state"] == state && t["source"] != "event" && t["endedAt"].as_i64().is_some_and(|at| at > since)).count();
+    let (done, failed) = (ended("completed"), ended("failed"));
     let mut line = format!("- 「{name}」{} · {status} · 最近活动：{}", if workspace.is_empty() { String::new() } else { format!("（{workspace}）") }, last.map(ago).unwrap_or_else(|| "无记录".into()));
     if let Some(ask) = ask { line.push_str(&format!("\n  用户上次说：{ask}")); }
     if let Some(reply) = reply { line.push_str(&format!("\n  最后回复：{reply}")); }
@@ -81,16 +89,15 @@ fn card_line(state: &AppState, queue: &crate::models::CardQueue, card: &crate::m
 pub async fn run(state: &AppState, request_id: &str) -> AppResult<bool> {
     let queue = state.queue.read_snapshot()?;
     let Some(butler) = queue.cards.iter().find(|c| crate::butler::is_card(c) && c.archived_at.is_none() && c.harness.is_some()) else { return Ok(false) };
-    let backlog = crate::mcp::butler_backlog(state).await;
+    let since = load_state()["lastSentAt"].as_i64().unwrap_or(0);
     let lines: Vec<String> = queue.cards.iter()
         .filter(|c| c.archived_at.is_none() && c.harness.is_some() && !crate::butler::is_card(c))
-        .map(|c| card_line(state, &queue, c, &backlog)).collect();
+        .map(|c| card_line(state, &queue, c, since)).collect();
     let body = if lines.is_empty() { "（目前没有其他会话卡片）".to_string() } else { lines.join("\n") };
     let text = format!("Que 定时汇总请求（自动发出，不是用户消息）。请根据下面各会话的现状，用用户的语言给用户写一份简短汇总：\n1. 有进展的事\n2. 等用户处理或卡住的事\n3. 很久（两天以上）没动、可能被遗忘的事\n4. 建议优先处理的最多三件（只是建议，由用户决定）\n不要给其他卡片发消息，不要执行任何操作；可以据此更新 STATE.md。\n\n{body}");
     let ws = crate::api::acp_workspace(state, &butler.id).await?;
     state.harness.request(&ws, &state.bin_dir, json!({"action":"send","id":butler.id,"requestId":request_id,"mode":"notification","text":text})).await?;
-    let covered: Vec<(String, String)> = backlog.into_iter().map(|(watch, event, _, _)| (watch, event)).collect();
-    crate::mcp::ack_butler_backlog(state, &covered).await;
+    save_state(json!({"lastSentAt":crate::queue::now_ms()}))?;
     Ok(true)
 }
 
@@ -100,11 +107,9 @@ async fn tick(state: &AppState) -> AppResult<()> {
     let now = Local::now();
     if cron_matches(&cron, now.minute(), now.hour(), now.day(), now.month(), now.weekday().num_days_from_sunday()) != Some(true) { return Ok(()); }
     let minute = now.timestamp() / 60;
-    let last = std::fs::read(state_file()).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v["lastMinute"].as_i64());
-    if last == Some(minute) { return Ok(()); }
+    if load_state()["lastMinute"].as_i64() == Some(minute) { return Ok(()); }
     // Claim the slot first: a digest that fails is skipped, never sent twice.
-    std::fs::create_dir_all(crate::paths::data_dir().join("mcp"))?;
-    crate::paths::atomic_write(&state_file(), &json!({"lastMinute":minute}).to_string())?;
+    save_state(json!({"lastMinute":minute}))?;
     if !run(state, &format!("digest:{minute}")).await? { return Err(AppError::msg("Butler has not been started")); }
     Ok(())
 }

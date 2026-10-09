@@ -18,10 +18,11 @@ pub mod headless;
 mod hosts;
 mod live;
 mod mcp;
-mod mailbox;
 mod digest;
 mod mcp_cards;
 mod mcp_settings;
+mod inbox;
+mod session_view;
 mod butler;
 mod models;
 mod notify;
@@ -44,32 +45,6 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 struct ApiPort(Mutex<u16>);
-
-#[tauri::command]
-async fn mcp_pending(
-    state: tauri::State<'_, api::AppState>,
-    window: tauri::WebviewWindow,
-) -> Result<serde_json::Value, String> {
-    if window.label() != "main" {
-        return Err("Use the main Que window".into());
-    }
-    Ok(mcp::pending(&state).await)
-}
-#[tauri::command]
-async fn mcp_decide(
-    state: tauri::State<'_, api::AppState>,
-    window: tauri::WebviewWindow,
-    id: String,
-    approve: bool,
-    all_cards: bool,
-) -> Result<serde_json::Value, String> {
-    if window.label() != "main" {
-        return Err("Use the main Que window".into());
-    }
-    mcp::decide(&state, &id, approve, all_cards)
-        .await
-        .map_err(|e| e.to_string())
-}
 
 #[tauri::command]
 fn api_base(port: tauri::State<ApiPort>) -> String {
@@ -208,8 +183,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             api_base,
-            mcp_pending,
-            mcp_decide,
             editor::open_in_vscode,
             open_devtools,
             reveal_log,

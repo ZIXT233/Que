@@ -25,7 +25,7 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
   const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-QueACP-Source-Epoch':session.connectionId};
   const call=(tool,args={})=>request('/api/mcp/tools',{tool,...args},headers);
   const denied={...headers};delete denied['X-Que-Source-Terminal'];delete denied['X-QueACP-Source-Epoch'];
-  await assert.rejects(request('/api/mcp/tools',{tool:'update_settings',scope:'ui',patch:{theme:'dark'}},denied),/all-card/);
+  await assert.rejects(request('/api/mcp/tools',{tool:'update_settings',scope:'ui',patch:{theme:'dark'}},denied),/Butler/);
   assert.ok((await call('list_settings')).ui.theme);
   await call('update_settings',{scope:'ui',patch:{theme:'dark',fontSize:18}});
   assert.equal((await request('/api/preferences')).theme,'dark');

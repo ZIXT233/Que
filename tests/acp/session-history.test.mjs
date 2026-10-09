@@ -63,6 +63,7 @@ test('who sent a message survives in the message itself', () => {
   const sender = { cardId: 'card-b', name: 'Backend "api"' };
   assert.deepEqual(parseMessage(messageHeader({ sender }) + 'pull and restart'),
     { text: 'pull and restart', source: 'agent', sender: { cardId: 'card-b', name: "Backend 'api'" } });
+  assert.match(messageHeader({ sender }), /To answer, send_message to card card-b\./, 'the recipient learns how to answer');
   assert.deepEqual(parseMessage(messageHeader({ notification: true }) + 'status data'), { text: 'status data', source: 'event' });
   assert.deepEqual(parseMessage('[Que: not really a header]\n\nhi'), { text: '[Que: not really a header]\n\nhi', source: 'user' });
   assert.equal(messageHeader({}), '');

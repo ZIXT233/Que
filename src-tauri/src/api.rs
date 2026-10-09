@@ -463,11 +463,6 @@ pub(crate) async fn launch_harness(
     let captured = state
         .queue
         .with_queue(true, |queue| {
-            if let Some(expected) = body.get("_mcpExpected") {
-                if crate::mcp::launch_target(queue, id) != *expected {
-                    return Err(AppError::msg("Target changed after start approval"));
-                }
-            }
             refresh_queue(queue, state);
             let card = queue
                 .cards
@@ -2288,6 +2283,7 @@ pub async fn start_server(state: AppState) -> AppResult<u16> {
     crate::mcp::publish(&state, port)?;
     crate::acp_supervisor::start(state.clone());
     crate::digest::start(state.clone());
+    crate::inbox::start(state.clone());
     let app = router(state);
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;

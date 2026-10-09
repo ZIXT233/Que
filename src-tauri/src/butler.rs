@@ -41,7 +41,7 @@ mod tests {
   std::fs::write(dir.join("ROLE.md"),"old version").unwrap();
   install_at(&dir).unwrap();
   assert_eq!(std::fs::read_to_string(dir.join("MEMORY.md")).unwrap(),"user memory");
-  assert!(std::fs::read_to_string(dir.join("ROLE.md")).unwrap().contains("QueACP MCP"));
+  assert!(std::fs::read_to_string(dir.join("ROLE.md")).unwrap().contains("wait_messages"));
   std::fs::remove_dir_all(dir).unwrap();
  }
  #[test] fn one_active_butler_card_and_a_new_one_after_archiving() {

@@ -4,6 +4,13 @@ import {randomUUID} from 'node:crypto';
 
 // Separate from the owner's control socket: possessing a per-run capability
 // permits only MCP calls for that card, never ACP control operations.
+const WAIT_MAX_SECONDS = 120;
+/** A tool call gets a few seconds, or the wait it asked for. */
+export function callBudget(body, timeoutMs) {
+  if (body?.tool !== 'wait_messages') return timeoutMs;
+  const seconds = Math.min(Math.max(Number(body.timeoutSeconds) || 50, 1), WAIT_MAX_SECONDS);
+  return Math.max(timeoutMs, (seconds + 8) * 1000);
+}
 export function remoteMcpHub({socketPath, sessions, timeoutMs = 20000}) {
   const routes = new Map(), capabilities = new Map(), pending = new Map(), sockets = new Set();
   const failure = message => ({isError:true,content:[{type:'text',text:message}]});
@@ -46,7 +53,7 @@ export function remoteMcpHub({socketPath, sessions, timeoutMs = 20000}) {
       for (const [id, entry] of pending) if (entry.socket === socket) {clearTimeout(entry.timer);pending.delete(id);}
     });
     let buffer = '', consumed = false;
-    socket.setEncoding('utf8');socket.setTimeout(timeoutMs+1000,()=>socket.destroy());
+    socket.setEncoding('utf8');socket.setTimeout(callBudget({tool:'wait_messages',timeoutSeconds:WAIT_MAX_SECONDS},timeoutMs)+1000,()=>socket.destroy());
     socket.on('data', chunk => {
       if (consumed) return;
       buffer += chunk;
@@ -63,7 +70,7 @@ export function remoteMcpHub({socketPath, sessions, timeoutMs = 20000}) {
         if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body) || typeof request.body.tool !== 'string') throw Error('Invalid MCP request');
         if (pending.size >= 128) throw Error('Too many pending MCP calls');
         const id = randomUUID();
-        const timer = setTimeout(()=>finish(id,failure('QueACP tool request timed out; execution may be unknown. No automatic retry was made.')),timeoutMs);
+        const timer = setTimeout(()=>finish(id,failure('QueACP tool request timed out; execution may be unknown. No automatic retry was made.')),callBudget(request.body,timeoutMs));
         pending.set(id,{socket,client,card,epoch,timer});
         client.write(JSON.stringify({event:'mcp_request',requestId:id,cardId:card,epoch,clientId,body:request.body})+'\n');
       } catch (error) {socket.end(JSON.stringify(failure(error.message))+'\n');}
