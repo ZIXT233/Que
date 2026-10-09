@@ -3,8 +3,8 @@
 <p align="center"><strong>让 Agent 排队找你</strong></p>
 
 <p align="center">
-  <a href="https://github.com/ZIXT233/Que/releases/latest"><img src="https://img.shields.io/github/v/release/ZIXT233/Que?style=flat-square&amp;color=3b82f6" alt="Latest release" /></a>
-  <a href="https://github.com/ZIXT233/Que/releases"><img src="https://img.shields.io/github/downloads/ZIXT233/Que/total?style=flat-square&amp;color=2ea66f" alt="Downloads" /></a>
+  <a href="https://github.com/ZIXT233/QueACP/releases/latest"><img src="https://img.shields.io/github/v/release/ZIXT233/QueACP?style=flat-square&amp;color=3b82f6" alt="Latest release" /></a>
+  <a href="https://github.com/ZIXT233/QueACP/releases"><img src="https://img.shields.io/github/downloads/ZIXT233/QueACP/total?style=flat-square&amp;color=2ea66f" alt="Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b5cf6?style=flat-square" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3b82f6?style=flat-square" alt="Windows, macOS, Linux" />
   <img src="https://img.shields.io/badge/Rust%20%2B%20Tauri%202-e88a39?style=flat-square" alt="Rust + Tauri 2" />
@@ -12,10 +12,10 @@
 
 <p align="center">
   <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="https://github.com/ZIXT233/Que/issues">反馈</a>
+  <a href="https://github.com/ZIXT233/QueACP/issues">反馈</a>
 </p>
 
-<h3 align="center"><a href="https://github.com/ZIXT233/Que/releases/latest">下载 Que</a></h3>
+<h3 align="center"><a href="https://github.com/ZIXT233/QueACP/releases/latest">下载 Que</a></h3>
 
 Que 通过统一的 Agent 会话队列安排你的注意力，让你只需处理排在最前面的会话，不必再想着哪些 Agent 还在等你回复。
 
@@ -73,7 +73,7 @@ Que 可以通过 Node.js 扩展接入更多 CLI Harness。Qwen Code 扩展随 Qu
 
 ## 开始使用
 
-1. 从 [Releases](https://github.com/ZIXT233/Que/releases/latest) 下载对应系统和架构的安装包。
+1. 从 [Releases](https://github.com/ZIXT233/QueACP/releases/latest) 下载对应系统和架构的安装包。
 2. 安装并登录要使用的 CLI 工具。
 3. 在 Que 中选择工具和工作区，新建会话。
 
@@ -82,8 +82,8 @@ Que 可以通过 Node.js 扩展接入更多 CLI Harness。Qwen Code 扩展随 Qu
 需要 Node.js 22+、Rust 和当前平台的 [Tauri 2 依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
-git clone https://github.com/ZIXT233/Que.git
-cd Que
+git clone https://github.com/ZIXT233/QueACP.git
+cd QueACP
 npm ci
 npm run tauri dev
 # 打包当前平台
