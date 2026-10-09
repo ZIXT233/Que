@@ -12,6 +12,44 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    name: test / linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --no-default-features
+
+      - name: Build the headless test binary
+        working-directory: src-tauri
+        run: cargo build --no-default-features --features headless-e2e --bin que-headless
+
+      - name: ACP tests
+        env:
+          QUEACP_HEADLESS_TEST_BINARY: ${{ github.workspace }}/src-tauri/target/debug/que-headless
+          QUEACP_SETTINGS_TEST_BINARY: ${{ github.workspace }}/src-tauri/target/debug/que-headless
+        run: npm run test:acp
+
   build:
     name: ${{ matrix.platform }} / ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
@@ -71,4 +109,4 @@ jobs:
           args: --target ${{ matrix.target }}
           uploadUpdaterJson: false
           uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: Que-${{ matrix.platform }}-${{ matrix.arch }}-[bundle]
+          workflowArtifactNamePattern: QueACP-${{ matrix.platform }}-${{ matrix.arch }}-[bundle]
