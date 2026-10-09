@@ -61,15 +61,10 @@ Que 既支持在终端卡片中直接使用主流 CLI Agent，也支持把其他
   <img src="docs/assets/harness/omp.svg" width="20" height="20" align="absmiddle" alt="" /> Oh My Pi &nbsp;
   <img src="docs/assets/harness/codebuddy.svg" width="20" height="20" align="absmiddle" alt="" /> CodeBuddy &nbsp;
   <img src="docs/assets/harness/grok.svg" width="20" height="20" align="absmiddle" alt="" /> Grok Build &nbsp;
-  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin &nbsp;
-  <img src="examples/harness-extensions/qwen-code/qwen-color.svg" width="20" height="20" align="absmiddle" alt="" /> Qwen Code
+  <img src="docs/assets/harness/devin.svg" width="20" height="20" align="absmiddle" alt="" /> Devin
 </p>
 
-使用已有的 CLI、账号和模型配置，从卡片启动时自动完成接入。另提供普通 Shell 卡片。外部会话通知在设置中按工具开启。[接入文档 →](docs/harness/hook-api.zh-CN.md)
-
-### Harness 扩展
-
-Que 可以通过 Node.js 扩展接入更多 CLI Harness。Qwen Code 扩展随 Que 发布；你也可以将自定义扩展放入 `~/.que/extensions/<id>/`。用户仍需安装对应 CLI 和 Node.js。参见[扩展指南](docs/harness/extensions.zh-CN.md)与[Qwen Code 示例](examples/harness-extensions/qwen-code/README.zh-CN.md)。
+使用已有的 CLI、账号和模型配置，从卡片启动时自动完成接入。另提供普通 Shell 卡片。外部会话通知在设置中按工具开启。[架构说明 →](docs/architecture.md)
 
 ## 开始使用
 
@@ -90,7 +85,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-应用数据在 `~/.que`。参见 [Harness Hook 协议](docs/harness/hook-api.zh-CN.md)。
+应用数据在 `~/.queacp`。参见[架构说明](docs/architecture.md)。
 
 ## 协议
 
