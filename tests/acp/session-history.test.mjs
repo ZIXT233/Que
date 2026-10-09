@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { sessionHistory, projectRecord, messageHeader, parseMessage, mapLimit } from '../../runtime/session-history.mjs';
+import { sessionHistory, projectRecord, placeNotes, messageHeader, parseMessage, mapLimit } from '../../runtime/session-history.mjs';
 
 const record = (id, cwd, lastUsedAt, extra = {}) => ({ acpxRecordId: id, cwd, title: `title ${id}`, lastUsedAt, agentCommand: 'agent', messages: [{ big: 'x'.repeat(1000) }], ...extra });
 
@@ -95,4 +95,13 @@ test('a very long transcript projects quickly', () => {
   const started = performance.now();
   assert.equal(projectRecord({ messages }).length, 4000);
   assert.ok(performance.now() - started < 1500);
+});
+
+test('notes go back after the tool call they followed, in order, and only into their own turn', () => {
+  const tool = id => ({ type: 'tool_call', toolCallId: id });
+  const turns = [{ id: 'r1', blocks: [tool('a'), { type: 'text_delta', text: 'done' }] }, { id: 'r2', blocks: [] }];
+  const note = (record, tool, text) => ({ record, tool, block: { type: 'message', text } });
+  placeNotes(turns, [note('r1', 'a', 'first'), note('r1', 'a', 'second'), note('r1', 'gone', 'end'), note('r2', undefined, 'only'), note('lost', 'a', 'nowhere')]);
+  assert.deepEqual(turns[0].blocks.map(b => b.text ?? b.toolCallId), ['a', 'first', 'second', 'done', 'end']);
+  assert.deepEqual(turns[1].blocks.map(b => b.text), ['only']);
 });

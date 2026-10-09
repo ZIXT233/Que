@@ -8,7 +8,7 @@ import path from 'node:path';
 const binary=process.env.QUEACP_HEADLESS_TEST_BINARY;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-test('cards message each other through inboxes: idle, busy, waiting, after the turn; guarded; digested', {skip:!binary, timeout:120000}, async()=>{
+test('cards message each other through inboxes; both sides see the messages, also after a restart', {skip:!binary, timeout:120000}, async()=>{
   const root=mkdtempSync(path.join(os.tmpdir(),'queacp-messages-'));
   const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
   try {
@@ -33,7 +33,7 @@ test('cards message each other through inboxes: idle, busy, waiting, after the t
     const {token}=JSON.parse(readFileSync(path.join(data,'mcp','endpoint.json'),'utf8'));
     const as=id=>({authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':id,'x-queacp-source-epoch':sessions[id].connectionId});
     const tool=(from,body)=>request('/api/mcp/tools',body,as(from));
-    const send=(from,to,requestId,text)=>tool(from,{tool:'send_message',cardId:to,sessionId:to,requestId,text});
+    const send=(from,to,requestId,text)=>tool(from,{tool:'send_message',to,requestId,text});
     const turns=async id=>(await request('/api/acp/'+id)).turns;
     const until=async(predicate,label)=>{for(let i=0;i<400;i++){const v=await predicate();if(v)return v;await sleep(50);}throw Error('timeout: '+label);};
     const settled=id=>until(async()=>(await turns(id)).every(t=>['completed','failed','cancelled'].includes(t.state)),'settled');
@@ -46,15 +46,24 @@ test('cards message each other through inboxes: idle, busy, waiting, after the t
 
     // 1. Idle: the message is the target's next turn, signed by the sender.
     const sent=await send(shen,yang,'ask','你那边构建好了吗？');
-    assert.equal(sent.delivery,'inbox');
+    assert.deepEqual(sent.sent.map(c=>c.name),['杨金水']);
     const asked=await until(async()=>(await turns(yang)).find(t=>t.sender),'delivered as a turn');
     assert.equal(asked.source,'agent');assert.equal(asked.sender.name,'沈一石');assert.equal(asked.text,'你那边构建好了吗？','the header is not part of what is shown');
     await settled(yang);
     await sleep(1500);
     assert.equal((await turns(shen)).length,0,'nothing is relayed back by itself');
 
-    // 2. Busy: the answer rides on the sender's next QueACP tool result, once.
+    // 2. Busy: what a card sends shows in its own turn; a broadcast reaches every other card.
     const decision=await busy(shen,'work-1');
+    const shout=await send(shen,'all','shout','请拉取后重启');
+    assert.ok(shout.sent.some(c=>c.name==='杨金水') && shout.sent.some(c=>c.cardId===butler));
+    assert.equal(shout.sent.length,2,'the Butler and 杨金水, not the sender');
+    const working=async()=>(await turns(shen)).find(t=>t.state==='running');
+    const out=(await working()).blocks.find(b=>b.type==='message');
+    assert.equal(out.direction,'out');assert.equal(out.all,true);assert.equal(out.text,'请拉取后重启');
+    await until(async()=>(await turns(yang)).some(t=>t.text==='请拉取后重启'),'broadcast delivered');
+    await settled(yang);
+    // The answer rides on the sender's next QueACP tool result, once, and shows in its turn.
     await send(yang,shen,'answer-1','构建好了，版本 1.2');
     await sleep(1500);
     assert.equal((await turns(shen)).length,1,'a busy card is not given a second turn');
@@ -62,6 +71,8 @@ test('cards message each other through inboxes: idle, busy, waiting, after the t
     assert.equal(listed.queacpMessages.length,1);
     assert.equal(listed.queacpMessages[0].from.name,'杨金水');assert.equal(listed.queacpMessages[0].text,'构建好了，版本 1.2');
     assert.equal((await tool(shen,{tool:'list_cards'})).queacpMessages,undefined,'handed over exactly once');
+    const shown=(await working()).blocks.filter(b=>b.type==='message'&&b.direction==='in');
+    assert.deepEqual(shown.map(b=>[b.from.name,b.text]),[['杨金水','构建好了，版本 1.2']]);
 
     // 3. Waiting: wait_messages returns as soon as the answer arrives.
     const waiting=tool(shen,{tool:'wait_messages',timeoutSeconds:20});
@@ -81,7 +92,7 @@ test('cards message each other through inboxes: idle, busy, waiting, after the t
 
     // Loop guard: a repeat is refused, a retry of the same request is not.
     await assert.rejects(send(yang,shen,'answer-4','我先下班了'),/same message/);
-    assert.equal((await send(yang,shen,'answer-3','我先下班了')).delivery,'inbox');
+    assert.equal((await send(yang,shen,'answer-3','我先下班了')).sent.length,1);
     await sleep(1500);
     assert.equal((await turns(shen)).filter(t=>t.sender).length,1,'the retried request posts nothing new');
     await assert.rejects(send(shen,shen,'self','hi'),/itself/);
@@ -92,7 +103,17 @@ test('cards message each other through inboxes: idle, busy, waiting, after the t
     // The digest reports what ended since the last one, without watching cards.
     assert.deepEqual(await request('/api/butler/digest',{}),{sent:true});
     const digest=await until(async()=>(await turns(butler)).find(t=>t.text.includes('定时汇总请求')),'digest delivered');
-    assert.match(digest.text,/「杨金水」（Distro）/);assert.match(digest.text,/自上次汇总：完成 1 轮/);
+    assert.match(digest.text,/「杨金水」（Distro）/);assert.match(digest.text,/自上次汇总：完成 2 轮/);
+
+    // Restart: the record does not keep tool output, the notes put the messages back.
+    const ownerPid=Number(readFileSync(path.join(data,'acp','owner.pid'),'utf8'));
+    process.kill(ownerPid,'SIGTERM');
+    for(let i=0;i<400;i++){try{process.kill(ownerPid,0);await sleep(25);}catch{break;}}
+    const next=base;
+    await until(async()=>{try{await request('/api/acp/'+shen,{action:'ensure',agent:'fixture',cwd:work});return true;}catch{return false;}},'a new owner');
+    const history=(await (await fetch(next+'/api/acp/'+shen,{signal:AbortSignal.timeout(30000)})).json()).turns;
+    const kept=history.flatMap(t=>t.blocks.filter(b=>b.type==='message').map(b=>[t.text,b.direction,b.text]));
+    assert.deepEqual(kept,[['permission please','out','请拉取后重启'],['permission please','in','构建好了，版本 1.2'],['permission please','in','测试也过了']]);
   } finally {
     child.kill('SIGTERM');
     for(let i=0;i<200&&child.exitCode===null&&child.signalCode===null;i++)await sleep(25);

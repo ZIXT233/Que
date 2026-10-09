@@ -36,9 +36,9 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
   await api(target,{action:'close'});
   const {token}=JSON.parse(readFileSync(path.join(data,'mcp','endpoint.json'),'utf8'));
   const headers={authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':source,'x-queacp-source-epoch':sourceSession.connectionId};
-  const message={tool:'send_message',cardId:target,sessionId:target,requestId:'once',text:'fixture message'};
+  const message={tool:'send_message',to:target,requestId:'once',text:'fixture message'};
   const submitted=await post('/api/mcp/tools',message,headers);
-  assert.equal(submitted.delivery,'inbox');
+  assert.deepEqual(submitted.sent.map(c=>c.cardId),[target]);
   let snapshot;
   for(let i=0;i<400;i++){
    snapshot=await (await fetch(base+'/api/acp/'+target)).json();
@@ -46,7 +46,7 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
   }
   assert.equal(snapshot.turns.length,1);assert.equal(snapshot.turns[0].state,'completed');
   assert.notEqual(snapshot.connectionId,first.connectionId);
-  assert.equal((await post('/api/mcp/tools',message,headers)).messageId,submitted.messageId,'a retry is the same message');
+  assert.deepEqual((await post('/api/mcp/tools',message,headers)).sent.map(c=>c.cardId),[target],'a retry is the same message');
   await sleep(1500);
   assert.equal((await (await fetch(base+'/api/acp/'+target)).json()).turns.length,1);
   await assert.rejects(post('/api/mcp/tools',{...message,requestId:'stale'}, {...headers,'x-queacp-source-epoch':'stale-source'}),/Source agent run ended/);

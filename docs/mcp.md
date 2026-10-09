@@ -16,13 +16,13 @@ The stdio bridge needs Node.js. It reads the private `endpoint.json` on each cal
 
 ## Tools
 
-Sessions — a card's `sessionId` comes from `list_cards`. How messages travel is in [agent-interaction.md](agent-interaction.md).
+Sessions — a card is one Agent session, addressed by its `cardId` from `list_cards`. How messages travel is in [agent-interaction.md](agent-interaction.md).
 
-- `list_cards()` — cards with their state, title and `sessionId`.
-- `read_session(cardId, sessionId, limit?, turnId?, detail?)` — compact by default: state, pending decisions, and the last few turns as message plus final-reply excerpts. `turnId` returns that one turn in full; `detail: "full"` returns everything.
-- `send_message(cardId, sessionId, requestId, text)` — puts a message, signed with your card, in the target's inbox; a stopped card is connected. Nothing comes back by itself: an answer is a message from the target. Reuse `requestId` only to retry the same message. Repeats and floods are refused.
+- `list_cards()` — cards with their name, workspace, Agent and state.
+- `read_session(cardId, limit?, turnId?, detail?)` — compact by default: state, pending decisions, and the last few turns as message plus final-reply excerpts. `turnId` returns that one turn in full; `detail: "full"` returns everything.
+- `send_message(to, requestId, text)` — puts a message, signed with your card, in the inbox of each card in `to`: a cardId, a list of them, or `"all"` for every other card with an Agent. A stopped card is connected. Nothing comes back by itself: an answer is a message from the target. Reuse `requestId` only to retry the same message. Repeats and floods are refused.
 - `wait_messages(timeoutSeconds?)` — waits up to 50 s (at most 120 s) for messages to your card and returns them. Messages also ride on any QueACP tool result as `queacpMessages`, or start your next turn when you are idle; each is handed over once.
-- `cancel_turn(cardId, sessionId, turnId)` — cancels a running turn or withdraws a queued message; read the session to confirm.
+- `cancel_turn(cardId, turnId)` — cancels a running turn or withdraws a queued message; read the session to confirm.
 - `set_card_nickname(cardId, nickname, requestId)`.
 
 Cards and workspaces: `list_workspaces` and `list_harnesses` for anyone; `create_card` and `archive_card` for the Butler.

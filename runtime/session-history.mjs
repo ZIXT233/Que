@@ -57,6 +57,26 @@ export function projectRecord(record) {
   return turns;
 }
 
+/**
+ * Messages between cards that were not a turn of their own (sent, or handed
+ * over on a tool result) are kept beside the record as notes, each anchored to
+ * acpx's id for its turn and the tool call it followed. Returns `turns`.
+ */
+export function placeNotes(turns, notes) {
+  const placed = new Set();
+  for (const note of notes || []) {
+    const turn = turns.find(t => t.id === note.record);
+    if (!turn) continue;
+    let at = note.tool ? turn.blocks.findIndex(b => b.type === 'tool_call' && b.toolCallId === note.tool) + 1 : 0;
+    if (at === 0) at = turn.blocks.length;
+    // Notes after the same tool call keep the order they happened in.
+    while (placed.has(turn.blocks[at])) at++;
+    turn.blocks.splice(at, 0, note.block);
+    placed.add(note.block);
+  }
+  return turns;
+}
+
 /** Run `task` over `items` with at most `limit` in flight; results keep input order. */
 export async function mapLimit(items, limit, task) {
   const results = new Array(items.length);

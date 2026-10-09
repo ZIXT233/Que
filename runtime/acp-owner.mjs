@@ -21,7 +21,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createAcpRuntime, createAgentRegistry, createFileSessionStore } from 'acpx/runtime';
 import { remoteMcpHub } from './remote-mcp.mjs';
 import { createSessionWire } from './session-wire.mjs';
-import { sessionHistory, projectRecord, messageHeader } from './session-history.mjs';
+import { sessionHistory, projectRecord, placeNotes, messageHeader } from './session-history.mjs';
 import { sessionErrorMessage } from './errors.mjs';
 import { discoverSessions } from './native-sessions.mjs';
 import { sessionEnvironment } from './session-environment.mjs';
@@ -65,6 +65,7 @@ const store = {
     await files.save(record);
     const s = sessions[record.acpxRecordId];
     if (!s) return;
+    learnRecordIds(s, record);
     s.title = record.title || s.title;
     s.promptCapabilities = record.agentCapabilities?.promptCapabilities || s.promptCapabilities;
     publish(s.id);
@@ -72,6 +73,42 @@ const store = {
   },
 };
 const listHistory = sessionHistory(storeDir, store);
+
+// Notes: messages between cards that are not a turn of their own. Que tells the
+// owner the moment a card sends or is handed one; the note shows in the live
+// turn and is kept here, so the record's projection can place it again.
+const notesDir = path.join(root, 'notes');
+const notesFile = id => path.join(notesDir, `${encodeURIComponent(id)}.json`);
+const readNotes = id => { try { return JSON.parse(fs.readFileSync(notesFile(id), 'utf8')); } catch { return []; } };
+function writeNotes(id, notes) {
+  fs.mkdirSync(notesDir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(notesFile(id) + '.tmp', JSON.stringify(notes), { mode: 0o600 });
+  fs.renameSync(notesFile(id) + '.tmp', notesFile(id));
+}
+/** acpx names a turn's message itself when it saves the prompt; learn that name. */
+function learnRecordIds(s, record) {
+  const users = (record.messages || []).filter(m => m.User).map(m => m.User.id);
+  const known = new Set(s.turns.map(t => t.recordId ?? t.id));
+  const fresh = users.filter(id => !known.has(id));
+  const waiting = s.turns.filter(t => !t.recordId && !t.withdrawn && ['running', 'queued', 'cancelling'].includes(t.state));
+  if (!fresh.length || !waiting.length) return;
+  const turn = waiting[0];
+  turn.recordId = fresh.at(-1);
+  const notes = readNotes(s.id);
+  if (notes.some(n => n.turn === turn.id && !n.record)) writeNotes(s.id, notes.map(n => n.turn === turn.id ? { ...n, record: turn.recordId } : n));
+}
+/** The card's conversation as the UI shows it: the acpx record, with its notes in place. */
+const conversation = (id, record) => placeNotes(projectRecord(record), readNotes(id));
+function note(id, block) {
+  const s = sessions[id], turn = s?.turns.findLast(t => ['running', 'cancelling'].includes(t.state));
+  if (!turn) return { noted: false };
+  const value = { ...block, type: 'message', at: Date.now() };
+  const tool = turn.blocks.findLast(b => b.type === 'tool_call')?.toolCallId;
+  turn.blocks.push(value);
+  writeNotes(id, [...readNotes(id), { turn: turn.id, record: turn.recordId, tool, block: value }]);
+  publish(id, false, [{ op: 'block', turn: turn.id, block: turn.blocks.length - 1, value: plain(value) }]);
+  return { noted: true };
+}
 const customAgents = path.join(root, 'agents.json');
 const registry = createAgentRegistry({ overrides: fs.existsSync(customAgents) ? JSON.parse(fs.readFileSync(customAgents, 'utf8')) : {} });
 const mcpSocketPath = process.platform === 'win32' ? `\\\\.\\pipe\\queacp-mcp-${createHash('sha256').update(root).digest('hex').slice(0, 20)}` : path.join(root, 'mcp.sock');
@@ -113,7 +150,7 @@ async function loadCard(id) {
   const record = await store.load(id);
   if (!record) return undefined;
   return { id, cwd: record.cwd, agent: agentOf(record), hostAccess: true, recordId: id, title: record.title,
-    promptCapabilities: record.agentCapabilities?.promptCapabilities || {}, state: 'not_running', turns: projectRecord(record) };
+    promptCapabilities: record.agentCapabilities?.promptCapabilities || {}, state: 'not_running', turns: conversation(id, record) };
 }
 
 function mcpServers(id) {
@@ -211,7 +248,7 @@ async function ensure(req) {
       const record = await store.load(id);
       s.title = record?.title; s.promptCapabilities = record?.agentCapabilities?.promptCapabilities || {};
       // Turns submitted in this run already show their full live content.
-      if (!s.turns.some(t => t.state !== 'history')) s.turns = projectRecord(record);
+      if (!s.turns.some(t => t.state !== 'history')) s.turns = conversation(id, record);
       await metadata(id).catch(() => {});
       return s;
     } catch (e) {
@@ -438,6 +475,7 @@ async function dispatch(req, client) {
   if (!s) throw Error('Session not found');
   if (action === 'read') return s;
   if (action === 'send') return send(id, req);
+  if (action === 'note') return note(id, req.block);
   if (action === 'cancel') {
     const running = live.get(id)?.turns.get(req.requestId), turn = s.turns.find(t => t.id === req.requestId);
     if (!running || !turn) throw Error('Turn is no longer active');

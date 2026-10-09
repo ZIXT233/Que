@@ -50,9 +50,9 @@ const SENDS_PER_WINDOW: usize = 20;
 /// guard is mechanical: an identical message to the same card, or too many
 /// messages to one card, within ten minutes is refused. A retried request
 /// (same key) is never refused, since it sends nothing new.
-fn admit(sent: &mut VecDeque<Sent>, key: &str, from: &str, to: &str, text: &str) -> AppResult<()> {
+fn admit(sent: &mut VecDeque<Sent>, key: &str, from: &str, to: &str, text: &str) -> AppResult<bool> {
     while sent.front().is_some_and(|s| s.at.elapsed() >= SEND_WINDOW) { sent.pop_front(); }
-    if sent.iter().any(|s| s.key == key) { return Ok(()); }
+    if sent.iter().any(|s| s.key == key) { return Ok(false); }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.trim().hash(&mut hasher);
     let digest = hasher.finish();
@@ -64,7 +64,7 @@ fn admit(sent: &mut VecDeque<Sent>, key: &str, from: &str, to: &str, text: &str)
         return Err(AppError::msg("Too many messages to this card in 10 minutes; combine them into one message or ask the user"));
     }
     sent.push_back(Sent { key: key.into(), from: from.into(), to: to.into(), digest, at: Instant::now() });
-    Ok(())
+    Ok(true)
 }
 
 fn remember(tools: &mut ToolState, key: String, body: Value, result: Value) {
@@ -260,7 +260,7 @@ async fn tools_inner(state:AppState, headers:HeaderMap, body:Value, remote:Optio
     }
     // Connecting a stopped target is app lifecycle, not an Agent task: do it
     // first, then revalidate the source below.
-    if matches!(operation.as_str(), "send_message" | "read_session") {
+    if operation == "read_session" {
         if let Some((machine,generation))=remote {
             if !state.harness.current_link(machine,generation)
                 || !state.queue.read_snapshot().is_ok_and(|queue|remote_source_matches(&queue,machine,source_terminal)) {
@@ -270,11 +270,9 @@ async fn tools_inner(state:AppState, headers:HeaderMap, body:Value, remote:Optio
         if !source_terminal.is_empty() && !state.harness.is_live(source_terminal) {
             return (StatusCode::FORBIDDEN,Json(json!({"error":"Source agent run ended or changed"}))).into_response();
         }
-        let target = match (required(&body,"cardId"),required(&body,"sessionId")) {
-            (Ok(card),Ok(session)) => (card,session),
-            (Err(error),_) | (_,Err(error)) => return error.into_response(),
-        };
-        if let Err(error) = crate::acp_supervisor::ensure_card(&state,target.0,target.1).await {
+        let card = match required(&body,"cardId") { Ok(card) => card, Err(error) => return error.into_response() };
+        // A card is one session: its session id is its own id.
+        if let Err(error) = crate::acp_supervisor::ensure_card(&state,card,card).await {
             return error.into_response();
         }
     }
@@ -292,7 +290,7 @@ async fn tools_inner(state:AppState, headers:HeaderMap, body:Value, remote:Optio
     let mail = match (&result, source_terminal.is_empty() || operation == "wait_messages") {
         (Ok(_), false) => match state.queue.read_snapshot().ok().and_then(|queue| queue.cards.iter()
             .find(|c| c.harness.as_ref().is_some_and(|h| h.terminal_id == source_terminal)).map(|c| c.id.clone())) {
-            Some(card) => crate::inbox::take(&card).await.unwrap_or_default(),
+            Some(card) => crate::inbox::hand_over(&state, &card).await.unwrap_or_default(),
             None => Vec::new(),
         },
         _ => Vec::new(),
@@ -402,11 +400,12 @@ async fn run_tool(
         "wait_messages" => {
             let source = source_card.ok_or_else(|| AppError::msg("wait_messages is for a card's own Agent"))?;
             let seconds = body["timeoutSeconds"].as_u64().unwrap_or(crate::inbox::WAIT_DEFAULT_SECS);
-            let letters = crate::inbox::wait(&source.id, seconds).await?;
+            let letters = crate::inbox::wait(state, &source.id, seconds).await?;
             return Ok(json!({"queacpMessages":crate::inbox::shown(&letters),
                 "note":if letters.is_empty() { "No message yet. Call again to keep waiting, or finish your turn: messages that arrive later start your next turn." } else { "Each message is handed over once." }}));
         }
-        "read_session" | "send_message" | "cancel_turn" | "set_card_nickname" => {}
+        "send_message" => return send_message(state, tools, body, &queue, source_card, &principal).await,
+        "read_session" | "cancel_turn" | "set_card_nickname" => {}
         _ => return Err(AppError::msg("Unknown tool")),
     }
     let card_id = required(body, "cardId")?;
@@ -415,46 +414,72 @@ async fn run_tool(
         .iter()
         .find(|c| c.id == card_id && c.archived_at.is_none())
         .ok_or_else(|| AppError::msg("Card is missing or archived"))?;
-    let session = card.harness.as_ref().map(|h| h.terminal_id.as_str())
-        .ok_or_else(|| AppError::msg("This card has not started an Agent yet"))?;
     if tool == "set_card_nickname" {
         if !butler && source_card.is_some_and(|source| source.id != card_id) {
             return Err(AppError::msg("A card can rename only itself; the Butler can rename any card"));
         }
         return set_nickname(state, tools, body, client, card_id).await;
     }
-    if required(body, "sessionId")? != session {
-        return Err(AppError::msg("The card's session changed; list cards again"));
-    }
+    if card.harness.is_none() { return Err(AppError::msg("This card has not started an Agent yet")); }
     let ws = crate::api::acp_workspace(state, card_id).await?;
-    match tool {
-        "read_session" => {
-            let snapshot = state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":card_id})).await?;
-            Ok(crate::session_view::session_view(card_id, &snapshot, body))
-        }
-        "cancel_turn" => {
-            state.harness.request(&ws, &state.bin_dir, json!({"action":"cancel","id":card_id,"requestId":required(body,"turnId")?})).await
-        }
-        _ => {
-            let request_id = required(body, "requestId")?;
-            if request_id.len() > 128 { return Err(AppError::msg("requestId is too long")); }
-            let text = required(body, "text")?;
-            let key = format!("{principal}:{request_id}");
-            if source_card.is_some_and(|source| source.id == card_id) {
-                return Err(AppError::msg("A card cannot message itself"));
-            }
-            admit(&mut tools.lock().await.sent, &key, &principal, card_id, text)?;
-            let from = match source_card {
-                Some(source) => json!({"cardId":source.id,"name":crate::session_view::card_name(source, &state.harness.debug_snapshot(&source.id, &state.terminals))}),
-                None => json!({"cardId":"","name":"External MCP client"}),
-            };
-            // The request key names the letter, so a retried call posts it once.
-            let id = hex::encode(&sha2::Sha256::digest(key.as_bytes())[..16]);
-            crate::inbox::post(crate::inbox::Letter { id: id.clone(), to: card_id.into(), from, text: text.into(), at: crate::queue::now_ms() }).await?;
-            Ok(json!({"messageId":id,"delivery":"inbox",
-                "note":"The card reads it now if idle, otherwise at its next QueACP tool call or when its current turn ends. Any answer comes back as a message to you: call wait_messages to wait for it within this turn, or finish your turn and it starts your next one. Do not poll read_session for it."}))
+    if tool == "read_session" {
+        let snapshot = state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":card_id})).await?;
+        return Ok(crate::session_view::session_view(card_id, &snapshot, body));
+    }
+    state.harness.request(&ws, &state.bin_dir, json!({"action":"cancel","id":card_id,"requestId":required(body,"turnId")?})).await
+}
+
+/// Puts one message in the inbox of each recipient: listed cards, or `"all"`
+/// other cards with an Agent. The sender's conversation shows what it sent.
+async fn send_message(state: &AppState, tools: &Mutex<ToolState>, body: &Value, queue: &crate::models::CardQueue,
+    source: Option<&crate::models::QueueCard>, principal: &str) -> AppResult<Value> {
+    let request_id = required(body, "requestId")?;
+    if request_id.len() > 128 { return Err(AppError::msg("requestId is too long")); }
+    let text = required(body, "text")?;
+    let named: Vec<&str> = match &body["to"] {
+        Value::String(id) => vec![id.as_str()],
+        Value::Array(ids) => ids.iter().filter_map(Value::as_str).collect(),
+        _ => return Err(AppError::msg("to must be a card id, a list of card ids, or \"all\"")),
+    };
+    let everyone = named.contains(&"all");
+    let reachable = |c: &&crate::models::QueueCard| c.archived_at.is_none() && c.harness.is_some();
+    let mut recipients: Vec<&crate::models::QueueCard> = Vec::new();
+    if everyone {
+        recipients.extend(queue.cards.iter().filter(reachable).filter(|c| source.is_none_or(|s| s.id != c.id)));
+    } else {
+        for id in named {
+            if source.is_some_and(|s| s.id == id) { return Err(AppError::msg("A card cannot message itself")); }
+            let card = queue.cards.iter().filter(reachable).find(|c| c.id == id)
+                .ok_or_else(|| AppError::msg(format!("Card {id} is missing, archived or has no Agent; list_cards shows who can be reached")))?;
+            if !recipients.iter().any(|r| r.id == card.id) { recipients.push(card); }
         }
     }
+    if recipients.is_empty() { return Err(AppError::msg("No card to send to")); }
+    let name = |card: &crate::models::QueueCard| crate::session_view::card_name(card, &state.harness.debug_snapshot(&card.id, &state.terminals));
+    let from = match source {
+        Some(source) => json!({"cardId":source.id,"name":name(source)}),
+        None => json!({"cardId":"","name":"External MCP client"}),
+    };
+    let (mut sent, mut refused, mut fresh) = (Vec::new(), Vec::new(), Vec::new());
+    for card in recipients {
+        // The request key names each letter, so a retried call posts it once.
+        let key = format!("{principal}:{request_id}:{}", card.id);
+        match admit(&mut tools.lock().await.sent, &key, principal, &card.id, text) {
+            Ok(new) => {
+                let id = hex::encode(&sha2::Sha256::digest(key.as_bytes())[..16]);
+                crate::inbox::post(crate::inbox::Letter { id, to: card.id.clone(), from: from.clone(), text: text.into(), at: crate::queue::now_ms() }).await?;
+                sent.push(json!({"cardId":card.id,"name":name(card)}));
+                if new { fresh.push(json!({"cardId":card.id,"name":name(card)})); }
+            }
+            Err(error) => refused.push(json!({"cardId":card.id,"error":error.to_string()})),
+        }
+    }
+    if let (Some(source), false) = (source, fresh.is_empty()) {
+        crate::inbox::note(state, &source.id, json!({"direction":"out","to":fresh,"all":everyone,"text":text})).await;
+    }
+    if sent.is_empty() { return Err(AppError::msg(refused[0]["error"].as_str().unwrap_or("Refused").to_string())); }
+    Ok(json!({"sent":sent,"refused":refused,
+        "note":"Each card reads it now if idle, otherwise at its next QueACP tool call or when its current turn ends. Answers come back as messages to you: call wait_messages to wait within this turn, or finish your turn and they start your next one. Do not poll read_session for them."}))
 }
 
 fn list_cards(state: &AppState, queue: &crate::models::CardQueue) -> Value {
@@ -475,7 +500,6 @@ fn list_cards(state: &AppState, queue: &crate::models::CardQueue) -> Value {
             json!({"cardId":card.id,"cwd":card.cwd,"phase":card.phase,
             "title":card_title(h.as_ref(), workspace.map(|w| w.name.as_str())),
             "nickname":card.nickname,"sessionTitle":h.as_ref().and_then(|h| h.session_name.as_ref()),
-            "sessionId":h.as_ref().map(|h| &h.terminal_id),
             "workspaceName":workspace.map(|w| &w.name),
             "kind":h.as_ref().map(|h| &h.kind), "state":h.as_ref().map(|h| h.state.as_str()).unwrap_or("not_started"),
             "butler":crate::butler::is_card(card),

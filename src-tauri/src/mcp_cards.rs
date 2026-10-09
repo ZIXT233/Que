@@ -32,13 +32,13 @@ pub async fn create(state:&AppState,source:&str,body:&Value)->AppResult<Value> {
  if !catalog.as_array().is_some_and(|items|items.iter().any(|item|item["id"]==kind)){return Err(AppError::msg("Harness not available; use list_harnesses"));}
  state.queue.with_queue(false,|q|insert_card(q,&id,workspace,kind,nickname,&key,&fingerprint)).await?;
  let queue=state.queue.read_snapshot()?;let card=queue.cards.iter().find(|c|c.id==id).unwrap();
- if card.archived_at.is_some(){return Ok(json!({"cardId":id,"sessionId":id,"delivery":"archived","note":"This creation request already produced an archived card; use a new requestId only for a new card."}));}
+ if card.archived_at.is_some(){return Ok(json!({"cardId":id,"delivery":"archived","note":"This creation request already produced an archived card; use a new requestId only for a new card."}));}
  if !state.harness.is_live(&id) {
   if let Err(e)=crate::api::launch_harness(state,&json!({"id":id}),"harness_resume").await {
-   return Ok(json!({"cardId":id,"sessionId":id,"delivery":"created","state":"not_started","error":e.to_string(),"next":"Retry create_card with the same requestId and arguments; no duplicate card will be created."}));
+   return Ok(json!({"cardId":id,"delivery":"created","state":"not_started","error":e.to_string(),"next":"Retry create_card with the same requestId and arguments; no duplicate card will be created."}));
   }
  }
- Ok(json!({"cardId":id,"sessionId":id,"delivery":"started","next":"Send the user-authorized task with send_message. The card answers with a message to you, if it answers."}))
+ Ok(json!({"cardId":id,"delivery":"started","next":"Send the user-authorized task with send_message. The card answers with a message to you, if it answers."}))
 }
 pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> {
  let id=required(body,"cardId")?;let(key,fingerprint)=identity(source,body)?;

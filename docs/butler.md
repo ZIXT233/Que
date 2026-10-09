@@ -34,5 +34,5 @@
 ## 卡片工具
 
 - `list_workspaces()`、`list_harnesses(workspaceId)`：列出工作区和该机器可用的 Agent。
-- `create_card(workspaceId, kind, requestId, nickname?)`：新建并启动一张卡，返回 `cardId` / `sessionId`；任务用 `send_message` 另行发送。同一 `requestId` 重试不会重复创建。
+- `create_card(workspaceId, kind, requestId, nickname?)`：新建并启动一张卡，返回 `cardId`；任务用 `send_message` 另行发送。同一 `requestId` 重试不会重复创建。
 - `archive_card(cardId, requestId)`：归档闲置卡片，保留历史；执行或排队中的卡片不能直接归档，不能归档自己。

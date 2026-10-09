@@ -43,20 +43,19 @@ import {createRoot} from 'react-dom/client';
 import assert from 'node:assert/strict';
 import {I18nProvider} from './src/hooks/useI18n';
 import {AcpConversation} from './src/components/AcpConversation';
-import {messagesIn} from './src/lib/peer-messages';
 export async function run(){
  globalThis.sessionStorage=window.sessionStorage;
- // MCP results come as text content holding JSON; some agents nest it in ACP content.
- const handed={cards:[],queacpMessages:[{from:{cardId:'yang',name:'杨金水'},text:'构建好了'}]};
- assert.equal(messagesIn({rawOutput:{content:[{type:'text',text:JSON.stringify(handed)}]}})[0].text,'构建好了');
- assert.equal(messagesIn({content:[{type:'content',content:{type:'text',text:JSON.stringify(handed)}}]})[0].from.name,'杨金水');
- assert.deepEqual(messagesIn({rawOutput:'plain output'}),[]);
- assert.deepEqual(messagesIn({rawOutput:{queacpMessages:[{text:'no sender'}]}}),[],'malformed entries are not drawn');
  const reply=text=>({type:'text_delta',stream:'message',text});
+ const yang={cardId:'yang',name:'杨金水'},shen={cardId:'shen',name:'沈一石'};
  const snapshot={state:'attention',turns:[
-  {id:'from-peer',text:'你那边好了吗？',source:'agent',sender:{cardId:'shen',name:'沈一石'},state:'completed',attachments:[],blocks:[reply('好了')]},
+  {id:'from-peer',text:'你那边好了吗？',source:'agent',sender:shen,state:'completed',attachments:[],blocks:[reply('好了')]},
   {id:'mine',text:'继续',source:'user',state:'completed',attachments:[],blocks:[
-   {type:'tool_call',toolCallId:'t1',title:'list_cards',status:'completed',rawOutput:{content:[{type:'text',text:JSON.stringify(handed)}]}},reply('收到')]},
+   {type:'tool_call',toolCallId:'t1',title:'send_message',status:'completed'},
+   {type:'message',direction:'out',to:[yang,shen],text:'请拉取后重启'},
+   {type:'tool_call',toolCallId:'t2',title:'wait_messages',status:'completed'},
+   {type:'message',direction:'in',from:yang,text:'构建好了'},
+   {type:'message',direction:'out',to:[yang],all:true,text:'大家下班'},
+   reply('收到')]},
  ]};
  globalThis.fetch=async()=>({ok:true,json:async()=>structuredClone(snapshot)});
  const root=createRoot(document.getElementById('root'));
@@ -64,13 +63,15 @@ export async function run(){
  await act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot));await new Promise(resolve=>setTimeout(resolve,30))});
  const [peerTurn,myTurn]=document.querySelectorAll('.cq-acp-turn');
  assert.equal(peerTurn.querySelector('.cq-acp-user'),null,'another card is not drawn as the user');
- assert.match(peerTurn.querySelector('.cq-acp-peer').textContent,/来自 沈一石/);
- assert.match(peerTurn.querySelector('.cq-acp-peer').textContent,/你那边好了吗？/);
+ const received=peerTurn.querySelector('.cq-acp-msg--in');
+ assert.match(received.textContent,/来自 沈一石/);assert.match(received.textContent,/你那边好了吗？/);
  assert.ok(myTurn.querySelector('.cq-acp-user'),'the user is still on the user side');
- const handedOver=myTurn.querySelector('.cq-acp-response .cq-acp-peer');
- assert.match(handedOver.textContent,/来自 杨金水/);assert.match(handedOver.textContent,/构建好了/);
- assert.equal(document.querySelectorAll('.cq-acp-peer').length,2);
- await act(async()=>root.unmount());console.log('PASS: messages from other cards are drawn on the Agent side, tinted, wherever they arrive');
+ const messages=[...myTurn.querySelectorAll('.cq-acp-response .cq-acp-msg')];
+ assert.deepEqual(messages.map(m=>m.className.split('--')[1]),['out','in','out'],'color follows direction, in order');
+ assert.match(messages[0].textContent,/发给 杨金水、沈一石/);assert.match(messages[0].textContent,/请拉取后重启/);
+ assert.match(messages[1].textContent,/来自 杨金水/);
+ assert.match(messages[2].textContent,/发给 全部/,'a broadcast says so');
+ await act(async()=>root.unmount());console.log('PASS: card messages sit on the Agent side, blue received and green sent, in turn order');
 }
 `,
     loader: "tsx",
@@ -86,7 +87,7 @@ export async function run(){
     js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);",
   },
 });
-const dir = await mkdtemp(join(tmpdir(), "queacp-peer-ui-"));
+const dir = await mkdtemp(join(tmpdir(), "queacp-message-ui-"));
 try {
   const entry = join(dir, "test.mjs");
   await writeFile(entry, result.outputFiles[0].text);

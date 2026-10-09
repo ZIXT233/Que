@@ -62,14 +62,32 @@ pub async fn post(letter: Letter) -> AppResult<()> {
     Ok(())
 }
 
-/// Hands over everything waiting for `card`, oldest first.
-pub async fn take(card: &str) -> AppResult<Vec<Letter>> {
+/// Removes everything waiting for `card`, oldest first.
+async fn take(card: &str) -> AppResult<Vec<Letter>> {
     let _delivery = DELIVERY.lock().await;
     with_inbox(|letters| {
         let (mine, rest) = std::mem::take(letters).into_iter().partition(|l| l.to == card);
         *letters = rest;
         mine
     }).await
+}
+
+/// Shows a message in `card`'s current turn. Que is the go-between, so it knows
+/// what was sent and handed over without reading any tool output.
+pub async fn note(state: &AppState, card: &str, block: Value) {
+    let Ok(ws) = crate::api::acp_workspace(state, card).await else { return };
+    if let Err(error) = state.harness.request(&ws, &state.bin_dir, json!({"action":"note","id":card,"block":block})).await {
+        crate::debuglog::warn("inbox", &format!("card={card} message not shown: {error}"));
+    }
+}
+
+/// Hands everything waiting for a busy `card` over on its tool result, and shows it.
+pub async fn hand_over(state: &AppState, card: &str) -> AppResult<Vec<Letter>> {
+    let letters = take(card).await?;
+    for letter in &letters {
+        note(state, card, json!({"direction":"in","from":letter.from,"text":letter.text})).await;
+    }
+    Ok(letters)
 }
 
 /// How a handed-over message reads in a tool result.
@@ -79,11 +97,11 @@ pub fn shown(letters: &[Letter]) -> Value {
 }
 
 /// Blocks until a message for `card` arrives or the wait ends.
-pub async fn wait(card: &str, seconds: u64) -> AppResult<Vec<Letter>> {
+pub async fn wait(state: &AppState, card: &str, seconds: u64) -> AppResult<Vec<Letter>> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds.clamp(1, WAIT_MAX_SECS));
     loop {
         let arrived = ARRIVED.notified();
-        let letters = take(card).await?;
+        let letters = hand_over(state, card).await?;
         if !letters.is_empty() { return Ok(letters); }
         if tokio::time::timeout_at(deadline, arrived).await.is_err() { return Ok(Vec::new()); }
     }

@@ -25,7 +25,7 @@ QueACP 是 Que 的 ACP 版本：卡片里的 Agent 通过 ACP（经由 acpx）�
 
 1. **一张卡就是一段对话。** 卡片不换绑 Agent 或目录；会话坏了就归档，再新建一张。
 2. **空会话不恢复。** 还没有任何对话的会话，重连时直接新开（acpx `prepareFreshSession`）；有过对话的会话照常恢复，恢复失败如实报错。
-3. **对话只在 acpx 记录里。** 进行中的回合只在 owner 内存里；Que 或 owner 退出时，没进入 acpx 记录的东西就没有了，从不重放。
+3. **对话只在 acpx 记录里。** 进行中的回合只在 owner 内存里；Que 或 owner 退出时，没进入 acpx 记录的东西就没有了，从不重放。唯一的附加是卡片之间的消息：acpx 不记工具输出，owner 把它们存成附注，挂在 acpx 的回合编号上，加载时放回原处（见 [agent-interaction.md](agent-interaction.md)）。
 4. **消息的来源写在消息里。** 来自其他卡片或 Que 通知的消息带一行固定格式的说明（`runtime/session-history.mjs`），Agent 读得到，记录里也就有，不另存。
 5. **卡片设置归 Que。** 用哪个 Agent、是否允许访问本机，存在卡片上，每次连接时交给 owner。
 6. **卡片状态由 acpx 的活动推导。** 有人要回答的请求 → 等你；有回合在跑 → 工作中；已连接且空闲 → 等你；否则未运行或出错。牌堆和侧栏只看这个。
@@ -52,7 +52,7 @@ Que（Rust）
 管家就是管家工作区（`~/.queacp/butler`）里的一张卡，遵守同样的规则：可以有多个管家会话，旧的归档，按钮打开现有的或新建一张；按钮自己从不启动 Agent。管家的延续靠工作区里的文件（`AGENTS.md` 让 Agent 先读 `ROLE.md`、`USER.md`、`MEMORY.md`、`STATE.md`），不靠某一段会话。
 
 - **不被逐个事件唤醒**：其他卡片的完成、失败只被收集，到设置里的汇总时间（下拉预设，底层为 cron）一次交给管家；汇总后管家卡排进队列。
-- **消息**：卡片之间用 `send_message` 发消息，放进对方的收件箱，只交付一次：对方空闲时成为它的下一轮；正忙时随它下一次 QueACP 工具结果或 `wait_messages` 交给它。回复也是消息，没有自动回传；防循环靠限速和去重。见 [agent-interaction.md](agent-interaction.md)。
+- **消息**：卡片之间用 `send_message` 发消息（一张、几张或全部），放进对方的收件箱，只交付一次：对方空闲时成为它的下一轮；正忙时随它下一次 QueACP 工具结果或 `wait_messages` 交给它。回复也是消息，没有自动回传；防循环靠限速和去重。见 [agent-interaction.md](agent-interaction.md)。
 - **精简读取**：`read_session` 默认只给最近几轮的消息和最终回复摘录。
 
 ## 协议
