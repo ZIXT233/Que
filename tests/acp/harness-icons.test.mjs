@@ -18,3 +18,13 @@ test('every acpx agent in the picker has a name and an icon', async () => {
     assert.ok(harnessName(agent), `${agent}: no name`);
   }
 });
+
+test('no sprite icon paints with a url(#…) the page cannot resolve', async () => {
+  // WebKit resolves url(#…) in an external sprite against the page, so only
+  // symbols whose paint servers ProviderIcon inlines (SPRITE_DEFS) may use one.
+  const sprite = await readFile('public/provider-icons.svg', 'utf8');
+  const icons = await readFile('src/components/ProviderIcon.tsx', 'utf8');
+  const inlined = new Set([...icons.slice(icons.indexOf('const SPRITE_DEFS'), icons.indexOf('export function SpritePaintDefs')).matchAll(/^  (\w+): \(/gm)].map(m => m[1]));
+  for (const [, id, body] of sprite.matchAll(/<symbol id="([^"]+)"(.*?)<\/symbol>/gs))
+    if (body.includes('url(#')) assert.ok(inlined.has(id), `${id} paints with url(#…) but ProviderIcon does not inline its defs`);
+});
