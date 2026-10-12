@@ -1189,7 +1189,7 @@ function CardQueueShellContent() {
           focused={inspected?.id ?? null}
           onFocus={setInspecting}
           renderCard={card => renderCard(card)}
-          nameOf={nameOf}
+          titleOf={titleOf}
           subtitleOf={card => `${displayProject(card)} · ${cardHostLabel(card, workspaceOf(card))}`}
           needsYou={card => !!(card.harness || card.session) && card.phase === "attention" && card.remindAt === undefined}
           toolbar={<><button type="button" onClick={showNew}><Icon name="plus" size={15} />{t("queue.新会话")}</button><button type="button" onClick={openHistory}><Icon name="history" size={15} />{t("queue.历史对话")}</button></>}

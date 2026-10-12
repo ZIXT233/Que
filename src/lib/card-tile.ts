@@ -8,6 +8,8 @@ export type TilePreview = {
   activity?: string;
   /** The end of the latest reply: conclusions come last. */
   text: string;
+  /** What the latest turn answers: the user's words, or another card's message. */
+  ask?: { text: string; sender?: { cardId: string; name: string } };
 };
 
 const tail = (text: string, limit: number) => {
@@ -29,6 +31,7 @@ export function tilePreview(snapshot: SessionSnapshot | undefined, fallback = ""
   return {
     status: decision ? "decision" : running ? "working" : "waiting",
     activity: decision?.request?.toolCall?.title ?? tool?.title,
-    text: tail(reply || (running ? last.text : "") || fallback, limit),
+    text: tail(reply, limit),
+    ...(last.text.trim() && last.source !== "event" ? { ask: { text: tail(last.text, 160), sender: last.sender } } : {}),
   };
 }

@@ -22,11 +22,14 @@ const snapshot = (...turns) => ({ turns });
 test("a tile shows where the conversation stands", () => {
   assert.deepEqual(tilePreview(undefined, "earlier reply"), { status: "idle", text: "earlier reply" });
   const done = tilePreview(snapshot({ id: "a", state: "completed", text: "q", blocks: [{ type: "text_delta", stream: "thought", text: "hidden" }, reply("the answer")] }));
-  assert.deepEqual(done, { status: "waiting", activity: undefined, text: "the answer" });
+  assert.deepEqual(done, { status: "waiting", activity: undefined, text: "the answer", ask: { text: "q", sender: undefined } });
   const working = tilePreview(snapshot({ id: "a", state: "running", text: "q", blocks: [reply("so far"), { type: "tool_call", title: "Read a.ts", status: "in_progress" }, { type: "tool_call", title: "done", status: "completed" }] }));
   assert.equal(working.status, "working");assert.equal(working.activity, "Read a.ts");assert.equal(working.text, "so far");
   const asking = tilePreview(snapshot({ id: "a", state: "running", text: "q", blocks: [{ type: "decision", state: "pending", request: { toolCall: { title: "Edit plan.md" } } }] }));
-  assert.equal(asking.status, "decision");assert.equal(asking.activity, "Edit plan.md");assert.equal(asking.text, "q", "the request it works on, before any reply");
+  assert.equal(asking.status, "decision");assert.equal(asking.activity, "Edit plan.md");assert.equal(asking.text, "");assert.equal(asking.ask.text, "q", "what it works on, before any reply");
+  const peer = tilePreview(snapshot({ id: "a", state: "completed", text: "pull and restart", source: "agent", sender: { cardId: "b", name: "Backend" }, blocks: [reply("done")] }));
+  assert.equal(peer.ask.sender.name, "Backend");
+  assert.equal(tilePreview(snapshot({ id: "a", state: "completed", text: "digest", source: "event", blocks: [reply("ok")] })).ask, undefined, "Que's own requests are not shown as asks");
   const queued = tilePreview(snapshot({ id: "a", state: "completed", text: "q", blocks: [reply("kept")] }, { id: "b", state: "queued", text: "later", blocks: [] }));
   assert.equal(queued.text, "kept", "a queued message is not where it stands yet");
 });

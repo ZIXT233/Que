@@ -2156,16 +2156,26 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 /* The open card is the one being handled: no frame. */
 .cq-canvas-cell[data-open] { border-color:var(--cq-line); box-shadow:none; }
 .cq-canvas .cq-static-card.cq-canvas-card { inset:0; }
-.cq-tile { display:flex; flex-direction:column; gap:calc(8px * var(--cq-canvas-ink)); height:100%; box-sizing:border-box; padding:calc(14px * var(--cq-canvas-ink)) calc(16px * var(--cq-canvas-ink)); color:var(--cq-ink); }
-.cq-tile header { display:flex; align-items:baseline; justify-content:space-between; gap:calc(10px * var(--cq-canvas-ink)); min-width:0; }
-.cq-tile header strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:calc(16px * var(--cq-canvas-ink)); font-weight:650; }
-.cq-tile-status { display:inline-flex; flex:none; align-items:center; gap:calc(5px * var(--cq-canvas-ink)); color:var(--cq-muted); font-size:calc(11px * var(--cq-canvas-ink)); }
-.cq-tile-status .cq-dot { width:calc(6px * var(--cq-canvas-ink)); height:calc(6px * var(--cq-canvas-ink)); }
-.cq-canvas-cell[data-attention] .cq-tile-status { color:var(--cq-accent); font-weight:600; }
-.cq-tile[data-status="decision"] .cq-tile-status { color:#c27a2c; }
-.cq-tile-subtitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--cq-muted); font-size:calc(10.5px * var(--cq-canvas-ink)); }
-.cq-tile-activity { margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--cq-external-blue); font-size:calc(11px * var(--cq-canvas-ink)); }
-.cq-tile-text { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:5; margin:0; overflow:hidden; color:color-mix(in srgb, var(--cq-ink) 82%, transparent); font-size:calc(12px * var(--cq-canvas-ink)); line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+/* A tile is the card's own header, bubbles and composer, laid out at overview
+   size and zoomed to its cell (see TilePoster). Only what differs is here. */
+.cq-tile { display:flex; flex-direction:column; overflow:hidden; background:var(--cq-paper); color:var(--cq-ink); pointer-events:none; }
+/* At tile size the header stacks: title and nickname, then the state. */
+.cq-shell:not(.cq-detached) .cq-tile .cq-card-header:has(.cq-card-heading) { display:block; padding:14px 18px 12px; }
+.cq-tile .cq-card-title-split { gap:10px; }
+.cq-tile .cq-card-title-split > h2 { flex:1 1 auto !important; min-width:0; margin:0; font-size:17px; }
+.cq-tile .cq-card-nickname { display:block; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0; font-size:15px; }
+.cq-tile .cq-card-state { margin-top:6px; }
+.cq-tile .cq-card-state span { margin-left:6px; }
+.cq-tile[data-status="decision"] .cq-card-state { color:#c27a2c; }
+.cq-tile-transcript { display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; }
+.cq-tile-transcript p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.cq-tile-activity { margin:2px 0 10px; color:var(--cq-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cq-tile-composer { margin:6px 14px 12px; }
+.cq-tile-composer span { display:block; padding:10px 16px; color:var(--cq-muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* The open card takes over from its face where the face stood. */
+.cq-canvas .cq-canvas-card { animation:cq-canvas-reveal .16s ease-out; }
+@keyframes cq-canvas-reveal { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .cq-canvas .cq-canvas-card { animation:none; } }
 .cq-canvas-toolbar { position:absolute; z-index:5; top:12px; left:16px; display:flex; gap:8px; }
 .cq-canvas-toolbar button { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border:1px solid var(--cq-line); border-radius:8px; background:var(--cq-paper); color:var(--cq-ink); font:inherit; font-size:12px; cursor:pointer; }
 .cq-canvas-toolbar button:hover { background:var(--cq-surface); }

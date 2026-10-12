@@ -10,18 +10,22 @@ import { useSessionSnapshot } from "@/lib/session-store";
 import { tilePreview } from "@/lib/card-tile";
 import { useI18n } from "@/hooks/useI18n";
 import { Icon } from "./QueueIcon";
+import { MarkdownMessage } from "./MarkdownMessage";
+import { nicknameHue } from "@/lib/card-nickname";
+import "./chat/composer.css";
 
 // The overview leaves room above for the toolbar.
 const PEEK_X = 76, PEEK_Y = 52, GAP = 40, PAD = 28, TOP = 56;
 type Camera = { scale: number; x: number; y: number };
 
-export function CardCanvas({ cards, focused, onFocus, renderCard, nameOf, subtitleOf, needsYou, toolbar }: {
+export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subtitleOf, needsYou, toolbar }: {
   cards: QueueCard[];
   /** The open card, or null for the overview. */
   focused: string | null;
   onFocus: (id: string | null) => void;
   renderCard: (card: QueueCard) => ReactNode;
-  nameOf: (card: QueueCard) => string;
+  /** The card header's title; the nickname shows beside it, as on the card. */
+  titleOf: (card: QueueCard) => string;
   subtitleOf: (card: QueueCard) => string;
   needsYou: (card: QueueCard) => boolean;
   toolbar: ReactNode;
@@ -136,7 +140,7 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, nameOf, subtit
           style={{ ...place(i), width: cell.width, height: cell.height }}
           onClick={() => { if (dragged.current) { dragged.current = false; return; } if (card.id !== focused) onFocus(card.id); }}>
           {open ? <div className="cq-static-card cq-canvas-card">{renderCard(card)}</div>
-            : <TilePoster card={card} name={nameOf(card)} subtitle={subtitleOf(card)} />}
+            : <TilePoster card={card} name={titleOf(card)} subtitle={subtitleOf(card)} ink={1 / overviewScale} width={cell.width} height={cell.height} />}
         </div>;
       })}
     </div>}
@@ -144,23 +148,35 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, nameOf, subtit
   </div>;
 }
 
-/** A card's face on the canvas, lettered to be read at overview scale. */
-function TilePoster({ card, name, subtitle }: { card: QueueCard; name: string; subtitle: string }) {
+/**
+ * A card's face on the canvas. It is drawn with the full card's own classes —
+ * header, bubbles, composer — laid out at the size it shows in the overview and
+ * zoomed to fill its cell, so opening it only adds detail, never changes its look.
+ */
+function TilePoster({ card, name, subtitle, ink, width, height }: { card: QueueCard; name: string; subtitle: string; ink: number; width: number; height: number }) {
   const { t } = useI18n();
   const snapshot = useSessionSnapshot(card.harness ? card.id : "");
-  const preview = tilePreview(snapshot, card.harness?.replyPreview || card.harness?.firstPrompt || "");
+  const preview = tilePreview(snapshot, card.harness?.replyPreview || "");
   const status = !card.harness ? t("tiles.new")
     : card.phase === "working" ? t("tiles.working")
     : preview.status === "decision" ? t("tiles.decision")
     : card.remindAt !== undefined ? t("queue.稍后提醒")
     : t("tiles.waiting");
-  return <article className="cq-tile" data-phase={card.phase} data-status={preview.status}>
-    <header>
-      <strong>{name}</strong>
-      <span className="cq-tile-status">{card.phase === "working" && <i className="cq-dot" />}{status}</span>
-    </header>
-    <small className="cq-tile-subtitle">{subtitle}</small>
-    {preview.activity && <p className="cq-tile-activity">{preview.activity}</p>}
-    {preview.text && <p className="cq-tile-text">{preview.text}</p>}
-  </article>;
+  return <div className="cq-tile" data-status={preview.status} style={{ width: width / ink, height: height / ink, zoom: ink } as CSSProperties}>
+    <div className="cq-card-header">
+      <div className="cq-card-identity"><div className="cq-card-heading"><div className="cq-card-title-split">
+        <h2>{name}</h2>
+        {card.nickname && <span className="cq-card-nickname" style={{ "--cq-nickname-hue": nicknameHue(card.id) } as CSSProperties}>{card.nickname}</span>}
+      </div></div>
+      <div className="cq-card-state"><i className={card.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{status}<span>{subtitle}</span></div></div>
+    </div>
+    <div className="cq-harness-body cq-acp"><div className="cq-acp-transcript cq-tile-transcript">
+      {preview.ask && (preview.ask.sender
+        ? <div className="cq-acp-msg cq-acp-msg--in"><small className="cq-acp-msg-label">来自 {preview.ask.sender.name}</small><p>{preview.ask.text}</p></div>
+        : <div className="cq-acp-user-group"><div className="cq-acp-user"><p>{preview.ask.text}</p></div></div>)}
+      {preview.activity && <div className="cq-acp-activity cq-tile-activity"><span>{preview.activity}</span></div>}
+      {preview.text && <div className="cq-tile-reply"><MarkdownMessage content={preview.text} role="assistant" /></div>}
+    </div></div>
+    <div className="fc-composer cq-tile-composer"><span>{t("composer.placeholder")}</span></div>
+  </div>;
 }
