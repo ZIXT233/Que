@@ -13,7 +13,7 @@ import { MissingReceiptsNotice } from './chat/MissingReceiptsNotice';
 import { Composer } from './chat/Composer';
 import type { Config, Usage as SessionUsage } from './chat/model';
 import { ActivityGroup, groupActivityBlocks } from './chat/ActivityGroup';
-import { useCardName } from '@/lib/card-names';
+import { CardMessage } from './chat/CardMessage';
 import { peekSessionSnapshot } from '@/lib/session-store';
 import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
@@ -38,16 +38,6 @@ const useConversationView = createRetainedConversationView(key => {
     admission: {current: null as Admission | null},
   };
 }, value => value.sending || value.controlBusy || !!value.admission.current);
-// A message between cards. Agents wrote it, so it sits on the Agent's side;
-// its color says which way it went: blue received, green sent. How it was
-// delivered (a turn of its own, a tool result) does not matter.
-type Peer = { cardId: string; name: string };
-function CardMessage({ direction, peers, all, text }: { direction: 'in' | 'out'; peers: Peer[]; all?: boolean; text: string }) {
-  // The name the card has now; the one saved with the message once it is gone.
-  const nameOf = useCardName();
-  const names = all ? '全部' : peers.map(p => (p.cardId && nameOf(p.cardId)) || p.name).join('、');
-  return <div className={`cq-acp-msg cq-acp-msg--${direction}`}><small className="cq-acp-msg-label">{direction === 'in' ? `来自 ${names}` : `发给 ${names}`}</small><MarkdownMessage content={text} role="assistant"/></div>;
-}
 const hasUserContent = (turn: Turn) => !!turn.text?.trim() || !!turn.attachments?.length;
 const missingReceipt = (turn: Turn) => turn.state === 'unknown' && !hasUserContent(turn)
   && !turn.blocks.length && !turn.result?.error;

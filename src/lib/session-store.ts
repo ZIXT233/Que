@@ -4,7 +4,8 @@
 import { useSyncExternalStore } from "react";
 import { foldEvents, type Delta, type StreamEvent } from "./acp-delta";
 
-export type SessionBlock = { type: string; stream?: string; text?: string; title?: string; status?: string; state?: string; kind?: string; request?: any; direction?: string };
+export type SessionBlock = { type: string; stream?: string; text?: string; title?: string; status?: string; state?: string; kind?: string; request?: any;
+  direction?: string; from?: { cardId: string; name: string }; to?: { cardId: string; name: string }[]; all?: boolean };
 export type SessionTurn = { id: string; text: string; state: string; source?: string; withdrawn?: boolean; sender?: { cardId: string; name: string }; blocks: SessionBlock[] };
 export type SessionSnapshot = { ownerEpoch?: string; revision?: number; state?: string; turns: SessionTurn[] };
 

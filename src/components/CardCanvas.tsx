@@ -14,6 +14,7 @@ import { tilePreview } from "@/lib/card-tile";
 import { useI18n } from "@/hooks/useI18n";
 import { Icon } from "./QueueIcon";
 import { MarkdownMessage } from "./MarkdownMessage";
+import { CardMessage } from "./chat/CardMessage";
 import { nicknameHue } from "@/lib/card-nickname";
 
 // The overview leaves room above for the toolbar.
@@ -195,10 +196,12 @@ function TilePoster({ card, name, subtitle, width, height }: { card: QueueCard; 
     </div>
     <div className="cq-harness-body cq-acp"><div className="cq-acp-transcript cq-tile-transcript">
       {preview.ask && (preview.ask.sender
-        ? <div className="cq-acp-msg cq-acp-msg--in"><small className="cq-acp-msg-label">来自 {preview.ask.sender.name}</small><p>{preview.ask.text}</p></div>
+        ? <CardMessage direction="in" peers={[preview.ask.sender]} text={preview.ask.text} />
         : <div className="cq-acp-user-group"><div className="cq-acp-user"><p>{preview.ask.text}</p></div></div>)}
-      {preview.activity && <div className="cq-acp-activity cq-tile-activity"><span>{preview.activity}</span></div>}
-      {preview.text && <div className="cq-tile-reply"><MarkdownMessage content={preview.text} role="assistant" /></div>}
+      {preview.items.map((item, i) => item.kind === "message" ? <CardMessage key={i} direction={item.direction} peers={item.peers} all={item.all} text={item.text} />
+        : item.kind === "activity" ? <div key={i} className="cq-acp-activity cq-tile-activity"><span>{item.title}</span></div>
+        : <div key={i} className="cq-tile-reply"><MarkdownMessage content={item.text} role="assistant" /></div>)}
+      {preview.decision && <div className="cq-acp-activity cq-tile-activity" data-decision><span>{preview.decision}</span></div>}
     </div></div>
   </div>;
 }
