@@ -14,6 +14,8 @@ for (const k of [
   "Node",
   "Event",
   "MouseEvent",
+  "KeyboardEvent",
+  "HTMLImageElement",
   "MutationObserver",
 ])
   globalThis[k] = dom.window[k];
@@ -49,7 +51,7 @@ export async function run(){
  const yang={cardId:'yang',name:'杨金水'},shen={cardId:'shen',name:'沈一石'};
  const snapshot={state:'attention',turns:[
   {id:'from-peer',text:'你那边好了吗？',source:'agent',sender:shen,state:'completed',attachments:[],blocks:[reply('好了')]},
-  {id:'mine',text:'继续',source:'user',state:'completed',attachments:[],blocks:[
+  {id:'mine',text:'继续',source:'user',state:'completed',attachments:[{mediaType:'image/png',data:'iVBORw0KGgo='}],blocks:[
    {type:'tool_call',toolCallId:'t1',title:'send_message',status:'completed'},
    {type:'message',direction:'out',to:[yang,shen],text:'请拉取后重启'},
    {type:'tool_call',toolCallId:'t2',title:'wait_messages',status:'completed'},
@@ -71,6 +73,14 @@ export async function run(){
  assert.match(messages[0].textContent,/发给 杨金水、沈一石/);assert.match(messages[0].textContent,/请拉取后重启/);
  assert.match(messages[1].textContent,/来自 杨金水/);
  assert.match(messages[2].textContent,/发给 全部/,'a broadcast says so');
+ const sent=myTurn.querySelector('.cq-acp-user img');
+ await act(async()=>sent.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+ const viewer=document.body.querySelector('.cq-image-viewer');
+ assert.ok(viewer,'clicking a picture opens it large');assert.equal(viewer.querySelector('img').src,sent.src);
+ await act(async()=>viewer.querySelector('img').dispatchEvent(new MouseEvent('click',{bubbles:true})));
+ assert.ok(viewer.classList.contains('cq-image-viewer--actual'),'clicking again shows the real size');
+ await act(async()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'})));
+ assert.equal(document.body.querySelector('.cq-image-viewer'),null,'Esc closes it');
  await act(async()=>root.unmount());console.log('PASS: card messages sit on the Agent side, blue received and green sent, in turn order');
 }
 `,

@@ -186,3 +186,9 @@
 .fc-agent-picker-options > button:hover { background:var(--cq-surface); }
 
 .cq-acp-sender { display:block; margin-bottom:6px; color:var(--cq-muted); font-size:12px; }
+.cq-acp-user img, .cq-acp-result-image { cursor:zoom-in; }
+.cq-image-viewer { z-index:200; overflow:auto; }
+.cq-image-viewer img { max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; box-shadow:0 24px 80px #1e281540; cursor:zoom-in; background:var(--cq-paper); }
+.cq-image-viewer--actual { align-items:flex-start; justify-content:flex-start; }
+.cq-image-viewer--actual img { max-width:none; max-height:none; margin:auto; cursor:zoom-out; }
+.cq-image-viewer-close { position:fixed; top:16px; right:16px; width:32px; height:32px; border:1px solid var(--cq-line); border-radius:50%; background:var(--cq-paper); color:var(--cq-ink); font-size:18px; line-height:1; cursor:pointer; }

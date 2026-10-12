@@ -13,6 +13,8 @@ import { Composer } from './chat/Composer';
 import type { Config, Usage as SessionUsage } from './chat/model';
 import { ActivityGroup, groupActivityBlocks } from './chat/ActivityGroup';
 import { CardMessage } from './chat/CardMessage';
+import { ImageViewer } from './chat/ImageViewer';
+import { createPortal } from 'react-dom';
 import { peekSessionSnapshot } from '@/lib/session-store';
 import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
@@ -82,6 +84,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const [draft,setDraft] = view.field('draft');
   const [quote,setQuote] = view.field('quote');
   const [attachments,setAttachments] = view.field('attachments');
+  const [viewing, setViewing] = useState<{src:string;alt:string}>();
   const [error,setError] = view.field('error');
   const [connectionError,setConnectionError] = view.field('connectionError');
   const [sending,setSending] = view.field('sending');
@@ -255,9 +258,11 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const loading=!snapshot && !connectionError;
   const disconnected=['not_running','error','unknown'].includes(snapshot?.state || '');
   const missingReceipts=turns.filter(turn=>!turn.withdrawn && missingReceipt(turn)).map(turn=>turn.id);
+  const viewImage=(event:React.MouseEvent)=>{const image=(event.target as Element).closest('.cq-acp-user img, img.cq-acp-result-image');if(image instanceof HTMLImageElement)setViewing({src:image.src,alt:image.alt});};
   return <div className="cq-harness-body cq-acp">
+    {viewing && createPortal(<ImageViewer src={viewing.src} alt={viewing.alt} onClose={()=>setViewing(undefined)}/>, document.body)}
     <div ref={scroll} className="cq-acp-transcript" onScroll={e=>scrolled(e.currentTarget)}
-      onWheel={userScroll} onTouchMove={userScroll} onPointerDown={userScroll} onKeyDown={userScroll}><div ref={content}>
+      onWheel={userScroll} onTouchMove={userScroll} onPointerDown={userScroll} onKeyDown={userScroll} onClick={viewImage}><div ref={content}>
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}
       {turns.filter(turn=>turn.state!=='queued'&&!turn.withdrawn&&!missingReceipt(turn)).map(turn=><article key={turn.id} className="cq-acp-turn">{hasUserContent(turn) && turn.sender && <div className="cq-acp-msg-group"><CardMessage direction="in" peers={[turn.sender]} text={turn.text}/><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}{hasUserContent(turn) && !turn.sender && <div className="cq-acp-user-group"><div className="cq-acp-user">{turn.source === 'event' ? <details><summary>工作会话通知</summary><pre>{turn.text}</pre></details> : <MarkdownMessage content={turn.text} role="user" />}{turn.attachments?.map((a,i)=>a.mediaType.startsWith('image/')?<img key={i} alt="已发送的图片" src={`data:${a.mediaType};base64,${a.data}`}/>:a.mediaType === 'text/plain'?<details key={i}><summary>{a.name || '文本文件'}</summary><pre>{a.data}</pre></details>:<audio key={i} controls src={`data:${a.mediaType};base64,${a.data}`}/>)}</div><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}
