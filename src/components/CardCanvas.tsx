@@ -63,9 +63,18 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
   // The camera is painted straight onto the canvas each frame, not through React.
   const world = useRef<HTMLDivElement>(null);
   const shown = useRef<Camera | null>(null);
-  const paint = (view: Camera) => {
+  // Moving, the canvas is scaled by the compositor (a transform); at rest, by
+  // layout (zoom), so it is drawn natively. WebKitGTK repaints content inside a
+  // scaled layer by stale tiles: blank patches and shifted borders once a
+  // bubble updates. Both scale from the top left, so switching shows nothing.
+  const frame = useRef<HTMLDivElement>(null);
+  const paint = (view: Camera, settled = true) => {
     shown.current = view;
-    if (world.current) world.current.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+    if (frame.current) { frame.current.style.left = `${view.x}px`; frame.current.style.top = `${view.y}px`; }
+    if (world.current) {
+      world.current.style.transform = settled ? "" : `scale(${view.scale})`;
+      world.current.style.zoom = settled ? String(view.scale) : "";
+    }
     viewport.current?.style.setProperty("--cq-zoom", String(1 / view.scale));
   };
   // The open card is mounted once the zoom has arrived; between neighbours,
@@ -82,7 +91,7 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
     const begin = performance.now(), ease = (t: number) => 1 - (1 - t) ** 3;
     let frame = requestAnimationFrame(function tick(now) {
       const t = Math.min(1, (now - begin) / 320), e = ease(t);
-      paint({ scale: from.scale + (to.scale - from.scale) * e, x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e });
+      paint({ scale: from.scale + (to.scale - from.scale) * e, x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e }, t === 1);
       if (t < 1) frame = requestAnimationFrame(tick); else setArrived(focused);
     });
     return () => cancelAnimationFrame(frame);
@@ -148,14 +157,14 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
         const next = nearest(moved.x, moved.y);
         // Settling back onto the same card is a camera move only.
         if (next === focused) paint(camera); else onFocus(next);
-      } else if (focused && (event.target === event.currentTarget || (event.target as HTMLElement).classList.contains("cq-canvas-world"))) onFocus(null);
+      } else if (focused && (event.target === event.currentTarget || (event.target as HTMLElement).matches(".cq-canvas-world, .cq-canvas-frame"))) onFocus(null);
     }}
     onPointerCancel={() => { start.current = null; if (drag.current) paint(camera); drag.current = null; }}>
     <div className="cq-canvas-toolbar">
       {toolbar}
       {focused && <button type="button" onClick={() => onFocus(null)} title={t("tiles.overviewHint")}><Icon name="stack" size={15} />{t("tiles.overview")}</button>}
     </div>
-    {size.width > 0 && <div ref={world} className="cq-canvas-world" style={{ width: layout.width, height: layout.height }}>
+    {size.width > 0 && <div ref={frame} className="cq-canvas-frame"><div ref={world} className="cq-canvas-world" style={{ width: layout.width, height: layout.height }}>
       {cards.map((card, i) => {
         const open = card.id === focused && arrived === card.id;
         return <div key={card.id} className="cq-canvas-cell" data-open={open || undefined} data-attention={needsYou(card) || undefined}
@@ -166,7 +175,7 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
             : <TilePoster card={card} name={titleOf(card)} subtitle={subtitleOf(card)} width={cell.width} height={cell.height} />}
         </div>;
       })}
-    </div>}
+    </div></div>}
     {!cards.length && <div className="cq-empty"><h2>{t("tiles.empty")}</h2></div>}
   </div>;
 }

@@ -2145,8 +2145,11 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
    frame and sets --cq-zoom (1 / scale) so tiles and frames keep their size on screen. */
 .cq-canvas { position:relative; flex:1; min-width:0; height:100%; overflow:hidden; background:var(--cq-surface); }
 .cq-canvas[data-zoomed] { cursor:grab; touch-action:none; }
-.cq-canvas-world { position:absolute; left:0; top:0; transform-origin:0 0; }
-.cq-canvas-cell { position:absolute; overflow:hidden; box-sizing:border-box; border:1px solid var(--cq-line); border-radius:28px; background:var(--cq-paper); cursor:pointer; }
+.cq-canvas-frame { position:absolute; left:0; top:0; }
+.cq-canvas-world { position:relative; transform-origin:0 0; }
+/* Lengths a cell draws are in screen pixels: the canvas is scaled, so a 1px
+   border would be a fraction of a pixel in the overview and drop out in places. */
+.cq-canvas-cell { position:absolute; overflow:hidden; box-sizing:border-box; border:calc(1px * var(--cq-zoom, 1)) solid var(--cq-line); border-radius:calc(16px * var(--cq-zoom, 1)); background:var(--cq-paper); cursor:pointer; }
 .cq-canvas-cell[data-open] { cursor:auto; }
 /* Needing you is a lit frame, never motion. In canvas units: thin at overview, a halo up close. */
 .cq-canvas-cell[data-attention] { border-color:var(--cq-accent); box-shadow:0 0 0 calc(3px * var(--cq-zoom, 1)) color-mix(in srgb, var(--cq-accent) 40%, transparent); }
