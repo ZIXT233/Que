@@ -7,7 +7,7 @@ import { useAudio } from "@/hooks/useAudio";
 import { useTheme } from "@/hooks/useTheme";
 import { useAttentionMode } from "@/hooks/useAttentionMode";
 import { useSubmissionBehavior } from "@/hooks/useSubmissionBehavior";
-import { ATTENTION_MODES } from "@/lib/attention-mode";
+import { ATTENTION_MODES, MODE_TOAST } from "@/lib/attention-mode";
 import { SUBMISSION_BEHAVIORS } from "@/lib/submission-behavior";
 import { announceQueueToast } from "@/lib/queue-toast";
 import { THEME_OPTIONS } from "@/lib/theme";
@@ -104,6 +104,7 @@ function GeneralSettings() {
         <div className="settings-attention-mode-copy">
           <p className="settings-general-description">{t("settings.attentionModeDailyDescription")}</p>
           <p className="settings-general-description">{t("settings.attentionModeFocusDescription")}</p>
+          <p className="settings-general-description">{t("settings.attentionModeTileDescription")}</p>
         </div>
         <div role="radiogroup" aria-label={t("settings.attentionMode")} className="settings-theme-options settings-attention-mode-options">
           {ATTENTION_MODES.map((option) => {
@@ -117,7 +118,7 @@ function GeneralSettings() {
                   checked={selected}
                   onChange={() => {
                     setAttentionMode(option.id);
-                    announceQueueToast(t(option.id === "focus" ? "queue.已切换专注模式说明" : "queue.已切换日常模式说明"));
+                    announceQueueToast(t(MODE_TOAST[option.id]));
                   }}
                   className="sr-only"
                 />

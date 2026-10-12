@@ -61,6 +61,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/acp/{id}", get(acp_read).post(acp_action))
         .route("/api/acp/{id}/events", get(acp_events))
+        .route("/api/acp/events", get(acp_all_events))
         .route("/api/speech/settings", get(crate::speech::settings).put(crate::speech::save_settings))
         .route("/api/speech/transcribe", post(crate::speech::transcribe).layer(DefaultBodyLimit::max(10_100_000)))
         .route("/api/acp-catalog", get(acp_catalog))
@@ -379,6 +380,28 @@ async fn acp_events(State(state): State<AppState>, Path(id): Path<String>) -> Ap
         Err(_) => runtime.cached(&watched).map(|snapshot| Ok(Event::default().event("snapshot").data(snapshot.to_string()))),
     });
     Ok(Sse::new(initial.chain(changes)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+}
+/// Every connected conversation on one stream, for views that show many cards
+/// at once: a browser opens only a few connections per host, so one stream per
+/// card would starve the rest. Each event is `{id, data}` with the same
+/// snapshot/delta data as the per-card stream; a missed delta is repaired the
+/// same way, by reading that card's snapshot.
+fn tagged(event: &'static str, id: &str, data: &str) -> Event {
+    Event::default().event(event).data(format!("{{\"id\":{},\"data\":{data}}}", json!(id)))
+}
+fn all_snapshots(runtime: &crate::acp::AcpRuntime) -> Vec<Result<Event, Infallible>> {
+    runtime.cached_all().into_iter().map(|(id, snapshot)| Ok(tagged("snapshot", &id, &snapshot.to_string()))).collect()
+}
+async fn acp_all_events(State(state): State<AppState>) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    let updates = state.harness.updates();
+    let initial = stream::iter(all_snapshots(&state.harness));
+    let runtime = state.harness.clone();
+    let changes = futures::StreamExt::flat_map(BroadcastStream::new(updates), move |item| stream::iter(match item {
+        Ok(update) => vec![Ok(tagged(update.event, &update.id, &update.data))],
+        // Updates were missed: the current states replace them.
+        Err(_) => all_snapshots(&runtime),
+    }));
+    Sse::new(initial.chain(changes)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }
 async fn acp_action(State(state): State<AppState>, Path(id): Path<String>, Json(mut body): Json<Value>) -> AppResult<Json<Value>> {
     let queue = state.queue.read_snapshot()?;

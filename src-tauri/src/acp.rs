@@ -95,6 +95,7 @@ impl AcpRuntime {
     /// Every change to any cached session, in order. A lagged receiver must resend a snapshot.
     pub fn updates(&self) -> broadcast::Receiver<AcpUpdate> { self.updates.subscribe() }
     pub fn cached(&self, id: &str) -> Option<Value> { self.snapshots.lock().get(id).cloned() }
+    pub fn cached_all(&self) -> Vec<(String, Value)> { self.snapshots.lock().iter().map(|(id, s)| (id.clone(), s.clone())).collect() }
     pub(crate) fn remote_requests(&self) -> mpsc::Receiver<RemoteMcpRequest> {
         let (sender, receiver) = mpsc::channel(128);
         *self.remote_mcp.lock() = Some(sender);

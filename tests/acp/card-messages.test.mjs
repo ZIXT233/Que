@@ -5,7 +5,16 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,existsSync} from
 import readline from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
+import {build} from 'esbuild';
+import {pathToFileURL} from 'node:url';
 const binary=process.env.QUEACP_HEADLESS_TEST_BINARY;
+// The UI's own folding, bundled from TypeScript.
+const {foldEvents}=await (async()=>{
+  const dir=mkdtempSync(path.join(os.tmpdir(),'queacp-fold-'));
+  try{const out=path.join(dir,'fold.mjs');const result=await build({entryPoints:['src/lib/acp-delta.ts'],bundle:true,format:'esm',platform:'node',write:false});
+    writeFileSync(out,result.outputFiles[0].text);return await import(pathToFileURL(out).href);}
+  finally{rmSync(dir,{recursive:true,force:true});}
+})();
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 test('cards talk over channels the user opens; both sides see the messages, also after a restart', {skip:!binary, timeout:120000}, async()=>{
@@ -31,6 +40,15 @@ test('cards talk over channels the user opens; both sides see the messages, also
     };
     const sessions={};
     for(const [id,cwd] of [[butler,home],[shen,work],[yang,work],[zhou,work]]) sessions[id]=await request('/api/acp/'+id,{action:'ensure',agent:'fixture',cwd});
+    // One stream for every card, as the tile canvas reads it.
+    const all=[],stream=new AbortController();
+    void (async()=>{try{
+      const response=await fetch(base+'/api/acp/events',{signal:stream.signal});
+      const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
+      for(;;){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});
+        let end;while((end=buffer.indexOf('\n\n'))>=0){const frame=buffer.slice(0,end);buffer=buffer.slice(end+2);
+          const event=frame.match(/^event: (.*)$/m)?.[1],data=frame.match(/^data: (.*)$/m)?.[1];if(event&&data)all.push({event,...JSON.parse(data)});}}
+    }catch{}})();
     const {token}=JSON.parse(readFileSync(path.join(data,'mcp','endpoint.json'),'utf8'));
     const as=id=>({authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':id,'x-queacp-source-epoch':sessions[id].connectionId});
     const tool=(from,body)=>request('/api/mcp/tools',body,as(from));
@@ -128,6 +146,12 @@ test('cards talk over channels the user opens; both sides see the messages, also
     assert.deepEqual(await request('/api/butler/digest',{}),{sent:true});
     const digest=await until(async()=>(await turns(butler)).find(t=>t.text.includes('定时汇总请求')),'digest delivered');
     assert.match(digest.text,/「杨金水」（Distro）/);assert.match(digest.text.split('「杨金水」')[1].split('\n- ')[0],/自上次汇总：完成 2 轮/);
+
+    // The shared stream carries every card, tagged, and folds to the same state.
+    assert.ok(all.some(e=>e.event==='snapshot'&&e.id===shen)&&all.some(e=>e.event==='delta'&&e.id===yang));
+    const folded=foldEvents(undefined,all.filter(e=>e.id===yang).map(e=>({event:e.event,data:e.data})));
+    assert.equal(folded.gap,false);assert.deepEqual(folded.snapshot.turns.map(t=>t.id),(await turns(yang)).map(t=>t.id));
+    stream.abort();
 
     // Restart: the record does not keep tool output, the notes put the messages back.
     const ownerPid=Number(readFileSync(path.join(data,'acp','owner.pid'),'utf8'));

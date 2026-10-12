@@ -13,6 +13,7 @@ Agent ──事件──▶ owner ──snapshot / delta──▶ Que ──SSE�
 - owner → Que：stdio（本机）或 SSH 转发到 tmux 里的 owner（远程）上的按行 JSON。
 - Que → 界面：`GET /api/acp/{id}/events`（SSE）。订阅时 Que 先向 owner 取一份当前快照发出，之后转发该卡的所有事件。
 - `GET /api/acp/{id}`：取一份完整快照，界面在序号对不上时使用。
+- `GET /api/acp/events`：所有已连接卡片合在一条 SSE 里，每个事件是 `{id, data}`，`data` 与单卡流相同。连上时先发每张卡缓存的快照；Que 丢了更新就把缓存快照全部重发。同时显示很多卡的视图（平铺模式）用它，因为浏览器对同一地址只开少数几条连接，一张卡一条流会把其他连接挤掉。界面按卡片用同一个 `foldEvents` 合并（`src/lib/session-store.ts`）。
 
 ## 事件
 

@@ -25,7 +25,8 @@
     "default": "daily",
     "enum": [
       "daily",
-      "focus"
+      "focus",
+      "tile"
     ]
   },
   "submissionBehavior": {
