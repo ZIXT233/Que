@@ -2156,7 +2156,7 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 /* The open card is the one being handled: no frame. */
 .cq-canvas-cell[data-open] { border-color:var(--cq-line); box-shadow:none; }
 .cq-canvas .cq-static-card.cq-canvas-card { inset:0; }
-/* A tile is the card's own header, bubbles and composer, laid out at overview
+/* A tile is the card's own header and bubbles, laid out at overview
    size and zoomed to its cell (see TilePoster). Only what differs is here. */
 .cq-tile { display:flex; flex-direction:column; overflow:hidden; background:var(--cq-paper); color:var(--cq-ink); pointer-events:none; }
 /* At tile size the header stacks: title and nickname, then the state. */
@@ -2170,8 +2170,6 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-tile-transcript { display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; }
 .cq-tile-transcript p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .cq-tile-activity { margin:2px 0 10px; color:var(--cq-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cq-tile-composer { margin:6px 14px 12px; }
-.cq-tile-composer span { display:block; padding:10px 16px; color:var(--cq-muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 /* The open card takes over from its face where the face stood. */
 .cq-canvas .cq-canvas-card { animation:cq-canvas-reveal .16s ease-out; }
 @keyframes cq-canvas-reveal { from { opacity:0; } to { opacity:1; } }

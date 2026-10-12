@@ -12,7 +12,6 @@ import { useI18n } from "@/hooks/useI18n";
 import { Icon } from "./QueueIcon";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { nicknameHue } from "@/lib/card-nickname";
-import "./chat/composer.css";
 
 // The overview leaves room above for the toolbar.
 const PEEK_X = 76, PEEK_Y = 52, GAP = 40, PAD = 28, TOP = 56;
@@ -150,7 +149,7 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
 
 /**
  * A card's face on the canvas. It is drawn with the full card's own classes —
- * header, bubbles, composer — laid out at the size it shows in the overview and
+ * header and bubbles — laid out at the size it shows in the overview and
  * zoomed to fill its cell, so opening it only adds detail, never changes its look.
  */
 function TilePoster({ card, name, subtitle, ink, width, height }: { card: QueueCard; name: string; subtitle: string; ink: number; width: number; height: number }) {
@@ -177,6 +176,5 @@ function TilePoster({ card, name, subtitle, ink, width, height }: { card: QueueC
       {preview.activity && <div className="cq-acp-activity cq-tile-activity"><span>{preview.activity}</span></div>}
       {preview.text && <div className="cq-tile-reply"><MarkdownMessage content={preview.text} role="assistant" /></div>}
     </div></div>
-    <div className="fc-composer cq-tile-composer"><span>{t("composer.placeholder")}</span></div>
   </div>;
 }
