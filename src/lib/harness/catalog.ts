@@ -56,11 +56,33 @@ let extensionCatalog: HarnessCatalogEntry[] = [];
 export function setExtensionCatalog(entries: HarnessCatalogEntry[]) {
   extensionCatalog = entries;
 }
+/** acpx registry agents that the built-in catalog does not describe: display name and icon. */
+const ACP_AGENTS: Record<string, [name: string, iconId: string]> = {
+  gemini: ["Gemini CLI", "google"],
+  openclaw: ["OpenClaw", "openclaw"],
+  copilot: ["GitHub Copilot", "github-copilot"],
+  droid: ["Factory Droid", "factory"],
+  "fast-agent": ["fast-agent", "fastagent"],
+  fx: ["fx", "fx"],
+  "grok-build": ["Grok Build", "grok"],
+  iflow: ["iFlow CLI", "iflow"],
+  junie: ["Junie", "junie"],
+  kilocode: ["Kilo Code", "kilocode"],
+  kimi: ["Kimi CLI", "kimi-coding"],
+  kiro: ["Kiro", "kiro"],
+  mcode: ["MiniMax Code", "minimax"],
+  mux: ["Mux", "mux"],
+  pool: ["Poolside", "poolside"],
+  qoder: ["Qoder CLI", "qoder"],
+  qwen: ["Qwen Code", "qwen"],
+  trae: ["TRAE CLI", "trae"],
+  zeroclaw: ["ZeroClaw", "zeroclaw"],
+};
 const harnessMeta = (id: HarnessId | string) => [...harnessCatalog, ...extensionCatalog].find(item => item.id === id);
 
 export const harnessPicker = harnessCatalog.filter(item => !item.hidden);
 /** Accepts any id, so an external notice can name a CLI that is not in the picker. */
-export const harnessName = (id: HarnessId | string) => harnessMeta(id)?.name ?? id;
+export const harnessName = (id: HarnessId | string) => harnessMeta(id)?.name ?? ACP_AGENTS[id]?.[0] ?? id;
 export const isExtensionHarness = (id: HarnessId | string) => extensionCatalog.some(item => item.id === id);
 
 /**
@@ -83,8 +105,8 @@ export const externalHarnesses: ExternalHarnessEntry[] = EXTERNAL_ORDER.map(id =
   return { id, name: id === "pi" ? "Pi / OMP" : meta.name, vendor: meta.vendor!, iconId: meta.iconId!, forms: meta.forms! };
 });
 
-const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "claudecode", gemini: "google" };
-export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? harnessMeta(id)?.iconId ?? id;
+const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "claudecode" };
+export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? harnessMeta(id)?.iconId ?? ACP_AGENTS[id]?.[1] ?? id;
 export const extensionIconDataUrl = (id: string) => harnessMeta(id)?.iconDataUrl;
 
 /** Terminal options for one harness, with the component defaults filled in. */

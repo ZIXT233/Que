@@ -49,6 +49,19 @@ const PROVIDER_ICONS: Record<string, { symbol: string; color: boolean }> = {
   antigravity: { symbol: "antigravity", color: true },
   pi: { symbol: "pi", color: true },
   devin: { symbol: "devin", color: false },
+  openclaw: { symbol: "openclaw", color: true },
+  factory: { symbol: "factory", color: false },
+  fastagent: { symbol: "fastagent", color: true },
+  fx: { symbol: "fx", color: true },
+  iflow: { symbol: "iflow", color: true },
+  junie: { symbol: "junie", color: true },
+  kilocode: { symbol: "kilocode", color: false },
+  kiro: { symbol: "kiro", color: true },
+  mux: { symbol: "mux", color: false },
+  poolside: { symbol: "poolside", color: false },
+  qoder: { symbol: "qoder", color: false },
+  trae: { symbol: "trae", color: true },
+  zeroclaw: { symbol: "zeroclaw", color: true },
 };
 
 /**
