@@ -2165,7 +2165,11 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-tile .cq-card-state { margin-top:6px; }
 .cq-tile .cq-card-state span { margin-left:6px; }
 .cq-tile[data-status="decision"] .cq-card-state { color:#c27a2c; }
-.cq-tile-transcript { display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; }
+/* The face is not interactive, except its summary, which scrolls. Short
+   content sits at the bottom, as a conversation does. */
+.cq-tile-transcript { display:flex; flex-direction:column; overflow-y:auto; overscroll-behavior:contain; pointer-events:auto; }
+.cq-tile-transcript > :first-child { margin-top:auto; }
+.cq-tile-transcript a { pointer-events:none; }
 .cq-tile-transcript p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .cq-tile-activity[data-decision] { color:#c27a2c; }
 .cq-tile-activity { margin:2px 0 10px; color:var(--cq-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

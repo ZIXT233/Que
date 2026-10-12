@@ -179,7 +179,14 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
 function TilePoster({ card, name, subtitle, width, height }: { card: QueueCard; name: string; subtitle: string; width: number; height: number }) {
   const { t } = useI18n();
   const snapshot = useSessionSnapshot(card.harness ? card.id : "");
-  const preview = tilePreview(snapshot, card.harness?.replyPreview || "");
+  // More than fits: the summary scrolls, and keeps to its end unless scrolled up.
+  const preview = tilePreview(snapshot, card.harness?.replyPreview || "", 1200, 12);
+  const summary = useRef<HTMLDivElement>(null);
+  const reading = useRef(false);
+  useLayoutEffect(() => {
+    const box = summary.current;
+    if (box && !reading.current) box.scrollTop = box.scrollHeight;
+  });
   const status = !card.harness ? t("tiles.new")
     : card.phase === "working" ? t("tiles.working")
     : preview.status === "decision" ? t("tiles.decision")
@@ -194,7 +201,8 @@ function TilePoster({ card, name, subtitle, width, height }: { card: QueueCard; 
       </div></div>
       <div className="cq-card-state"><i className={card.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{status}<span>{subtitle}</span></div></div>
     </div>
-    <div className="cq-harness-body cq-acp"><div className="cq-acp-transcript cq-tile-transcript">
+    <div className="cq-harness-body cq-acp"><div ref={summary} className="cq-acp-transcript cq-tile-transcript"
+      onScroll={event => { const box = event.currentTarget; reading.current = box.scrollHeight - box.scrollTop - box.clientHeight > 8; }}>
       {preview.ask && (preview.ask.sender
         ? <CardMessage direction="in" peers={[preview.ask.sender]} text={preview.ask.text} />
         : <div className="cq-acp-user-group"><div className="cq-acp-user"><p>{preview.ask.text}</p></div></div>)}
