@@ -207,9 +207,12 @@ function TilePoster({ card, name, subtitle, width, height }: { card: QueueCard; 
         ? <CardMessage direction="in" peers={[preview.ask.sender]} text={preview.ask.text} />
         : <div className="cq-acp-user-group"><div className="cq-acp-user"><p>{preview.ask.text}</p></div></div>)}
       {preview.items.map((item, i) => item.kind === "message" ? <CardMessage key={i} direction={item.direction} peers={item.peers} all={item.all} text={item.text} />
-        : item.kind === "activity" ? <div key={i} className="cq-acp-activity cq-tile-activity"><span>{item.title}</span></div>
         : <div key={i} className="cq-tile-reply"><MarkdownMessage content={item.text} role="assistant" /></div>)}
-      {preview.decision && <div className="cq-acp-activity cq-tile-activity" data-decision><span>{preview.decision}</span></div>}
-    </div></div>
+    </div>
+      {preview.live && <div className="cq-tile-live" data-kind={preview.live.kind} role="status">
+        <span className="cq-tile-live-label">{t(preview.live.kind === "thought" ? "tiles.thinking" : preview.live.kind === "tool" ? "tiles.tool" : "tiles.decision")}</span>
+        <span className="cq-tile-live-text">{preview.live.text}</span>
+      </div>}
+    </div>
   </div>;
 }

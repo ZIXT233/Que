@@ -476,6 +476,8 @@ export const zhTWLocale: LocalePlugin = {
     "tiles.overviewHint": "回到總覽（Esc）",
     "tiles.new": "新會話",
     "tiles.working": "工作中",
+    "tiles.thinking": "思考中",
+    "tiles.tool": "工具",
     "tiles.waiting": "等你回覆",
     "tiles.decision": "等你確認",
     "tiles.empty": "還沒有卡片",

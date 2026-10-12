@@ -25,9 +25,14 @@ test("a tile shows where the conversation stands", () => {
   assert.deepEqual(done, { status: "waiting", ask: { text: "q", sender: undefined }, items: [{ kind: "text", text: "the answer" }] });
   const working = tilePreview(snapshot({ id: "a", state: "running", text: "q", blocks: [reply("so far"), { type: "tool_call", title: "Read a.ts", status: "in_progress" }, { type: "tool_call", title: "done", status: "completed" }] }));
   assert.equal(working.status, "working");
-  assert.deepEqual(working.items, [{ kind: "text", text: "so far" }, { kind: "activity", title: "Read a.ts" }]);
+  assert.deepEqual(working.items, [{ kind: "text", text: "so far" }]);
+  assert.deepEqual(working.live, { kind: "tool", text: "Read a.ts" }, "the running tool is the live line");
+  const thinking = tilePreview(snapshot({ id: "a", state: "running", text: "q", blocks: [reply("so far"), { type: "text_delta", stream: "thought", text: "Look at the tests.\nThen fix the parser" }] }));
+  assert.deepEqual(thinking.live, { kind: "thought", text: "Then fix the parser" }, "the end of its thinking");
+  assert.deepEqual(thinking.items, [{ kind: "text", text: "so far" }], "thoughts stay out of the summary");
+  assert.equal(done.live, undefined, "a finished turn has no live line");
   const asking = tilePreview(snapshot({ id: "a", state: "running", text: "q", blocks: [{ type: "decision", state: "pending", request: { toolCall: { title: "Edit plan.md" } } }] }));
-  assert.equal(asking.status, "decision");assert.equal(asking.decision, "Edit plan.md");assert.equal(asking.ask.text, "q");
+  assert.equal(asking.status, "decision");assert.deepEqual(asking.live, { kind: "decision", text: "Edit plan.md" });assert.equal(asking.ask.text, "q");
   const peer = tilePreview(snapshot({ id: "a", state: "completed", text: "pull and restart", source: "agent", sender: { cardId: "b", name: "Backend" }, blocks: [reply("done")] }));
   assert.equal(peer.ask.sender.name, "Backend");
   assert.equal(tilePreview(snapshot({ id: "a", state: "completed", text: "digest", source: "event", blocks: [reply("ok")] })).ask, undefined, "Que's own requests are not shown as asks");

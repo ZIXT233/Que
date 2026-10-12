@@ -513,6 +513,8 @@ export const enLocale: LocalePlugin = {
     "tiles.overviewHint": "Back to the overview (Esc)",
     "tiles.new": "New session",
     "tiles.working": "Working",
+    "tiles.thinking": "Thinking",
+    "tiles.tool": "Tool",
     "tiles.waiting": "Waiting for you",
     "tiles.decision": "Needs your approval",
     "tiles.empty": "No cards yet",
