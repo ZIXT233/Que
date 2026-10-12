@@ -186,14 +186,3 @@
 .fc-agent-picker-options > button:hover { background:var(--cq-surface); }
 
 .cq-acp-sender { display:block; margin-bottom:6px; color:var(--cq-muted); font-size:12px; }
-/* "Where was I?" strip at the top of a returning card. */
-.cq-acp-recap { flex:none; margin:8px 22px 0; border:1px solid var(--cq-line); border-radius:9px; background:var(--cq-surface); font-size:12px; color:var(--cq-muted); }
-.cq-acp-recap > summary { display:flex; align-items:baseline; gap:8px; padding:6px 12px; cursor:pointer; list-style:none; min-width:0; }
-.cq-acp-recap > summary::-webkit-details-marker { display:none; }
-.cq-acp-recap-label { flex:none; font-weight:600; color:var(--cq-ink); }
-.cq-acp-recap-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--cq-ink); }
-.cq-acp-recap-meta { flex:none; white-space:nowrap; }
-.cq-acp-recap dl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; padding:2px 12px 10px; }
-.cq-acp-recap dt { color:var(--cq-muted); white-space:nowrap; }
-.cq-acp-recap dd { margin:0; color:var(--cq-ink); overflow-wrap:anywhere; white-space:pre-wrap; }
-@media (max-width: 520px) { .cq-acp-recap-meta { display:none; } }

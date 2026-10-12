@@ -1,4 +1,3 @@
-import { CardRecap } from "./chat/CardRecap";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { PermissionCard } from './chat/PermissionCard';
@@ -257,7 +256,6 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const disconnected=['not_running','error','unknown'].includes(snapshot?.state || '');
   const missingReceipts=turns.filter(turn=>!turn.withdrawn && missingReceipt(turn)).map(turn=>turn.id);
   return <div className="cq-harness-body cq-acp">
-    <CardRecap turns={turns}/>
     <div ref={scroll} className="cq-acp-transcript" onScroll={e=>scrolled(e.currentTarget)}
       onWheel={userScroll} onTouchMove={userScroll} onPointerDown={userScroll} onKeyDown={userScroll}><div ref={content}>
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
