@@ -2141,18 +2141,16 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-channel-request .cq-confirm-actions > .cq-primary { background:var(--cq-accent); border-color:var(--cq-accent); color:var(--cq-paper); }
 .cq-channel-request .cq-confirm-actions > .cq-primary:hover { background:var(--cq-accent-hover); border-color:var(--cq-accent-hover); }
 
-/* Tile mode: one canvas, scaled as a whole. Lengths inside a tile are in canvas
-   units; --cq-canvas-ink (1 / overview scale) letters tiles to read at overview. */
+/* Tile mode: one canvas, scaled as a whole; CardCanvas paints the camera every
+   frame and sets --cq-zoom (1 / scale) so tiles and frames keep their size on screen. */
 .cq-canvas { position:relative; flex:1; min-width:0; height:100%; overflow:hidden; background:var(--cq-surface); }
 .cq-canvas[data-zoomed] { cursor:grab; touch-action:none; }
-.cq-canvas-world { position:absolute; left:0; top:0; transform-origin:0 0; transition:transform 320ms cubic-bezier(.2,.7,.2,1); }
-.cq-canvas-world[data-dragging] { transition:none; }
-@media (prefers-reduced-motion: reduce) { .cq-canvas-world { transition:none; } }
+.cq-canvas-world { position:absolute; left:0; top:0; transform-origin:0 0; }
 .cq-canvas-cell { position:absolute; overflow:hidden; box-sizing:border-box; border:1px solid var(--cq-line); border-radius:28px; background:var(--cq-paper); cursor:pointer; }
 .cq-canvas-cell[data-open] { cursor:auto; }
 /* Needing you is a lit frame, never motion. In canvas units: thin at overview, a halo up close. */
-.cq-canvas-cell[data-attention] { border-color:var(--cq-accent); box-shadow:0 0 0 calc(3px * var(--cq-canvas-ink)) color-mix(in srgb, var(--cq-accent) 40%, transparent); }
-.cq-canvas-cell[data-urgent] { border-color:#c24b3f; box-shadow:0 0 0 calc(3px * var(--cq-canvas-ink)) color-mix(in srgb, #c24b3f 45%, transparent); }
+.cq-canvas-cell[data-attention] { border-color:var(--cq-accent); box-shadow:0 0 0 calc(3px * var(--cq-zoom, 1)) color-mix(in srgb, var(--cq-accent) 40%, transparent); }
+.cq-canvas-cell[data-urgent] { border-color:#c24b3f; box-shadow:0 0 0 calc(3px * var(--cq-zoom, 1)) color-mix(in srgb, #c24b3f 45%, transparent); }
 /* The open card is the one being handled: no frame. */
 .cq-canvas-cell[data-open] { border-color:var(--cq-line); box-shadow:none; }
 .cq-canvas .cq-static-card.cq-canvas-card { inset:0; }
@@ -2170,10 +2168,6 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-tile-transcript { display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; }
 .cq-tile-transcript p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .cq-tile-activity { margin:2px 0 10px; color:var(--cq-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* The open card takes over from its face where the face stood. */
-.cq-canvas .cq-canvas-card { animation:cq-canvas-reveal .16s ease-out; }
-@keyframes cq-canvas-reveal { from { opacity:0; } to { opacity:1; } }
-@media (prefers-reduced-motion: reduce) { .cq-canvas .cq-canvas-card { animation:none; } }
 .cq-canvas-toolbar { position:absolute; z-index:5; top:12px; left:16px; display:flex; gap:8px; }
 .cq-canvas-toolbar button { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border:1px solid var(--cq-line); border-radius:8px; background:var(--cq-paper); color:var(--cq-ink); font:inherit; font-size:12px; cursor:pointer; }
 .cq-canvas-toolbar button:hover { background:var(--cq-surface); }

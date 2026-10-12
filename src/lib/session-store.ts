@@ -55,6 +55,9 @@ function subscribe(id: string, listener: () => void) {
   };
 }
 
+/** What the shared stream already knows of a card, without subscribing. */
+export const peekSessionSnapshot = (id: string) => snapshots.get(id);
+
 /** The live conversation of a connected card; undefined until it is connected, or for "". */
 export function useSessionSnapshot(id: string): SessionSnapshot | undefined {
   return useSyncExternalStore(listener => subscribe(id, listener), () => snapshots.get(id), () => undefined);

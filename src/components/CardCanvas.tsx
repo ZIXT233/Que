@@ -4,6 +4,9 @@
 // Opening a card zooms the whole canvas in, so its neighbours stay in place
 // around it, edges in view; dragging the canvas moves to them. Only large things
 // are ever scaled down, so the open card is drawn at its own size, sharp.
+// Every frame, faces are laid out at the size they have on screen (--cq-zoom is
+// 1 / scale): text keeps its size while the canvas zooms, and close up a face
+// is laid out like its card. Moving to a neighbour mounts that card at once.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { QueueCard } from "@/lib/card-queue";
 import { useSessionSnapshot } from "@/lib/session-store";
@@ -46,28 +49,47 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
   const cell = { width: Math.max(420, size.width - 2 * PEEK_X), height: Math.max(360, size.height - 2 * PEEK_Y) };
   const columns = Math.max(1, Math.ceil(Math.sqrt(cards.length)));
   const rows = Math.max(1, Math.ceil(cards.length / columns));
-  const world = { width: columns * cell.width + (columns - 1) * GAP, height: rows * cell.height + (rows - 1) * GAP };
-  const overviewScale = Math.min(0.5, (size.width - 2 * PAD) / world.width, (size.height - TOP - PAD) / world.height);
+  const layout = { width: columns * cell.width + (columns - 1) * GAP, height: rows * cell.height + (rows - 1) * GAP };
+  const overviewScale = Math.min(0.5, (size.width - 2 * PAD) / layout.width, (size.height - TOP - PAD) / layout.height);
   const place = (index: number) => ({ left: (index % columns) * (cell.width + GAP), top: Math.floor(index / columns) * (cell.height + GAP) });
   const index = cards.findIndex(card => card.id === focused);
   const camera = useMemo<Camera>(() => {
-    if (index < 0) return { scale: overviewScale, x: (size.width - world.width * overviewScale) / 2, y: TOP + (size.height - TOP - PAD - world.height * overviewScale) / 2 };
+    if (index < 0) return { scale: overviewScale, x: (size.width - layout.width * overviewScale) / 2, y: TOP + (size.height - TOP - PAD - layout.height * overviewScale) / 2 };
     const { left, top } = place(index);
     return { scale: 1, x: (size.width - cell.width) / 2 - left, y: (size.height - cell.height) / 2 - top };
-  }, [index, overviewScale, size.width, size.height, world.width, world.height, cell.width, cell.height, columns]);
+  }, [index, overviewScale, size.width, size.height, layout.width, layout.height, cell.width, cell.height, columns]);
 
-  // The open card becomes interactive once the zoom has arrived.
+  // The camera is painted straight onto the canvas each frame, not through React.
+  const world = useRef<HTMLDivElement>(null);
+  const shown = useRef<Camera | null>(null);
+  const paint = (view: Camera) => {
+    shown.current = view;
+    if (world.current) world.current.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+    viewport.current?.style.setProperty("--cq-zoom", String(1 / view.scale));
+  };
+  // The open card is mounted once the zoom has arrived; between neighbours,
+  // which are already close up, at once.
   const [arrived, setArrived] = useState<string | null>(null);
-  useEffect(() => {
-    if (!focused) { setArrived(null); return; }
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { setArrived(focused); return; }
-    const timer = setTimeout(() => setArrived(focused), 340);
-    return () => clearTimeout(timer);
-  }, [focused]);
+  useLayoutEffect(() => {
+    if (!size.width) return;
+    const from = shown.current, to = camera;
+    if (!focused) setArrived(null);
+    else if (from?.scale === 1) setArrived(focused);
+    // Nothing to animate from, motion turned off, or a hidden window (where frames
+    // never run, e.g. a notification opening a card while Que sits in the tray).
+    if (!from || document.visibilityState === "hidden" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) { paint(to); setArrived(focused); return; }
+    const begin = performance.now(), ease = (t: number) => 1 - (1 - t) ** 3;
+    let frame = requestAnimationFrame(function tick(now) {
+      const t = Math.min(1, (now - begin) / 320), e = ease(t);
+      paint({ scale: from.scale + (to.scale - from.scale) * e, x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e });
+      if (t < 1) frame = requestAnimationFrame(tick); else setArrived(focused);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [camera, focused, size.width]);
 
   // Dragging pans the zoomed canvas; letting go settles on the nearest card.
-  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const start = useRef<{ pointer: number; x: number; y: number } | null>(null);
+  const drag = useRef<{ x: number; y: number } | null>(null);
   // A drag ends in a click on whatever is under the pointer; that click is not a choice.
   const dragged = useRef(false);
   const nearest = (x: number, y: number) => {
@@ -101,9 +123,7 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
     return () => window.removeEventListener("keydown", key);
   });
 
-  const shown = drag ? { ...camera, x: camera.x + drag.x, y: camera.y + drag.y } : camera;
   return <div ref={viewport} className="cq-canvas" data-zoomed={focused ? true : undefined}
-    style={{ "--cq-canvas-ink": `${1 / overviewScale}` } as CSSProperties}
     onPointerDown={event => {
       // Pan only from outside the open card: inside it, pointers belong to the card.
       if (!focused || event.button !== 0 || (event.target as HTMLElement).closest(".cq-canvas-cell[data-open]")) return;
@@ -113,25 +133,28 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
       const from = start.current;
       if (!from || from.pointer !== event.pointerId) return;
       const x = event.clientX - from.x, y = event.clientY - from.y;
-      if (!drag && Math.hypot(x, y) < 6) return;
-      if (!drag) event.currentTarget.setPointerCapture(event.pointerId);
-      setDrag({ x, y });
+      if (!drag.current && Math.hypot(x, y) < 6) return;
+      if (!drag.current) event.currentTarget.setPointerCapture(event.pointerId);
+      drag.current = { x, y };
+      paint({ ...camera, x: camera.x + x, y: camera.y + y });
     }}
     onPointerUp={event => {
-      const moved = drag;
+      const moved = drag.current;
       start.current = null;
-      setDrag(null);
+      drag.current = null;
       dragged.current = !!moved;
-      if (moved) onFocus(nearest(moved.x, moved.y));
-      else if (focused && (event.target === event.currentTarget || (event.target as HTMLElement).classList.contains("cq-canvas-world"))) onFocus(null);
+      if (moved) {
+        const next = nearest(moved.x, moved.y);
+        // Settling back onto the same card is a camera move only.
+        if (next === focused) paint(camera); else onFocus(next);
+      } else if (focused && (event.target === event.currentTarget || (event.target as HTMLElement).classList.contains("cq-canvas-world"))) onFocus(null);
     }}
-    onPointerCancel={() => { start.current = null; setDrag(null); }}>
+    onPointerCancel={() => { start.current = null; if (drag.current) paint(camera); drag.current = null; }}>
     <div className="cq-canvas-toolbar">
       {toolbar}
       {focused && <button type="button" onClick={() => onFocus(null)} title={t("tiles.overviewHint")}><Icon name="stack" size={15} />{t("tiles.overview")}</button>}
     </div>
-    {size.width > 0 && <div className="cq-canvas-world" data-dragging={drag ? true : undefined}
-      style={{ width: world.width, height: world.height, transform: `translate(${shown.x}px, ${shown.y}px) scale(${shown.scale})` }}>
+    {size.width > 0 && <div ref={world} className="cq-canvas-world" style={{ width: layout.width, height: layout.height }}>
       {cards.map((card, i) => {
         const open = card.id === focused && arrived === card.id;
         return <div key={card.id} className="cq-canvas-cell" data-open={open || undefined} data-attention={needsYou(card) || undefined}
@@ -139,7 +162,7 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
           style={{ ...place(i), width: cell.width, height: cell.height }}
           onClick={() => { if (dragged.current) { dragged.current = false; return; } if (card.id !== focused) onFocus(card.id); }}>
           {open ? <div className="cq-static-card cq-canvas-card">{renderCard(card)}</div>
-            : <TilePoster card={card} name={titleOf(card)} subtitle={subtitleOf(card)} ink={1 / overviewScale} width={cell.width} height={cell.height} />}
+            : <TilePoster card={card} name={titleOf(card)} subtitle={subtitleOf(card)} width={cell.width} height={cell.height} />}
         </div>;
       })}
     </div>}
@@ -149,10 +172,10 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
 
 /**
  * A card's face on the canvas. It is drawn with the full card's own classes —
- * header and bubbles — laid out at the size it shows in the overview and
- * zoomed to fill its cell, so opening it only adds detail, never changes its look.
+ * header and bubbles — laid out at its size on screen and zoomed to fill its
+ * cell, so it reads at any zoom and, close up, looks like its card.
  */
-function TilePoster({ card, name, subtitle, ink, width, height }: { card: QueueCard; name: string; subtitle: string; ink: number; width: number; height: number }) {
+function TilePoster({ card, name, subtitle, width, height }: { card: QueueCard; name: string; subtitle: string; width: number; height: number }) {
   const { t } = useI18n();
   const snapshot = useSessionSnapshot(card.harness ? card.id : "");
   const preview = tilePreview(snapshot, card.harness?.replyPreview || "");
@@ -161,7 +184,8 @@ function TilePoster({ card, name, subtitle, ink, width, height }: { card: QueueC
     : preview.status === "decision" ? t("tiles.decision")
     : card.remindAt !== undefined ? t("queue.稍后提醒")
     : t("tiles.waiting");
-  return <div className="cq-tile" data-status={preview.status} style={{ width: width / ink, height: height / ink, zoom: ink } as CSSProperties}>
+  return <div className="cq-tile" data-status={preview.status}
+    style={{ width: `calc(${width}px / var(--cq-zoom, 1))`, height: `calc(${height}px / var(--cq-zoom, 1))`, zoom: "var(--cq-zoom, 1)" } as CSSProperties}>
     <div className="cq-card-header">
       <div className="cq-card-identity"><div className="cq-card-heading"><div className="cq-card-title-split">
         <h2>{name}</h2>

@@ -1,5 +1,5 @@
 import { CardRecap } from "./chat/CardRecap";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { PermissionCard } from './chat/PermissionCard';
 import { useI18n } from '@/hooks/useI18n';
@@ -14,6 +14,7 @@ import { Composer } from './chat/Composer';
 import type { Config, Usage as SessionUsage } from './chat/model';
 import { ActivityGroup, groupActivityBlocks } from './chat/ActivityGroup';
 import { useCardName } from '@/lib/card-names';
+import { peekSessionSnapshot } from '@/lib/session-store';
 import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
 
@@ -31,7 +32,7 @@ const useConversationView = createRetainedConversationView(key => {
     quote: sessionStorage.getItem(`queacp:quote:${id}`) || '',
     attachments: [] as Turn['attachments'],
     editingDraft: null as EditingDraft | null,
-    error: '', connectionError: '', sending: false, controlBusy: false, follow: true,
+    error: '', connectionError: '', sending: false, controlBusy: false, follow: true, readingAt: 0,
     mutationActive: {current: false},
     streamHealth: {failures: 0},
     admission: {current: null as Admission | null},
@@ -97,11 +98,19 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const [sending,setSending] = view.field('sending');
   const [controlBusy,setControlBusy] = view.field('controlBusy');
   const [follow,setFollow] = view.field('follow');
+  const [readingAt,setReadingAt] = view.field('readingAt');
   const scroll = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
   const draftNow=useRef({text:draft,quote,attachments});draftNow.current={text:draft,quote,attachments};
   const archived = card.archivedAt !== undefined;
   useEffect(() => { if(quote) sessionStorage.setItem(`queacp:quote:${card.id}`,quote); else sessionStorage.removeItem(`queacp:quote:${card.id}`); },[card.id,quote]);
   useEffect(() => { sessionStorage.setItem(`queacp:draft:${card.id}`, draft); }, [card.id,draft]);
+  // A card shown elsewhere (a tile) already has its conversation in the shared
+  // store: open with it, before the first paint, instead of a loading state.
+  useLayoutEffect(() => {
+    if (snapshot) return;
+    const known = peekSessionSnapshot(card.id);
+    if (known) setSnapshot(known as unknown as Snapshot);
+  }, [card.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // The conversation is a subscription: a snapshot first, then ordered deltas
   // (see runtime/session-wire.mjs). A delta that does not fit means a missed
   // event, repaired by fetching one full snapshot.
@@ -139,19 +148,41 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     connect();
     return()=>{closed=true;clearTimeout(retry);clearTimeout(frame);source?.close();};
   },[active,card.id,setSnapshot,setConnectionError,streamHealth]);
-  useEffect(() => { if(follow && scroll.current) scroll.current.scrollTop=scroll.current.scrollHeight; },[snapshot,follow]);
-  // Following the end means staying there however the size changes: a card that
-  // moves to another place in the queue mounts again, gets its size late, and
-  // its messages finish laying out after the snapshot that brought them.
+  // Where the transcript stands is the user's choice alone: following the end,
+  // or the place they scrolled up to. Only their own scrolling (wheel, touch,
+  // scrollbar, keys) changes it; a scroll caused by layout — a card mounting
+  // again elsewhere, content arriving late, the box resizing — never does.
+  // Following, it stays at the end however the size changes; otherwise it keeps
+  // its place, and a card opened again returns to it.
   const following = useRef(follow); following.current = follow;
+  const userScrolling = useRef(false);
+  const toEnd = useCallback(() => {
+    const box = scroll.current;
+    if (!box || !following.current) return;
+    userScrolling.current = false;
+    box.scrollTop = box.scrollHeight;
+  }, []);
+  useLayoutEffect(toEnd, [snapshot, follow, toEnd]);
+  const restored = useRef(false);
+  useLayoutEffect(() => {
+    if (restored.current || !snapshot || !scroll.current) return;
+    restored.current = true;
+    if (!following.current) { userScrolling.current = false; scroll.current.scrollTop = readingAt; }
+  }, [snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const box = scroll.current, body = content.current;
     if (!box || !body) return;
-    const stick = () => { if (following.current) box.scrollTop = box.scrollHeight; };
-    const observer = new ResizeObserver(stick);
+    const observer = new ResizeObserver(toEnd);
     observer.observe(box); observer.observe(body);
     return () => observer.disconnect();
-  }, []);
+  }, [toEnd]);
+  const userScroll = () => { userScrolling.current = true; };
+  const scrolled = (box: HTMLDivElement) => {
+    // Moved by something else while following: back to the end, at once.
+    if (!userScrolling.current) { toEnd(); return; }
+    setFollow(box.scrollHeight - box.scrollTop - box.clientHeight < 80);
+    setReadingAt(box.scrollTop);
+  };
   const command=async(body:{action:string;[key:string]:unknown})=> {
     if(mutationActive.current)return;
     mutationActive.current=true;setControlBusy(true);
@@ -237,7 +268,8 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const missingReceipts=turns.filter(turn=>!turn.withdrawn && missingReceipt(turn)).map(turn=>turn.id);
   return <div className="cq-harness-body cq-acp">
     <CardRecap turns={turns}/>
-    <div ref={scroll} className="cq-acp-transcript" onScroll={e=>{const n=e.currentTarget;setFollow(n.scrollHeight-n.scrollTop-n.clientHeight<80)}}><div ref={content}>
+    <div ref={scroll} className="cq-acp-transcript" onScroll={e=>scrolled(e.currentTarget)}
+      onWheel={userScroll} onTouchMove={userScroll} onPointerDown={userScroll} onKeyDown={userScroll}><div ref={content}>
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}
       {turns.filter(turn=>turn.state!=='queued'&&!turn.withdrawn&&!missingReceipt(turn)).map(turn=><article key={turn.id} className="cq-acp-turn">{hasUserContent(turn) && turn.sender && <div className="cq-acp-msg-group"><CardMessage direction="in" peers={[turn.sender]} text={turn.text}/><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}{hasUserContent(turn) && !turn.sender && <div className="cq-acp-user-group"><div className="cq-acp-user">{turn.source === 'event' ? <details><summary>工作会话通知</summary><pre>{turn.text}</pre></details> : <MarkdownMessage content={turn.text} role="user" />}{turn.attachments?.map((a,i)=>a.mediaType.startsWith('image/')?<img key={i} alt="已发送的图片" src={`data:${a.mediaType};base64,${a.data}`}/>:a.mediaType === 'text/plain'?<details key={i}><summary>{a.name || '文本文件'}</summary><pre>{a.data}</pre></details>:<audio key={i} controls src={`data:${a.mediaType};base64,${a.data}`}/>)}</div><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}
