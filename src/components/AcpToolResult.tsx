@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { FileDiff } from './chat/FileDiff';
 import { MarkdownMessage, MarkdownLink } from './MarkdownMessage';
 import { useI18n } from '@/hooks/useI18n';
+import { Disclosure } from './chat/Disclosure';
 
 type ToolBlock = { title?: string; status?: string; content?: unknown; rawInput?: unknown; rawOutput?: unknown };
 type Data = Record<string, unknown>;
@@ -10,8 +11,18 @@ const text = (value: unknown) => typeof value === 'string' ? value : '';
 const printable = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 const webLink = (value: unknown) => typeof value === 'string' && /^https?:\/\//i.test(value);
 
-/** Render the ACP tool content envelope, retaining unsupported payloads for inspection. */
-export const AcpToolResult = memo(function AcpToolResult({ block }: { block: ToolBlock }) {
+/** The raw call and its result, for formats the readable view does not cover. */
+export function ToolPayload({ block }: { block: ToolBlock }) {
+  const { t } = useI18n();
+  return <>
+    {block.rawInput !== undefined && <><h4>{t('acp.tool.input')}</h4><pre>{printable(block.rawInput)}</pre></>}
+    {block.rawOutput !== undefined && <><h4>{t('acp.tool.output')}</h4><pre>{printable(block.rawOutput)}</pre></>}
+    {block.content !== undefined && <pre>{printable(block.content)}</pre>}
+  </>;
+}
+
+/** A tool's result, readable, with its raw payload one fold further down. */
+export function ToolResultBody({ block }: { block: ToolBlock }) {
   const { t } = useI18n();
   const content = Array.isArray(block.content) ? block.content : [];
   function render(value: unknown, index: number) {
@@ -31,15 +42,17 @@ export const AcpToolResult = memo(function AcpToolResult({ block }: { block: Too
     return <p key={index}>{t('acp.tool.unsupported')}</p>;
   }
   const hasRaw = block.rawInput !== undefined || block.rawOutput !== undefined || block.content !== undefined;
-  return <details className="cq-acp-activity cq-acp-tool">
-    <summary><span>{block.title || t('acp.tool.title')}</span><small>{['pending','in_progress','completed','failed'].includes(block.status || '') ? t(`acp.tool.${block.status}`) : block.status}</small></summary>
-    <div className="cq-acp-tool-body">{content.map(render)}
-      {!content.length && typeof block.rawOutput === 'string' && <pre>{block.rawOutput}</pre>}
-      {hasRaw && <details className="cq-acp-raw"><summary>{t('acp.tool.details')}</summary>
-        {block.rawInput !== undefined && <><h4>{t('acp.tool.input')}</h4><pre>{printable(block.rawInput)}</pre></>}
-        {block.rawOutput !== undefined && <><h4>{t('acp.tool.output')}</h4><pre>{printable(block.rawOutput)}</pre></>}
-        {block.content !== undefined && <pre>{printable(block.content)}</pre>}
-      </details>}
-    </div>
-  </details>;
+  return <div className="cq-acp-tool-body">{content.map(render)}
+    {!content.length && typeof block.rawOutput === 'string' && <pre>{block.rawOutput}</pre>}
+    {hasRaw && <Disclosure className="cq-acp-raw" summary={t('acp.tool.details')}><ToolPayload block={block}/></Disclosure>}
+  </div>;
+}
+
+/** Render the ACP tool content envelope, retaining unsupported payloads for inspection. */
+export const AcpToolResult = memo(function AcpToolResult({ block }: { block: ToolBlock }) {
+  const { t } = useI18n();
+  return <Disclosure className="cq-acp-activity cq-acp-tool"
+    summary={<><span>{block.title || t('acp.tool.title')}</span><small>{['pending','in_progress','completed','failed'].includes(block.status || '') ? t(`acp.tool.${block.status}`) : block.status}</small></>}>
+    <ToolResultBody block={block}/>
+  </Disclosure>;
 });

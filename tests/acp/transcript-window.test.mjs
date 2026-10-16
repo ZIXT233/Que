@@ -14,6 +14,7 @@ for (const k of [
   "Node",
   "Event",
   "MouseEvent",
+  "HTMLImageElement",
   "MutationObserver",
 ])
   globalThis[k] = dom.window[k];
@@ -49,36 +50,51 @@ import {I18nProvider} from './src/hooks/useI18n';
 import {AcpConversation} from './src/components/AcpConversation';
 export async function run(){
  globalThis.sessionStorage=window.sessionStorage;
- const turn=i=>({id:'t'+i,text:'q'+i,state:'completed',attachments:[],blocks:[{type:'text_delta',stream:'message',text:'reply '+i}]});
+ const turn=i=>({id:'t'+i,text:'q'+i,state:'completed',attachments:[],blocks:[
+  {type:'text_delta',stream:'thought',text:'thinking '+i},{type:'tool_call',toolCallId:'c'+i,title:'read '+i,status:'completed',content:[{type:'content',content:{type:'text',text:'output '+i}}]},
+  {type:'text_delta',stream:'message',text:'reply '+i}]});
  const snapshot={state:'attention',turns:Array.from({length:75},(_,i)=>turn(i))};
  globalThis.fetch=async()=>({ok:true,json:async()=>structuredClone(snapshot)});
  const root=createRoot(document.getElementById('root'));
- const render=key=>act(async()=>root.render(<I18nProvider><AcpConversation key={key} card={{id:'card'}} active={true} onResume={async()=>{}}/></I18nProvider>));
+ const render=(key,active=true)=>act(async()=>root.render(<I18nProvider><AcpConversation key={key} card={{id:'card'}} active={active} onResume={async()=>{}}/></I18nProvider>));
  const push=()=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot));await new Promise(r=>setTimeout(r,30))});
  const box=()=>document.querySelector('.cq-acp-transcript');
- const shown=()=>[...document.querySelectorAll('.cq-acp-turn')].map(a=>a.textContent.match(/q(\\d+)/)[1]*1);
+ const shown=()=>[...document.querySelectorAll('.cq-acp-turn .cq-acp-user')].map(a=>Number(a.textContent.slice(1)));
  const scrollTo=async top=>act(async()=>{const b=box();b.dispatchEvent(new window.WheelEvent('wheel',{bubbles:true}));b.scrollTop=top;b.dispatchEvent(new window.Event('scroll'));});
  await render('a');await push();
- assert.equal(shown().length,30,'a long conversation opens with its last turns');assert.equal(shown()[0],45);
- assert.equal(box().scrollTop,3000,'at its end');
+ assert.equal(shown().length,15,'a long conversation opens with its last turns');assert.equal(shown()[0],60);
+ assert.equal(box().scrollTop,1500,'at its end');
+ // Finished turns fold their steps; the last one stays open.
+ const turns=[...document.querySelectorAll('.cq-acp-turn')];
+ assert.equal(document.querySelectorAll('.cq-acp-steps').length,14,'every finished turn but the last folds its steps');
+ assert.equal(turns.at(-1).querySelector('.cq-acp-steps'),null,'the last turn shows its steps');
+ assert.match(turns[0].querySelector('.cq-acp-steps summary').textContent,/2 步/,'the fold counts each thought and tool');
+ assert.match(turns[0].textContent,/reply 60/,'a folded turn still shows its answer');
+ assert.doesNotMatch(turns[0].textContent,/output 60|thinking 60/,'its steps are not in the page while folded');
+ const steps=turns[0].querySelector('.cq-acp-steps');
+ await act(async()=>{steps.open=true;steps.dispatchEvent(new window.Event('toggle'));});
+ assert.match(turns[0].textContent,/read 60/,'opening the fold shows the steps');
  await scrollTo(1000);
- assert.equal(shown().length,30,'reading in the middle adds nothing');
+ assert.equal(shown().length,15,'reading in the middle adds nothing');
  await scrollTo(200);
- assert.equal(shown().length,60,'near the top, earlier turns are added');assert.equal(shown()[0],15);
- assert.equal(box().scrollTop,3200,'and what was being read stays in place');
+ assert.equal(shown().length,30,'near the top, earlier turns are added');assert.equal(shown()[0],45);
+ assert.equal(box().scrollTop,1700,'and what was being read stays in place');
  snapshot.turns.push(turn(75));await push();
- assert.equal(shown()[0],15,'a new turn does not move the window');assert.equal(shown().length,61);
+ assert.equal(shown()[0],45,'a new turn does not move the window');assert.equal(shown().length,31);
  await render('b');await push();
- assert.equal(shown()[0],15,'opened again, the same turns are shown');assert.equal(box().scrollTop,3200);
+ assert.equal(shown()[0],45,'opened again, the same turns are shown');assert.equal(box().scrollTop,1700);
  await act(async()=>document.querySelector('.cq-acp-earlier').click());
- assert.equal(shown()[0],0,'the button shows the rest');
+ assert.equal(shown()[0],30,'the button shows 15 more');
+ await render('preview',false);
+ assert.deepEqual(shown(),[73,74,75],'a card behind the front one shows its last turns only');
+ assert.equal(document.querySelector('.cq-acp-earlier'),null);
  await act(async()=>root.unmount());
  globalThis.__hidden=true;
  const hidden=createRoot(document.getElementById('root'));
  await act(async()=>hidden.render(<I18nProvider><AcpConversation card={{id:'hidden'}} active={true} onResume={async()=>{}}/></I18nProvider>));await push();
- assert.equal(shown().length,30,'a hidden conversation (no height) does not load its whole history');
+ assert.equal(shown().length,15,'a hidden conversation (no height) does not load its whole history');
  await act(async()=>hidden.unmount());globalThis.__hidden=false;
- console.log('PASS: long conversations render their last turns and grow upward on demand');
+ console.log('PASS: long conversations render their last turns, fold finished steps, and grow upward on demand');
 }
 `,
     loader: "tsx",
