@@ -1,7 +1,9 @@
 "use client";
-// The overview: every card at a glance, in three columns — the queue, the cards
-// at work, and those set aside for later. It is a view of the queue, not a mode:
-// opening a card leaves it and opens the card where it lives in the queue.
+// The overview: every card at a glance, in three sections one below the other —
+// the queue in its order, the cards at work, and those set aside for later —
+// each a grid. Cards move between sections as the queue moves them: a card done
+// working, or back from later, takes its place in the queue. It is a view of the
+// queue, not a mode: opening a card leaves it and opens the card where it lives.
 import { useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
 import type { QueueCard } from "@/lib/card-queue";
 import { useSessionSnapshot } from "@/lib/session-store";
@@ -11,7 +13,7 @@ import { MarkdownMessage } from "./MarkdownMessage";
 import { CardMessage } from "./chat/CardMessage";
 import { nicknameHue } from "@/lib/card-nickname";
 
-type Column = { key: "queue" | "working" | "later"; label: string; cards: QueueCard[] };
+type Section = { key: "queue" | "working" | "later"; label: string; cards: QueueCard[] };
 
 export function CardOverview({ queued, working, later, titleOf, subtitleOf, onOpen, onClose }: {
   queued: QueueCard[];
@@ -28,17 +30,17 @@ export function CardOverview({ queued, working, later, titleOf, subtitleOf, onOp
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [onClose]);
-  const columns: Column[] = [
+  const sections: Section[] = [
     { key: "queue", label: t("overview.queue"), cards: queued },
     { key: "working", label: t("overview.working"), cards: working },
     { key: "later", label: t("overview.later"), cards: later },
   ];
   return <div className="cq-overview">
-    {columns.map(column => <section key={column.key} className="cq-overview-column" data-column={column.key} aria-label={column.label}>
-      <header><span>{column.label}</span><span>{column.cards.length.toString().padStart(2, "0")}</span></header>
-      <div className="cq-overview-cards">
+    {sections.map(section => <section key={section.key} className="cq-overview-section" data-section={section.key} aria-label={section.label}>
+      <header><span>{section.label}</span><span>{section.cards.length.toString().padStart(2, "0")}</span></header>
+      <div className="cq-overview-grid">
         {/* Not a <button>: a face holds the reply's own links and copy buttons. */}
-        {column.cards.map(card => <div key={card.id} role="button" tabIndex={0} className="cq-overview-card" data-column={column.key}
+        {section.cards.map(card => <div key={card.id} role="button" tabIndex={0} className="cq-overview-card" data-section={section.key}
           onClick={() => onOpen(card.id)} onKeyDown={event => { if (event.key === "Enter" && event.target === event.currentTarget) onOpen(card.id); }}>
           <CardFace card={card} name={titleOf(card)} subtitle={subtitleOf(card)} />
         </div>)}

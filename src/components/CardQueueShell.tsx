@@ -1081,7 +1081,7 @@ function CardQueueShellContent() {
       focusedId={focus?.id ?? active?.id}
     >
     <div className="cq-layout" inert={!!inspected && !detachedId}>
-      {!detachedId && <aside className="cq-sidebar">
+      {!detachedId && !overview && <aside className="cq-sidebar">
         <div className="cq-sidebar-brand"><a className="cq-brand" href={QUE_REPO_URL} aria-label="Que GitHub" title="GitHub" onClick={(event) => { event.preventDefault(); void openUrl(QUE_REPO_URL).catch(() => showQueueToast(t("settings.aboutOpenFailed"))); }}><span className="cq-logo"><QueLogo /></span>QueACP</a><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
         <button className="cq-new" onClick={showNew}><Icon name="plus" /> {t("queue.新会话")}</button>
         <button className="cq-history-entry" onClick={openHistory}><Icon name="history" />{t("queue.历史对话")}</button>
