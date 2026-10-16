@@ -190,6 +190,19 @@ pub fn run() {
                         .unwrap_or("off")
                 ),
             );
+            // On a Force Touch trackpad macOS asks WebKit for a Look Up hit test at
+            // every press, the title bar included when dragging the window. WebKit
+            // then searches the page's text a character at a time from that point,
+            // which across long conversations freezes the page for seconds. Que has
+            // no use for Look Up or link previews; turning link previews off also
+            // removes that gesture.
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.with_webview(|webview| unsafe {
+                    let view: &objc2_web_kit::WKWebView = &*webview.inner().cast();
+                    view.setAllowsLinkPreview(false);
+                });
+            }
             let resource_dir = app.path().resource_dir().ok();
             // Prefer the bundled modern ConPTY over the inbox kernel32 build
             // (must happen before the first local pty spawn).

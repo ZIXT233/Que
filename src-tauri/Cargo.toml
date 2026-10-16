@@ -64,6 +64,7 @@ windows-sys = { version = "0.59", features = ["Win32_System_LibraryLoader", "Win
 
 [target.'cfg(target_os = "macos")'.dependencies]
 http = "1"
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }
 tokio-util = { version = "0.7", features = ["io"] }
 
 [profile.release]

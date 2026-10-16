@@ -6,6 +6,15 @@ import { hasUrgentCall } from "@/lib/urgent-call";
 import type { QueueCard } from "@/lib/card-queue";
 import { isDeckCardOffscreenLeft, deckStep, peekDeckIndexAtPoint, projectDeckCard } from "@/lib/card-deck";
 
+/**
+ * The deck's card layers: the stage's own children. Never a selector search of
+ * the deck, which walks every card's conversation, and runs per wheel event and
+ * per frame.
+ */
+const deckLayers = (scroller: HTMLElement | null) =>
+  [...(scroller?.firstElementChild?.firstElementChild?.children ?? [])].filter((layer): layer is HTMLElement => layer.classList.contains("cq-deck-layer"));
+const frontLayer = (scroller: HTMLElement | null) => deckLayers(scroller).find(layer => layer.getAttribute("aria-hidden") === "false");
+
 // Fractional scroll frames only update the layer; conversation trees render on
 // card/focus changes, not on every transform update.
 const DeckContent = memo(function DeckContent({ card, isFront, renderCard }: {
@@ -70,8 +79,8 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     };
     const peekIndexFromPoint = (clientX: number, clientY: number) => {
       const selected = Math.round(element.scrollLeft / stepRef.current);
-      const front = element.querySelector<HTMLElement>('.cq-deck-layer[aria-hidden="false"]');
-      const layers = [...element.querySelectorAll<HTMLElement>('.cq-deck-layer[aria-hidden="true"]')].map((layer) => {
+      const front = frontLayer(element);
+      const layers = deckLayers(element).filter(layer => layer.getAttribute("aria-hidden") === "true").map((layer) => {
         const rect = layer.getBoundingClientRect();
         return { index: Number(layer.dataset.deckIndex), z: Number(layer.style.zIndex) || 0, ...rect };
       });
@@ -118,8 +127,12 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       if (event.ctrlKey || event.metaKey || event.defaultPrevented) return;
       if (!event.deltaX && !event.deltaY) return;
       stopKeyboard();
+      clearTimeout(wheelIdle);
+      wheelIdle = setTimeout(finishWheel, 180);
+      // A horizontal swipe is the browser's own scroll: nothing to look up.
+      if (wheelMode === "native") return;
       const target = event.target instanceof Element ? event.target : null;
-      const front = element.querySelector('.cq-deck-layer[aria-hidden="false"]');
+      const front = frontLayer(element);
       const rect = front?.getBoundingClientRect();
       const outside = rect && (event.clientX < rect.left || event.clientX > rect.right
         || event.clientY < rect.top || event.clientY > rect.bottom);
@@ -129,8 +142,6 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       // A slight diagonal is normal. Ambiguous angles favor native horizontal
       // scrolling; once chosen, the direction stays fixed through this burst.
       wheelMode ??= eligible && Math.abs(event.deltaY) > Math.abs(event.deltaX) * 1.5 ? "vertical" : "native";
-      clearTimeout(wheelIdle);
-      wheelIdle = setTimeout(finishWheel, 180);
       if (wheelMode !== "vertical" || !eligible || !event.cancelable) return;
       event.preventDefault();
       element.classList.add("cq-vertical-wheel");
@@ -156,7 +167,7 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
       const target = event.target instanceof Element ? event.target : null;
       const peekHit = target?.closest(".cq-deck-peek-hit");
       if (!peekHit && target?.closest("button,a,input,textarea,select,summary,[contenteditable],[role=button]")) return;
-      const front = element.querySelector('.cq-deck-layer[aria-hidden="false"]');
+      const front = frontLayer(element);
       const rect = front?.getBoundingClientRect();
       if (!peekHit && rect && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) return;
       stopKeyboard();
@@ -221,7 +232,23 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     surface.addEventListener("pointercancel", endDrag);
     surface.addEventListener("lostpointercapture", endDrag);
     surface.addEventListener("click", onClick, true);
+    // In the deck, text can be selected in the front card only. The cards
+    // around it are inert, and WebKit cannot place a selection in them: it keeps
+    // searching, a character at a time across their conversations, for a place
+    // that can hold one, on every frame while the selection stays (seen on
+    // macOS after a press for Look Up). Such a selection is dropped at once.
+    const onSelection = () => {
+      const selection = document.getSelection();
+      if (!selection?.rangeCount) return;
+      const stray = [selection.anchorNode, selection.focusNode].some(node => {
+        const at = node instanceof Element ? node : node?.parentElement;
+        return !!at && element.contains(at) && !at.closest('.cq-deck-layer[aria-hidden="false"]');
+      });
+      if (stray) selection.removeAllRanges();
+    };
+    document.addEventListener("selectionchange", onSelection);
     return () => {
+      document.removeEventListener("selectionchange", onSelection);
       navigationRef.current = null;
       stopKeyboard();
       element.removeEventListener("scrollend", onScrollEnd);
@@ -286,15 +313,20 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     const front = Math.round(current);
     const travel = Math.sign(current - lastPosition.current);
     const next = travel > 0 ? Math.ceil(current) : travel < 0 ? Math.floor(current) : front;
-    for (const layer of scrollerRef.current?.querySelectorAll<HTMLElement>(".cq-deck-layer") ?? []) {
+    for (const layer of deckLayers(scrollerRef.current)) {
       const index = Number(layer.dataset.deckIndex);
       const { x, scale, distance } = projectDeckCard(index, current, width);
       layer.style.transform = `translate3d(${x}px, 0, 0) scale(${scale})`;
-      layer.style.visibility = isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5 ? "hidden" : "";
-      layer.dataset.clear = String(index === front || index === next);
-      layer.setAttribute("aria-hidden", String(index !== front));
+      // Only what changed is written: a write restyles the layer's whole card,
+      // even when the value is the same, and a long conversation makes that slow.
+      const visibility = isDeckCardOffscreenLeft(x, width, leftBleed) || distance > 5 ? "hidden" : "";
+      if (layer.style.visibility !== visibility) layer.style.visibility = visibility;
+      const clear = String(index === front || index === next);
+      if (layer.dataset.clear !== clear) layer.dataset.clear = clear;
+      const hidden = String(index !== front);
+      if (layer.getAttribute("aria-hidden") !== hidden) layer.setAttribute("aria-hidden", hidden);
       const body = layer.firstElementChild as HTMLElement | null;
-      if (body) body.inert = index !== front;
+      if (body && body.inert !== (index !== front)) body.inert = index !== front;
     }
     lastPosition.current = current;
   };

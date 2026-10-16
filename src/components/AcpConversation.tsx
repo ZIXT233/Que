@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { MarkdownMessage } from './MarkdownMessage';
 import { PermissionCard } from './chat/PermissionCard';
 import { useI18n } from '@/hooks/useI18n';
@@ -69,6 +69,21 @@ function Decision({ block, answer, disabled }: { block: Block; answer: (answer: 
     return <label key={key}>{field.title || key}{field.description && <small>{field.description}</small>}{field.enum ? <select required={required} value={values[key] ?? ''} onChange={e => setValues(v => ({...v,[key]:e.target.value}))}><option value="">请选择</option>{field.enum.map((v: string) => <option key={v}>{v}</option>)}</select> : field.type === 'boolean' ? <input type="checkbox" checked={!!values[key]} onChange={e => setValues(v => ({...v,[key]:e.target.checked}))} /> : <input required={required} type={field.type === 'number' || field.type === 'integer' ? 'number' : 'text'} min={field.minimum} max={field.maximum} minLength={field.minLength} maxLength={field.maxLength} value={values[key] ?? ''} onChange={e => setValues(v => ({...v,[key]:field.type === 'number' || field.type === 'integer' ? Number(e.target.value) : e.target.value}))} />}</label>;
   })}<div><button type="button" disabled={disabled} onClick={() => answer({action:'decline'})}>不提供</button><button type="submit" disabled={disabled}>提交</button></div></form>;
 }
+/**
+ * One turn of the transcript. Turns are structurally shared between snapshots,
+ * so a turn that did not change keeps its object and is not rendered again when
+ * another one streams; a long conversation stays cheap to update.
+ */
+const TurnView = memo(function TurnView({ turn, archived, controlBusy, onQuote, onAnswer }: { turn: Turn; archived: boolean; controlBusy: boolean; onQuote: (text: string) => void; onAnswer: (decisionId: string | undefined, answer: unknown) => void }) {
+  return <article className="cq-acp-turn">{hasUserContent(turn) && turn.sender && <div className="cq-acp-msg-group"><CardMessage direction="in" peers={[turn.sender]} text={turn.text}/><MessageActions text={turn.text} onQuote={archived?undefined:onQuote}/></div>}{hasUserContent(turn) && !turn.sender && <div className="cq-acp-user-group"><div className="cq-acp-user">{turn.source === 'event' ? <details><summary>工作会话通知</summary><pre>{turn.text}</pre></details> : <MarkdownMessage content={turn.text} role="user" />}{turn.attachments?.map((a,i)=>a.mediaType.startsWith('image/')?<img key={i} alt="已发送的图片" src={`data:${a.mediaType};base64,${a.data}`}/>:a.mediaType === 'text/plain'?<details key={i}><summary>{a.name || '文本文件'}</summary><pre>{a.data}</pre></details>:<audio key={i} controls src={`data:${a.mediaType};base64,${a.data}`}/>)}</div><MessageActions text={turn.text} onQuote={archived?undefined:onQuote}/></div>}
+        <div className="cq-acp-response">{groupActivityBlocks(turn.blocks).map(({block:b,activities,index:i})=> activities ? <ActivityGroup key={i} blocks={activities} running={busyTurn(turn)}/> : !b ? null : b.type==='message' ? <CardMessage key={i} direction={b.direction==='out'?'out':'in'} peers={b.direction==='out'?(b.to||[]):b.from?[b.from]:[]} all={b.all} text={b.text || ''}/> : b.type==='text_delta' ? b.stream==='thought'?<details key={i} className="cq-acp-activity"><summary>思考过程</summary><MarkdownMessage content={b.text || ''} role="assistant"/></details>:<MarkdownMessage key={i} content={b.text || ''} role="assistant"/> : b.type==='decision'?<Decision key={b.id} block={b} disabled={controlBusy || archived} answer={answer=>void onAnswer(b.id,answer)}/> : b.entries?<ul key={i} className="cq-acp-plan">{b.entries.map((e,j)=><li key={j} data-state={e.status}>{e.status==='completed'?'✓':e.status==='in_progress'?'◉':'○'} {e.content}</li>)}</ul>:null)}</div>
+        {!busyTurn(turn) && <MessageActions text={turn.blocks.filter(b=>b.type==='text_delta'&&b.stream!=='thought').map(b=>b.text||'').join('\n\n')} onQuote={archived?undefined:onQuote}/>}
+        {turnLabel[turn.state] && <div className="cq-acp-turn-state" role="status">{turn.blocks.some(b=>b.type==='decision'&&b.state==='pending')?'等待你的确认':turnLabel[turn.state]}</div>}
+        {turn.result?.error && <p role="alert" className="cq-acp-error">{turn.result.error.message}</p>}
+        {turn.result?.stopReason && !['end_turn','cancelled'].includes(turn.result.stopReason) && <p className="cq-acp-turn-state">结束原因：{turn.result.stopReason}</p>}
+      </article>;
+});
+
 export function AcpConversation({ card, active, onResume }: {card: QueueCard; active: boolean; onResume: () => Promise<void>}) {
   const {t}=useI18n();
   const viewKey=JSON.stringify([card.id, card.workspaceId, card.cwd, card.harness?.kind]);
@@ -197,7 +212,8 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     if(!box)return;
     if(anchor.current!==null){ box.scrollTop=box.scrollHeight-anchor.current; anchor.current=null; setReadingAt(box.scrollTop); }
     // Too short to scroll up: nothing would ever ask for more.
-    else if(first>0 && box.scrollHeight<=box.clientHeight) setShownFrom(Math.max(0, first-TURN_WINDOW));
+    // A hidden view (no height) is not short: it would load the whole history.
+    else if(first>0 && box.clientHeight>0 && box.scrollHeight<=box.clientHeight) setShownFrom(Math.max(0, first-TURN_WINDOW));
   },[first, shownFrom, snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
   const command=async(body:{action:string;[key:string]:unknown})=> {
     if(mutationActive.current)return;
@@ -276,6 +292,10 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const turns=snapshot?.turns || [], running=turns.some(busyTurn);
   const stopTarget=turns.find(t=>t.state==='running'||t.state==='cancelling') || turns.find(t=>t.state==='queued');
   const quoteMessage=(text:string)=>{setQuote(text);requestAnimationFrame(()=>scroll.current?.parentElement?.querySelector('textarea')?.focus());};
+  // Handed to every turn: stable, so an unchanged turn is not rendered again.
+  const latest=useRef({quoteMessage,command});latest.current={quoteMessage,command};
+  const onQuote=useCallback((text:string)=>latest.current.quoteMessage(text),[]);
+  const onAnswer=useCallback((decisionId:string|undefined,answer:unknown)=>void latest.current.command({action:'answer',decisionId,answer}),[]);
   const options=snapshot?.status?.details?.configOptions || [];
   const commands=snapshot?.commands || snapshot?.status?.availableCommands || [];
   // Transport startup is independent of whether history has already loaded.
@@ -290,13 +310,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}
       {first>0 && <button type="button" className="cq-acp-earlier" onClick={earlier}>显示更早的 {Math.min(first, TURN_WINDOW)} 轮</button>}
-      {shownTurns.slice(first).map(turn=><article key={turn.id} className="cq-acp-turn">{hasUserContent(turn) && turn.sender && <div className="cq-acp-msg-group"><CardMessage direction="in" peers={[turn.sender]} text={turn.text}/><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}{hasUserContent(turn) && !turn.sender && <div className="cq-acp-user-group"><div className="cq-acp-user">{turn.source === 'event' ? <details><summary>工作会话通知</summary><pre>{turn.text}</pre></details> : <MarkdownMessage content={turn.text} role="user" />}{turn.attachments?.map((a,i)=>a.mediaType.startsWith('image/')?<img key={i} alt="已发送的图片" src={`data:${a.mediaType};base64,${a.data}`}/>:a.mediaType === 'text/plain'?<details key={i}><summary>{a.name || '文本文件'}</summary><pre>{a.data}</pre></details>:<audio key={i} controls src={`data:${a.mediaType};base64,${a.data}`}/>)}</div><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}
-        <div className="cq-acp-response">{groupActivityBlocks(turn.blocks).map(({block:b,activities,index:i})=> activities ? <ActivityGroup key={i} blocks={activities} running={busyTurn(turn)}/> : !b ? null : b.type==='message' ? <CardMessage key={i} direction={b.direction==='out'?'out':'in'} peers={b.direction==='out'?(b.to||[]):b.from?[b.from]:[]} all={b.all} text={b.text || ''}/> : b.type==='text_delta' ? b.stream==='thought'?<details key={i} className="cq-acp-activity"><summary>思考过程</summary><MarkdownMessage content={b.text || ''} role="assistant"/></details>:<MarkdownMessage key={i} content={b.text || ''} role="assistant"/> : b.type==='decision'?<Decision key={b.id} block={b} disabled={controlBusy || archived} answer={answer=>void command({action:'answer',decisionId:b.id,answer})}/> : b.entries?<ul key={i} className="cq-acp-plan">{b.entries.map((e,j)=><li key={j} data-state={e.status}>{e.status==='completed'?'✓':e.status==='in_progress'?'◉':'○'} {e.content}</li>)}</ul>:null)}</div>
-        {!busyTurn(turn) && <MessageActions text={turn.blocks.filter(b=>b.type==='text_delta'&&b.stream!=='thought').map(b=>b.text||'').join('\n\n')} onQuote={archived?undefined:quoteMessage}/>}
-        {turnLabel[turn.state] && <div className="cq-acp-turn-state" role="status">{turn.blocks.some(b=>b.type==='decision'&&b.state==='pending')?'等待你的确认':turnLabel[turn.state]}</div>}
-        {turn.result?.error && <p role="alert" className="cq-acp-error">{turn.result.error.message}</p>}
-        {turn.result?.stopReason && !['end_turn','cancelled'].includes(turn.result.stopReason) && <p className="cq-acp-turn-state">结束原因：{turn.result.stopReason}</p>}
-      </article>)}
+      {shownTurns.slice(first).map(turn=><TurnView key={turn.id} turn={turn} archived={archived} controlBusy={controlBusy} onQuote={onQuote} onAnswer={onAnswer}/>)}
       <MissingReceiptsNotice key={viewKey} identity={viewKey} receiptIds={missingReceipts}/>
     </div></div>
     {!follow && <button className="cq-acp-latest" onClick={()=>setFollow(true)}>↓ 回到最新</button>}

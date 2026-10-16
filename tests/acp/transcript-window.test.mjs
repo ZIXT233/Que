@@ -37,8 +37,8 @@ globalThis.MessageChannel = class extends NativeChannel {
 };
 // The transcript has no layout here: give it one.
 // Each turn is 100px tall.
-Object.defineProperty(dom.window.HTMLElement.prototype, "scrollHeight", { get() { return this.classList.contains("cq-acp-transcript") ? 100 * this.querySelectorAll(".cq-acp-turn").length : 0; } });
-Object.defineProperty(dom.window.HTMLElement.prototype, "clientHeight", { get() { return this.classList.contains("cq-acp-transcript") ? 200 : 0; } });
+Object.defineProperty(dom.window.HTMLElement.prototype, "scrollHeight", { get() { return this.classList.contains("cq-acp-transcript") && !globalThis.__hidden ? 100 * this.querySelectorAll(".cq-acp-turn").length : 0; } });
+Object.defineProperty(dom.window.HTMLElement.prototype, "clientHeight", { get() { return this.classList.contains("cq-acp-transcript") && !globalThis.__hidden ? 200 : 0; } });
 const result = await build({
   stdin: {
     contents: `
@@ -72,7 +72,13 @@ export async function run(){
  assert.equal(shown()[0],15,'opened again, the same turns are shown');assert.equal(box().scrollTop,3200);
  await act(async()=>document.querySelector('.cq-acp-earlier').click());
  assert.equal(shown()[0],0,'the button shows the rest');
- await act(async()=>root.unmount());console.log('PASS: long conversations render their last turns and grow upward on demand');
+ await act(async()=>root.unmount());
+ globalThis.__hidden=true;
+ const hidden=createRoot(document.getElementById('root'));
+ await act(async()=>hidden.render(<I18nProvider><AcpConversation card={{id:'hidden'}} active={true} onResume={async()=>{}}/></I18nProvider>));await push();
+ assert.equal(shown().length,30,'a hidden conversation (no height) does not load its whole history');
+ await act(async()=>hidden.unmount());globalThis.__hidden=false;
+ console.log('PASS: long conversations render their last turns and grow upward on demand');
 }
 `,
     loader: "tsx",
