@@ -190,22 +190,10 @@ html.dark .cq-history-list .cq-history-nickname { color: hsl(var(--cq-nickname-h
 .cq-large-card.cq-underlay { z-index: 2; transform: translateY(20px) scale(.987); transition: none; pointer-events: none; }
 .cq-large-card.cq-underlay.is-rising { transform: translateY(0) scale(1); transition: transform .42s cubic-bezier(.2,.65,.25,1); }
 .cq-back-card { transition: transform .42s cubic-bezier(.2,.65,.25,1); }
-/* Continuous native scroll + native end-of-gesture snap. The stack projection
-   follows scrollTop without transition locks or server-side queue rotations. */
 .cq-main { padding-top: 0; }
-.cq-deck-scroller { position: absolute; inset: 0 -28px; padding: 0 28px; overflow-x: hidden; overflow-y: auto; scroll-snap-type: y mandatory; scroll-behavior: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
-.cq-deck-scroller::-webkit-scrollbar { display: none; }
-.cq-deck-track { position: relative; }
-.cq-deck-sticky { position: sticky; top: 0; width: 100%; pointer-events: none; }
-.cq-deck-layer { position: absolute; inset: 24px 0 64px; transform-origin: center top; will-change: transform; }
-.cq-deck-layer > .cq-continuous-card,
-.cq-deck-layer-body > .cq-continuous-card { inset: 0; transform: none; transition: none; animation: none; }
-.cq-deck-layer > .cq-back-card,
-.cq-deck-layer-body > .cq-back-card { inset: 0; }
-.cq-snap-point { position: absolute; left: 0; right: 0; height: 1px; pointer-events: none; scroll-snap-align: start; scroll-snap-stop: normal; }
 .cq-static-card { position: absolute; inset: 24px 0 0; }
 .cq-static-card > .cq-continuous-card { inset: 0; transform: none; animation: none; transition: none; }
-@media (max-width: 700px) { .cq-main { padding-top: 0; }.cq-deck-scroller { inset: 0 -14px; padding: 0 14px; }.cq-deck-layer, .cq-static-card { top: 15px; } }
+@media (max-width: 700px) { .cq-main { padding-top: 0; }.cq-static-card { top: 15px; } }
 /* Native scroll snapping owns trackpad gesture completion. */
 
 /* Shared card motion lives outside the scrolling deck, so wheel input stays native. */
@@ -222,17 +210,9 @@ html.dark .cq-history-list .cq-history-nickname { color: hsl(var(--cq-nickname-h
 
 
 
-/* The queue moves horizontally; vertical scrolling stays inside each conversation. */
-.cq-deck-scroller{inset:0 -24px;padding:0 24px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
-.cq-deck-track{height:100%}
-.cq-deck-sticky{left:0;top:0;height:100%}
-.cq-deck-layer{inset:24px 0 12px 0;transform-origin:left center}
-.cq-snap-point{top:0;right:auto;width:1px;height:100%}
-@media(max-width:700px){.cq-deck-layer{top:15px;right:0}}
 
 /* Let outgoing cards pass behind the sidebar instead of clipping at the stage. */
 .cq-sidebar{position:relative;z-index:20;background:var(--cq-surface)}
-.cq-deck-scroller{left:calc(-1 * var(--cq-deck-bleed-left,24px));padding-left:var(--cq-deck-bleed-left,24px)}
 
 /* State color belongs to the title bar; conversation and card surfaces stay neutral. */
 .cq-large-card[data-working-view="true"] .cq-card-header{
@@ -248,26 +228,24 @@ html.dark .cq-history-list .cq-history-nickname { color: hsl(var(--cq-nickname-h
 .cq-static-card.cq-single-mode-card{top:76px}
 @media(max-width:700px){.cq-single-mode-controls{top:12px;gap:10px}.cq-return-queue{padding:10px 14px;font-size:13px}.cq-single-mode-label{font-size:11px}.cq-static-card.cq-single-mode-card{top:72px}}
 
-/* Stack previews extend outside the full-width foreground card. */
-.cq-deck-scroller{right:calc(-1 * var(--cq-deck-bleed-right,160px));padding-right:var(--cq-deck-bleed-right,160px)}
-.cq-deck-end{position:absolute;left:100%;top:0;width:var(--cq-deck-bleed-right,160px);height:1px;pointer-events:none}
 
-/* Dim only the preview surface, keeping card edges and shadows crisp. A
-   translucent tint is used instead of backdrop-filter: blurring a moving
-   layer resamples its backdrop every frame and stalls the slide. */
-.cq-deck-layer::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  z-index:5;
-  border-radius:22px;
-  pointer-events:none;
-  background:rgb(255 255 255 / 32%);
-  opacity:0;
-  transition:opacity 120ms ease;
-}
+/* The queue: one slot per card, side by side, moved by native horizontal
+   scrolling and snapping alone (see CardDeck). The scroller reaches past the
+   stage to the layout's edges, where the neighbours show, dimmed. */
+.cq-deck-scroller{position:absolute;top:0;bottom:0;left:calc(-1 * var(--cq-deck-bleed-left,24px));right:calc(-1 * var(--cq-deck-bleed-right,24px));z-index:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;scroll-padding-left:var(--cq-deck-bleed-left,24px);scrollbar-width:none;cursor:grab}
+.cq-deck-scroller::-webkit-scrollbar{display:none}
+.cq-deck-scroller.cq-pointer-drag,.cq-deck-scroller.cq-vertical-wheel{scroll-snap-type:none}
+.cq-deck-track{display:flex;gap:24px;height:100%;padding-left:calc(var(--cq-deck-bleed-left,24px) - 24px)}
+.cq-deck-layer{position:relative;flex:none;margin:24px 0 60px;scroll-snap-align:start}
+.cq-deck-layer[aria-hidden="false"]{cursor:auto}
+.cq-deck-layer-body{position:absolute;inset:0}
+.cq-deck-layer-body > .cq-continuous-card{inset:0;transform:none;transition:none;animation:none}
+.cq-deck-layer-body > .cq-back-card{inset:0}
+.cq-deck-end{flex:none;width:calc(var(--cq-deck-bleed-right,24px) - 24px)}
+.cq-deck-layer::after{content:"";position:absolute;inset:0;z-index:5;border-radius:22px;pointer-events:none;background:rgb(255 255 255 / 32%);opacity:0}
 .cq-deck-layer[aria-hidden="true"]::after{opacity:1}
-@media(max-width:700px){.cq-deck-layer::after{border-radius:17px}}
+.cq-main.cq-deck-dragging,.cq-main.cq-deck-dragging *{cursor:grabbing!important;user-select:none!important}
+@media(max-width:700px){.cq-deck-layer{margin-top:15px}.cq-deck-layer::after{border-radius:17px}}
 
 
 @media(min-width:701px){
@@ -338,8 +316,6 @@ html.dark .cq-card-search-results>button .cq-card-search-nickname{color:hsl(var(
 .cq-content-toolbar.cq-toolbar-expanded .cq-insertion-position{width:auto;min-width:0;max-width:none;padding-inline:10px;justify-content:flex-start;gap:5px}
 .cq-content-toolbar.cq-toolbar-expanded .cq-sort-label,.cq-content-toolbar.cq-toolbar-expanded .cq-mode-label{display:inline}
 @media(max-width:700px){.cq-content-toolbar{left:14px;gap:4px}.cq-toolbar-trigger{width:30px}.cq-card-search{top:15px;right:14px;left:auto;width:calc(100% - 178px);transform:none}.cq-card-search-results{right:0;left:auto;width:min(360px,calc(100vw - 28px))}}
-.cq-deck-scroller{z-index:0}
-.cq-deck-layer{bottom:60px}
 .cq-shell:not(.cq-detached) .cq-static-card{bottom:60px}
 .cq-shell:not(.cq-detached) .cq-empty{inset:24px 0 60px;border-radius:22px}
 @media(max-width:700px){.cq-shell:not(.cq-detached) .cq-empty{top:15px}}
@@ -1009,12 +985,6 @@ html.dark .cq-remind-countdown{color:#e2c57e}
 .cq-large-card[data-urgent-call="true"] .cq-card-header{background:#fff0ee;border-bottom-color:#e5b2ab}
 .cq-large-card[data-urgent-call="true"] .cq-card-state{color:#a93026}
 
-.cq-deck-scroller{touch-action:auto;cursor:grab}
-.cq-deck-layer[aria-hidden="false"]{cursor:auto}
-.cq-deck-layer-body{position:absolute;inset:0}
-.cq-deck-peek-hit{position:absolute;inset:0;z-index:6;margin:0;padding:0;border:0;border-radius:22px;background:transparent;cursor:pointer}
-@media(max-width:700px){.cq-deck-peek-hit{border-radius:17px}}
-.cq-main.cq-deck-dragging,.cq-main.cq-deck-dragging *{cursor:grabbing!important;user-select:none!important}
 
 /* Machine selection follows the existing light workspace picker. */
 .machine-dialog { --machine-accent: #5f8058; width: 560px; max-width: calc(100vw - 32px); height: min(820px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); display: flex; flex-direction: column; background: var(--cq-paper); color: var(--cq-ink); border-color: var(--cq-line); }
@@ -1104,12 +1074,6 @@ html.dark .cq-remind-countdown{color:#e2c57e}
 .machine-auth-backdrop { grid-template-columns: minmax(0, 1fr); }
 .machine-auth-dialog { width: min(410px, 100%); min-width: 0; justify-self: center; }
 
-.cq-deck-scroller{scroll-snap-type:x mandatory;scroll-padding-left:var(--cq-deck-bleed-left,24px);scroll-padding-right:var(--cq-deck-bleed-right,24px);overflow-anchor:none}
-.cq-deck-scroller.cq-pointer-drag,.cq-deck-scroller.cq-keyboard-scroll,.cq-deck-scroller.cq-vertical-wheel{scroll-snap-type:none}
-.cq-snap-point{scroll-snap-align:start;scroll-snap-stop:normal}
-
-/* Reveal the approaching card before it becomes the focused card. */
-.cq-deck-layer[data-clear="true"]::after{opacity:0;transition-duration:50ms}
 
 .cq-task-panel { box-sizing: border-box; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: #fff; }
 .cq-task-panel[hidden],.cq-task-viewer[hidden],.cq-task-terminal[hidden] { display: none; }
@@ -1237,7 +1201,6 @@ html.dark .cq-inline-tools { --bg-hover: #30362e; --bg-selected: #394036; --text
 .cq-drawer-backdrop { position: fixed; inset: 0; z-index: 200; background: #0006; }
 
 @media(prefers-reduced-motion:reduce){
-  .cq-deck-layer::after{transition:none}
   .cq-queue-minimap button>span{transition:none}
   .cq-queue-minimap-preview{animation:none}
 }

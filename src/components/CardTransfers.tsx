@@ -12,17 +12,13 @@ type Props = {
   attentionMode?: AttentionMode;
   focusedId?: string | null;
 };
-type Snapshot = { flights: Flight[]; layout: { id: string; transform: string }[] };
+type Snapshot = { flights: Flight[] };
 type Flight = { id: string; zone: Zone; rect: DOMRect; image: HTMLElement };
 
 /** Capture the source before React removes it; animate only the visual copy. */
 export class CardTransfers extends Component<Props> {
   private root = createRef<HTMLDivElement>();
   private flights = new Map<string, () => void>();
-  private layoutAnimations = new Set<Animation>();
-  private stopLayout = () => { for (const animation of this.layoutAnimations) animation.cancel(); this.layoutAnimations.clear(); };
-
-  componentDidMount() { this.root.current?.addEventListener("wheel", this.stopLayout, { capture: true, passive: true }); this.root.current?.addEventListener("cq-deck-drag-start", this.stopLayout); }
 
   private surface(id: string, zone: Zone) {
     return this.root.current?.querySelector<HTMLElement>(`[data-transfer-id="${CSS.escape(id)}"][data-transfer-zone="${zone}"]`);
@@ -36,23 +32,14 @@ export class CardTransfers extends Component<Props> {
   }
 
   getSnapshotBeforeUpdate(previous: Props): Snapshot {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { flights: [], layout: [] };
-    const reordered = previous.order.length !== this.props.order.length || previous.order.some((id, index) => this.props.order[index] !== id);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { flights: [] };
     const moved = Object.entries(this.props.locations).some(([id, zone]) => previous.locations[id] && previous.locations[id] !== zone);
-    if (!reordered && !moved) return { flights: [], layout: [] };
+    if (!moved) return { flights: [] };
     const surfaces = new Map<string, HTMLElement>();
     this.root.current?.querySelectorAll<HTMLElement>("[data-transfer-id][data-transfer-zone]").forEach(element => {
       const key = `${element.dataset.transferZone}:${element.dataset.transferId}`;
       if (!surfaces.has(key) || element.closest(".cq-inspection-overlay")) surfaces.set(key, element);
     });
-    const layout: Snapshot["layout"] = [];
-    if (reordered) {
-      for (const id of previous.order) {
-        const source = surfaces.get(`deck:${id}`);
-        if (source?.classList.contains("cq-deck-layer")) layout.push({ id, transform: getComputedStyle(source).transform });
-      }
-      this.stopLayout();
-    }
     const snapshots: Flight[] = [];
     for (const [id, zone] of Object.entries(this.props.locations)) {
       if (!previous.locations[id] || previous.locations[id] === zone) continue;
@@ -73,17 +60,10 @@ export class CardTransfers extends Component<Props> {
       image.querySelectorAll("[id]").forEach((element) => element.removeAttribute("id"));
       snapshots.push({ id, zone, rect, image });
     }
-    return { flights: snapshots, layout };
+    return { flights: snapshots };
   }
 
   componentDidUpdate(_previous: Props, _state: unknown, snapshot: Snapshot) {
-    for (const { id, transform } of snapshot.layout) {
-      const target = this.surface(id, "deck");
-      if (!target || getComputedStyle(target).transform === transform) continue;
-      const animation = target.animate([{ transform }, { transform: target.style.transform }], { duration: 320, easing: "cubic-bezier(.22,.8,.25,1)" });
-      this.layoutAnimations.add(animation);
-      void animation.finished.then(() => this.layoutAnimations.delete(animation), () => this.layoutAnimations.delete(animation));
-    }
     for (const { id, zone, rect, image } of snapshot.flights) {
       const target = this.surface(id, zone);
       // A completion deep in the queue lands on the visible stack edge.
@@ -134,7 +114,7 @@ export class CardTransfers extends Component<Props> {
     }
   }
 
-  componentWillUnmount() { this.stopLayout(); this.root.current?.removeEventListener("cq-deck-drag-start", this.stopLayout); this.root.current?.removeEventListener("wheel", this.stopLayout, true); for (const clean of this.flights.values()) clean(); }
+  componentWillUnmount() { for (const clean of this.flights.values()) clean(); }
 
   render() { return <div className="cq-transfer-root" ref={this.root}>{this.props.children}</div>; }
 }
