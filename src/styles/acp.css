@@ -192,3 +192,5 @@
 .cq-image-viewer--actual { align-items:flex-start; justify-content:flex-start; }
 .cq-image-viewer--actual img { max-width:none; max-height:none; margin:auto; cursor:zoom-out; }
 .cq-image-viewer-close { position:fixed; top:16px; right:16px; width:32px; height:32px; border:1px solid var(--cq-line); border-radius:50%; background:var(--cq-paper); color:var(--cq-ink); font-size:18px; line-height:1; cursor:pointer; }
+.cq-acp-earlier { display:block; margin:12px auto 4px; border:1px solid var(--cq-line); border-radius:7px; padding:3px 10px; background:var(--cq-paper); color:var(--cq-muted); font-size:12px; cursor:pointer; }
+.cq-acp-earlier:hover { color:var(--cq-ink); }

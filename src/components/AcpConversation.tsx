@@ -21,6 +21,8 @@ import '../styles/acp.css';
 
 type Block = { type: string; direction?: 'in' | 'out'; from?: { cardId: string; name: string }; to?: { cardId: string; name: string }[]; all?: boolean; text?: string; stream?: string; toolCallId?: string; title?: string; status?: string; content?: unknown; rawInput?: unknown; rawOutput?: unknown; entries?: { content: string; status: string }[]; id?: string; kind?: string; state?: string; request?: any; answer?: any };
 type Turn = { withdrawn?: boolean; source?: 'event' | 'user' | 'agent'; sender?:{cardId:string;name:string;epoch:string}; at?: number; endedAt?: number; id: string; text: string; state: string; blocks: Block[]; attachments: { mediaType: string; data: string; name?: string }[]; result?: { stopReason?: string; error?: { message: string } } };
+/** How many turns a conversation opens with, and adds each time the user scrolls up. */
+const TURN_WINDOW = 30;
 type Snapshot = { ownerEpoch?:string;revision?:number; hostAccess?: boolean; promptCapabilities?: { image?: boolean; audio?: boolean }; state: string; stage?: string; error?: string; turns: Turn[]; commands?: { name: string; description?: string }[]; context?: { used?: number; size?: number }; status?: { models?: { currentModelId?: string; availableModelIds: string[]; availableModels?: { modelId: string; name: string }[] }; availableCommands?: { name: string; description?: string }[]; usage?: SessionUsage; details?: { configOptions?: Config[] } } };
 const busyTurn = (t: Turn) => ['queued','running','cancelling'].includes(t.state);
 type EditingDraft = {text:string;quote:string;attachments:Turn['attachments']; original:Turn; restoreId:string};
@@ -33,7 +35,7 @@ const useConversationView = createRetainedConversationView(key => {
     quote: sessionStorage.getItem(`queacp:quote:${id}`) || '',
     attachments: [] as Turn['attachments'],
     editingDraft: null as EditingDraft | null,
-    error: '', connectionError: '', sending: false, controlBusy: false, follow: true, readingAt: 0,
+    error: '', connectionError: '', sending: false, controlBusy: false, follow: true, readingAt: 0, shownFrom: -1,
     mutationActive: {current: false},
     streamHealth: {failures: 0},
     admission: {current: null as Admission | null},
@@ -91,6 +93,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const [controlBusy,setControlBusy] = view.field('controlBusy');
   const [follow,setFollow] = view.field('follow');
   const [readingAt,setReadingAt] = view.field('readingAt');
+  const [shownFrom,setShownFrom] = view.field('shownFrom');
   const scroll = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
   const draftNow=useRef({text:draft,quote,attachments});draftNow.current={text:draft,quote,attachments};
   const archived = card.archivedAt !== undefined;
@@ -174,7 +177,28 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     if (!userScrolling.current) { toEnd(); return; }
     setFollow(box.scrollHeight - box.scrollTop - box.clientHeight < 80);
     setReadingAt(box.scrollTop);
+    if (box.scrollTop < 400) earlier();
   };
+  // A long conversation opens with its last turns only; earlier ones are added
+  // as the user scrolls up to them, the page held still where it was.
+  const shownTurns=(snapshot?.turns || []).filter(turn=>turn.state!=='queued'&&!turn.withdrawn&&!missingReceipt(turn));
+  const first=shownFrom<0 ? Math.max(0, shownTurns.length-TURN_WINDOW) : Math.min(shownFrom, shownTurns.length);
+  const anchor=useRef<number|null>(null);
+  const earlier=()=>{
+    const box=scroll.current;
+    if(!box || first===0 || anchor.current!==null)return;
+    anchor.current=box.scrollHeight-box.scrollTop;
+    setShownFrom(Math.max(0, first-TURN_WINDOW));
+  };
+  useLayoutEffect(()=>{
+    const box=scroll.current;
+    // The window starts where it opened: new turns are added after it, never moving it.
+    if(shownFrom<0 && snapshot){ setShownFrom(first); return; }
+    if(!box)return;
+    if(anchor.current!==null){ box.scrollTop=box.scrollHeight-anchor.current; anchor.current=null; setReadingAt(box.scrollTop); }
+    // Too short to scroll up: nothing would ever ask for more.
+    else if(first>0 && box.scrollHeight<=box.clientHeight) setShownFrom(Math.max(0, first-TURN_WINDOW));
+  },[first, shownFrom, snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
   const command=async(body:{action:string;[key:string]:unknown})=> {
     if(mutationActive.current)return;
     mutationActive.current=true;setControlBusy(true);
@@ -265,7 +289,8 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       onWheel={userScroll} onTouchMove={userScroll} onPointerDown={userScroll} onKeyDown={userScroll} onClick={viewImage}><div ref={content}>
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}
-      {turns.filter(turn=>turn.state!=='queued'&&!turn.withdrawn&&!missingReceipt(turn)).map(turn=><article key={turn.id} className="cq-acp-turn">{hasUserContent(turn) && turn.sender && <div className="cq-acp-msg-group"><CardMessage direction="in" peers={[turn.sender]} text={turn.text}/><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}{hasUserContent(turn) && !turn.sender && <div className="cq-acp-user-group"><div className="cq-acp-user">{turn.source === 'event' ? <details><summary>工作会话通知</summary><pre>{turn.text}</pre></details> : <MarkdownMessage content={turn.text} role="user" />}{turn.attachments?.map((a,i)=>a.mediaType.startsWith('image/')?<img key={i} alt="已发送的图片" src={`data:${a.mediaType};base64,${a.data}`}/>:a.mediaType === 'text/plain'?<details key={i}><summary>{a.name || '文本文件'}</summary><pre>{a.data}</pre></details>:<audio key={i} controls src={`data:${a.mediaType};base64,${a.data}`}/>)}</div><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}
+      {first>0 && <button type="button" className="cq-acp-earlier" onClick={earlier}>显示更早的 {Math.min(first, TURN_WINDOW)} 轮</button>}
+      {shownTurns.slice(first).map(turn=><article key={turn.id} className="cq-acp-turn">{hasUserContent(turn) && turn.sender && <div className="cq-acp-msg-group"><CardMessage direction="in" peers={[turn.sender]} text={turn.text}/><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}{hasUserContent(turn) && !turn.sender && <div className="cq-acp-user-group"><div className="cq-acp-user">{turn.source === 'event' ? <details><summary>工作会话通知</summary><pre>{turn.text}</pre></details> : <MarkdownMessage content={turn.text} role="user" />}{turn.attachments?.map((a,i)=>a.mediaType.startsWith('image/')?<img key={i} alt="已发送的图片" src={`data:${a.mediaType};base64,${a.data}`}/>:a.mediaType === 'text/plain'?<details key={i}><summary>{a.name || '文本文件'}</summary><pre>{a.data}</pre></details>:<audio key={i} controls src={`data:${a.mediaType};base64,${a.data}`}/>)}</div><MessageActions text={turn.text} onQuote={archived?undefined:quoteMessage}/></div>}
         <div className="cq-acp-response">{groupActivityBlocks(turn.blocks).map(({block:b,activities,index:i})=> activities ? <ActivityGroup key={i} blocks={activities} running={busyTurn(turn)}/> : !b ? null : b.type==='message' ? <CardMessage key={i} direction={b.direction==='out'?'out':'in'} peers={b.direction==='out'?(b.to||[]):b.from?[b.from]:[]} all={b.all} text={b.text || ''}/> : b.type==='text_delta' ? b.stream==='thought'?<details key={i} className="cq-acp-activity"><summary>思考过程</summary><MarkdownMessage content={b.text || ''} role="assistant"/></details>:<MarkdownMessage key={i} content={b.text || ''} role="assistant"/> : b.type==='decision'?<Decision key={b.id} block={b} disabled={controlBusy || archived} answer={answer=>void command({action:'answer',decisionId:b.id,answer})}/> : b.entries?<ul key={i} className="cq-acp-plan">{b.entries.map((e,j)=><li key={j} data-state={e.status}>{e.status==='completed'?'✓':e.status==='in_progress'?'◉':'○'} {e.content}</li>)}</ul>:null)}</div>
         {!busyTurn(turn) && <MessageActions text={turn.blocks.filter(b=>b.type==='text_delta'&&b.stream!=='thought').map(b=>b.text||'').join('\n\n')} onQuote={archived?undefined:quoteMessage}/>}
         {turnLabel[turn.state] && <div className="cq-acp-turn-state" role="status">{turn.blocks.some(b=>b.type==='decision'&&b.state==='pending')?'等待你的确认':turnLabel[turn.state]}</div>}

@@ -63,19 +63,30 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
   // The camera is painted straight onto the canvas each frame, not through React.
   const world = useRef<HTMLDivElement>(null);
   const shown = useRef<Camera | null>(null);
-  // Moving, the canvas is scaled by the compositor (a transform); at rest, by
-  // layout (zoom), so it is drawn natively. WebKitGTK repaints content inside a
-  // scaled layer by stale tiles: blank patches and shifted borders once a
-  // bubble updates. Both scale from the top left, so switching shows nothing.
+  // Moving, the canvas is moved and scaled by the compositor (transforms); at
+  // rest, placed and scaled by layout (left/top, zoom), so it is drawn natively.
+  // WebKitGTK repaints content inside a scaled layer by stale tiles: blank
+  // patches and shifted borders once a bubble updates. Both scale from the top
+  // left, so switching shows nothing. A move never touches layout or styles:
+  // --cq-zoom is set only when the scale changes, as every face under the canvas
+  // is restyled when it is set, and a long open card makes that slow.
   const frame = useRef<HTMLDivElement>(null);
+  const placed = useRef({ x: 0, y: 0 });
+  const zoomed = useRef<number | null>(null);
   const paint = (view: Camera, settled = true) => {
     shown.current = view;
-    if (frame.current) { frame.current.style.left = `${view.x}px`; frame.current.style.top = `${view.y}px`; }
-    if (world.current) {
-      world.current.style.transform = settled ? "" : `scale(${view.scale})`;
-      world.current.style.zoom = settled ? String(view.scale) : "";
+    if (frame.current) {
+      if (settled) {
+        placed.current = { x: view.x, y: view.y };
+        frame.current.style.left = `${view.x}px`; frame.current.style.top = `${view.y}px`;
+      }
+      frame.current.style.transform = settled ? "" : `translate(${view.x - placed.current.x}px, ${view.y - placed.current.y}px)`;
     }
-    viewport.current?.style.setProperty("--cq-zoom", String(1 / view.scale));
+    if (world.current) {
+      world.current.style.transform = settled || view.scale === 1 ? "" : `scale(${view.scale})`;
+      world.current.style.zoom = settled || view.scale === 1 ? String(view.scale) : "";
+    }
+    if (zoomed.current !== view.scale) { zoomed.current = view.scale; viewport.current?.style.setProperty("--cq-zoom", String(1 / view.scale)); }
   };
   // The open card is mounted once the zoom has arrived; between neighbours,
   // which are already close up, at once.
@@ -146,7 +157,7 @@ export function CardCanvas({ cards, focused, onFocus, renderCard, titleOf, subti
       if (!drag.current && Math.hypot(x, y) < 6) return;
       if (!drag.current) event.currentTarget.setPointerCapture(event.pointerId);
       drag.current = { x, y };
-      paint({ ...camera, x: camera.x + x, y: camera.y + y });
+      paint({ ...camera, x: camera.x + x, y: camera.y + y }, false);
     }}
     onPointerUp={event => {
       const moved = drag.current;
