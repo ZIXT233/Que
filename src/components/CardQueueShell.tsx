@@ -531,11 +531,10 @@ function CardQueueShellContent() {
     if (inspectionLeaving && (!inspected || inspectionLeaving.id !== inspecting)) setInspectionLeaving(null);
   }, [inspecting, inspected, inspectionLeaving]);
 
-  // Stage sizing: prefer a 10:9 (height:width) card — width follows the
-  // flex-determined stage height when the content area is wide enough to keep
-  // side margins — but never narrower than 50% of the content area (which
-  // also caps it at the full content width on narrow windows). Detached
-  // windows stay fluid.
+  // Stage sizing: a square card when the content area is wide enough — as wide
+  // as the card is tall (the stage less the card's margins above and below,
+  // see .cq-deck-layer and the inspection overlay) — else the content width;
+  // never narrower than half the content area. Detached windows stay fluid.
   const [stageWidth, setStageWidth] = useState<number | null>(null);
   useEffect(() => {
     if (detachedId) { setStageWidth(null); return; }
@@ -547,7 +546,8 @@ function CardQueueShellContent() {
       const inner = main.clientWidth - parseFloat(mainStyle.paddingLeft) - parseFloat(mainStyle.paddingRight);
       const height = stage.getBoundingClientRect().height;
       if (!(inner > 0) || !(height > 0)) return;
-      const width = Math.round(Math.max(inner * 0.5, Math.min(height * 0.9, inner)));
+      const cardHeight = height - (window.matchMedia("(max-width: 700px)").matches ? 15 : 24) - 60;
+      const width = Math.round(Math.max(inner * 0.5, Math.min(cardHeight, inner)));
       setStageWidth(current => current === width ? current : width);
     };
     measure();
