@@ -11,11 +11,16 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
  const root=await mkdtemp(path.join(tmpdir(),'queacp-settings-api-'));
  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin')},stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',d=>stderr+=d);
  const lines=readline.createInterface({input:child.stdout});
- const address=new Promise((resolve,reject)=>{lines.on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v.base)}catch{}});child.once('exit',()=>reject(Error(stderr)))});
+ const address=new Promise((resolve,reject)=>{lines.on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v)}catch{}});child.once('exit',()=>reject(Error(stderr)))});
  let card,ownerPid;
  try{
-  const base=await address;
-  const request=async(route,body,headers={})=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...headers},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error||JSON.stringify(data));return data;};
+  const {base,token:apiToken}=await address;
+  // Loopback is reachable by any process and, through the browser, any page: the API answers only Que's own windows.
+  assert.equal((await fetch(base+'/api/card-queue')).status,401,'no token, no API');
+  assert.equal((await fetch(base+'/api/card-queue',{headers:{'x-que-token':'guess'}})).status,401,'a wrong token is refused');
+  assert.equal((await fetch(base+'/api/card-queue?token='+apiToken)).status,200,'the token works in the query, for EventSource');
+  assert.notEqual((await fetch(base+'/api/mcp/tools',{method:'POST',body:'{}'})).status,200,'MCP keeps its own token');
+  const request=async(route,body,headers={})=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-que-token':apiToken,...headers},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error||JSON.stringify(data));return data;};
   const acpRoot=path.join(root,'que','acp');await mkdir(acpRoot,{recursive:true});await writeFile(path.join(acpRoot,'agents.json'),JSON.stringify({codex:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   // The Butler button only opens the card; the agent is chosen on it.
   card=(await request('/api/card-queue',{action:'butler_open'})).butlerId;

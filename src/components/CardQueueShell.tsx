@@ -1,4 +1,5 @@
 "use client";
+import { apiUrlWithToken } from "@/lib/http";
 
 import { NativeHistory } from "./chat/NativeHistory";
 import { useAcpHistory, filterHistoryEntries, type AcpHistoryEntry } from "@/hooks/useAcpHistory";
@@ -752,7 +753,7 @@ function CardQueueShellContent() {
     let alive = true;
     const release = () => {
       if (desktopOwner) return; // The native window owns its lease across page reloads.
-      navigator.sendBeacon("/api/card-queue", new Blob([JSON.stringify({ action: "release", id: detachedId, owner })], { type: "application/json" }));
+      navigator.sendBeacon(apiUrlWithToken("/api/card-queue"), new Blob([JSON.stringify({ action: "release", id: detachedId, owner })], { type: "application/json" }));
     };
     const claim = async () => {
       try {

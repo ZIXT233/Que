@@ -50,13 +50,13 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
   const child = spawn(binary, [root], { env: { ...process.env, QUE_BIN_DIR: path.resolve('src-tauri/resources/bin') }, stdio: ['pipe', 'pipe', 'pipe'] });
   let stderr = ''; child.stderr.on('data', d => stderr += d);
   const lines = readline.createInterface({ input: child.stdout });
-  const address = new Promise((resolve, reject) => { lines.on('line', line => { try { const v = JSON.parse(line); if (v.base) resolve(v.base); } catch {} }); child.once('exit', () => reject(Error(stderr))); });
+  const address = new Promise((resolve, reject) => { lines.on('line', line => { try { const v = JSON.parse(line); if (v.base) resolve(v); } catch {} }); child.once('exit', () => reject(Error(stderr))); });
   let card;
   let ownerPid, stream, second;
   try {
-    const base = await address;
+    const { base, token: apiToken } = await address;
     const request = async (route, body) => {
-      const response = await fetch(base + route, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      const response = await fetch(base + route, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'x-que-token': apiToken }, body: body ? JSON.stringify(body) : undefined });
       const data = await response.json(); if (!response.ok) throw Error(data.error || JSON.stringify(data)); return data;
     };
     const acpRoot = path.join(root, 'que', 'acp'); await mkdir(acpRoot, { recursive: true });
@@ -65,7 +65,7 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
     card = (await request('/api/card-queue', { action: 'butler_open' })).butlerId;
     await request('/api/card-queue', { action: 'harness_start', id: card, kind: 'codex' });
 
-    stream = await subscribe(`${base}/api/acp/${card}/events`);
+    stream = await subscribe(`${base}/api/acp/${card}/events?token=${apiToken}`);
     await until(() => stream.events.length, 'the initial snapshot');
     ownerPid = Number(await readFile(path.join(acpRoot, 'owner.pid'), 'utf8'));
     assert.equal(stream.events[0].event, 'snapshot', 'a subscription starts from the current state');
@@ -97,7 +97,7 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
     assert.equal(state.revision, finalState.revision);
 
     // A late subscriber (reload, card moved) starts from the full current state.
-    second = await subscribe(`${base}/api/acp/${card}/events`);
+    second = await subscribe(`${base}/api/acp/${card}/events?token=${apiToken}`);
     await until(() => second.events.length, 'a second snapshot');
     assert.equal(second.events[0].event, 'snapshot');
     assert.deepEqual(second.events[0].data.turns, finalState.turns);

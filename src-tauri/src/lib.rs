@@ -45,7 +45,7 @@ use api::{build_state, start_server};
 use std::sync::Mutex;
 use tauri::Manager;
 
-struct ApiPort(Mutex<u16>);
+struct ApiAccess { port: Mutex<u16>, token: std::sync::Arc<str> }
 
 // Channels change only from the main window: the local HTTP API is not
 // authenticated, and an Agent must not open its own channels.
@@ -68,9 +68,10 @@ async fn channel_set(state: tauri::State<'_, api::AppState>, window: tauri::Webv
     channels::set(&state, &a, &b, joined).await.map_err(|e| e.to_string())
 }
 
+/// The API's address and the token every request must carry; only Que's own windows can ask.
 #[tauri::command]
-fn api_base(port: tauri::State<ApiPort>) -> String {
-    format!("http://127.0.0.1:{}", *port.0.lock().unwrap())
+fn api_access(access: tauri::State<ApiAccess>) -> serde_json::Value {
+    serde_json::json!({ "base": format!("http://127.0.0.1:{}", *access.port.lock().unwrap()), "token": &*access.token })
 }
 
 #[tauri::command]
@@ -210,14 +211,15 @@ pub fn run() {
             let state = build_state(resource_dir);
             app.manage(state.terminals.clone());
             app.manage(state.clone());
+            let token = state.api_token.clone();
             let port =
                 tauri::async_runtime::block_on(start_server(state)).map_err(|e| e.to_string())?;
-            app.manage(ApiPort(Mutex::new(port)));
+            app.manage(ApiAccess { port: Mutex::new(port), token });
             notify::init(&app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            api_base,
+            api_access,
             channel_requests,
             channel_decide,
             channel_set,

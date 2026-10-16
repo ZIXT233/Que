@@ -13,7 +13,7 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
  let ownerPid;
  try {
-  const {base}=await new Promise((resolve,reject)=>{
+  const {base,token:apiToken}=await new Promise((resolve,reject)=>{
    const lines=readline.createInterface({input:child.stdout});
    lines.on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v)}catch{}});
    child.once('exit',code=>reject(Error('headless exited '+code)));
@@ -26,7 +26,7 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
   const queue={version:1,revision:0,order:[source,target],cards:[card(source),card(target)],workspaces:[{id:'queacp-butler',name:'Butler',kind:'local',cwd,runtimeCwd:cwd}]};
   writeFileSync(path.join(data,'queue.json'),JSON.stringify(queue));
   const post=async(url,body,headers={})=>{
-   const r=await fetch(base+url,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
+   const r=await fetch(base+url,{method:'POST',headers:{'Content-Type':'application/json','x-que-token':apiToken,...headers},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
    const value=await r.json();if(!r.ok)throw Error(JSON.stringify(value));return value;
   };
   const api=(id,body)=>post('/api/acp/'+id,body);
@@ -41,14 +41,14 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
   assert.deepEqual(submitted.sent.map(c=>c.cardId),[target]);
   let snapshot;
   for(let i=0;i<400;i++){
-   snapshot=await (await fetch(base+'/api/acp/'+target)).json();
+   snapshot=await (await fetch(base+'/api/acp/'+target,{headers:{'x-que-token':apiToken}})).json();
    if(snapshot.turns[0]?.state==='completed')break;await sleep(30);
   }
   assert.equal(snapshot.turns.length,1);assert.equal(snapshot.turns[0].state,'completed');
   assert.notEqual(snapshot.connectionId,first.connectionId);
   assert.deepEqual((await post('/api/mcp/tools',message,headers)).sent.map(c=>c.cardId),[target],'a retry is the same message');
   await sleep(1500);
-  assert.equal((await (await fetch(base+'/api/acp/'+target)).json()).turns.length,1);
+  assert.equal((await (await fetch(base+'/api/acp/'+target,{headers:{'x-que-token':apiToken}})).json()).turns.length,1);
   await assert.rejects(post('/api/mcp/tools',{...message,requestId:'stale'}, {...headers,'x-queacp-source-epoch':'stale-source'}),/Source agent run ended/);
   await api(target,{action:'close'});
   queue.cards[1].archivedAt=1;writeFileSync(path.join(data,'queue.json'),JSON.stringify(queue));

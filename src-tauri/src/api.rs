@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tokio_stream::StreamExt;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -50,6 +50,8 @@ pub struct AppState {
     pub default_cwd: PathBuf,
     pub launches: Arc<Mutex<HashSet<String>>>,
     pub mcp: Arc<crate::mcp::McpControl>,
+    /// Proof that a request comes from Que's own windows; see `require_token`.
+    pub api_token: Arc<str>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -98,13 +100,43 @@ pub fn router(state: AppState) -> Router {
         .route("/api/terminal/{id}/events", get(terminal_events))
         .route("/api/sessions", get(empty_sessions))
         .layer(DefaultBodyLimit::max(110 * 1024 * 1024))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), require_token))
         .layer(
             CorsLayer::new()
-                .allow_origin(Any)
+                .allow_origin(AllowOrigin::predicate(|origin, _| own_origin(origin.as_bytes())))
                 .allow_methods(Any)
                 .allow_headers(Any),
         )
         .with_state(state)
+}
+
+/// The API listens on loopback, where any process — and any web page, through
+/// the user's browser — can reach it. Its reads and writes reach the agents, so
+/// every request must carry the token that only Que's own windows are given
+/// (Tauri's `api_access`): as `x-que-token`, or as `token=` in the query where a
+/// header cannot be set (EventSource, sendBeacon). The MCP endpoint keeps its
+/// own bearer token, handed only to the agents Que launches.
+async fn require_token(State(state): State<AppState>, request: Request, next: axum::middleware::Next) -> axum::response::Response {
+    let path = request.uri().path();
+    if !path.starts_with("/api/") || path == "/api/mcp/tools" {
+        return next.run(request).await;
+    }
+    let token = &*state.api_token;
+    let header = request.headers().get("x-que-token").and_then(|value| value.to_str().ok());
+    let query = request.uri().query().and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("token=")));
+    if header == Some(token) || query == Some(token) {
+        next.run(request).await
+    } else {
+        (StatusCode::UNAUTHORIZED, Json(json!({"error": "Que API token required"}))).into_response()
+    }
+}
+
+/// Que's windows (tauri://localhost on macOS and Linux, http(s)://tauri.localhost
+/// on Windows) and a development server on this machine.
+fn own_origin(origin: &[u8]) -> bool {
+    let origin = std::str::from_utf8(origin).unwrap_or_default();
+    matches!(origin, "tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost")
+        || ["http://localhost:", "http://127.0.0.1:"].iter().any(|prefix| origin.strip_prefix(prefix).is_some_and(|port| port.parse::<u16>().is_ok()))
 }
 
 fn overlay_harness(queue: &mut CardQueue, state: &AppState) {
@@ -2333,6 +2365,7 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
         default_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         launches: Arc::new(Mutex::new(HashSet::new())),
         mcp: Arc::new(crate::mcp::McpControl::default()),
+        api_token: uuid::Uuid::new_v4().simple().to_string().into(),
     }
 }
 

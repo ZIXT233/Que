@@ -12,6 +12,8 @@ QueACP 是 Que 的 ACP 版本：卡片里的 Agent 通过 ACP（经由 acpx）�
 
 每样状态只有一个主人。owner 不另存对话；Que 不缓存对话之外的结论；acpx 不知道卡片。
 
+界面通过本机回环地址上的 HTTP API 与 Que 通信。回环地址谁都能访问，浏览器里的任何网页也能，所以每个请求都要带 Que 每次启动生成的令牌（请求头 `x-que-token`；EventSource 和 sendBeacon 带不了请求头，放在查询参数 `token` 里）。令牌只通过 Tauri 命令 `api_access` 交给 Que 自己的窗口；跨域只允许这些窗口和本机的开发服务器。MCP 接口另有自己的令牌，只交给 Que 启动的 Agent。
+
 ## 映射
 
 ```

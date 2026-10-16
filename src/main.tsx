@@ -11,7 +11,7 @@ import { openDetachedCardWindow } from "./lib/card-window";
 import type { QueDesktop } from "./lib/desktop";
 import { setDeveloperProbesEnabled } from "./lib/developer-probes";
 import { installFrontendLogBridge } from "./lib/app-log";
-import { installApiInterceptor, setApiBase } from "./lib/http";
+import { installApiInterceptor, setApiAccess } from "./lib/http";
 import "./styles/globals.css";
 import "./styles/settings.css";
 import "./styles/card-queue.css";
@@ -61,8 +61,8 @@ function installDesktopBridge() {
 
 async function boot() {
   installDesktopBridge();
-  const base = await invoke<string>("api_base");
-  setApiBase(base);
+  const { base, token } = await invoke<{ base: string; token: string }>("api_access");
+  setApiAccess(base, token);
   installApiInterceptor();
   installFrontendLogBridge();
   await startSettingsSync();

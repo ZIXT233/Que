@@ -22,7 +22,7 @@ test('cards talk over channels the user opens; both sides see the messages, also
   const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
   try {
     const controls=new Map();
-    const {base}=await new Promise((resolve,reject)=>{
+    const {base,token:apiToken}=await new Promise((resolve,reject)=>{
       readline.createInterface({input:child.stdout}).on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v);if(v.controlId)controls.get(v.controlId)?.(v)}catch{}});
       child.once('exit',code=>reject(Error('headless exited '+code)));child.stderr.on('data',()=>{});
     });
@@ -35,7 +35,7 @@ test('cards talk over channels the user opens; both sides see the messages, also
       cards:[card(butler,home,'queacp-butler'),card(shen,work,'w','沈一石'),card(yang,work,'w','杨金水'),card(zhou,work,'w','周知县')],
       workspaces:[{id:'queacp-butler',name:'Butler',kind:'local',cwd:home,runtimeCwd:home},{id:'w',name:'Distro',kind:'local',cwd:work,runtimeCwd:work}]}));
     const request=async(url,body,headers={})=>{
-      const r=await fetch(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',...headers},body:body&&JSON.stringify(body),signal:AbortSignal.timeout(30000)});
+      const r=await fetch(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-que-token':apiToken,...headers},body:body&&JSON.stringify(body),signal:AbortSignal.timeout(30000)});
       const value=await r.json();if(!r.ok)throw Error(JSON.stringify(value));return value;
     };
     const sessions={};
@@ -43,7 +43,7 @@ test('cards talk over channels the user opens; both sides see the messages, also
     // One stream for every card, as the tile canvas reads it.
     const all=[],stream=new AbortController();
     void (async()=>{try{
-      const response=await fetch(base+'/api/acp/events',{signal:stream.signal});
+      const response=await fetch(base+'/api/acp/events',{signal:stream.signal,headers:{'x-que-token':apiToken}});
       const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
       for(;;){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});
         let end;while((end=buffer.indexOf('\n\n'))>=0){const frame=buffer.slice(0,end);buffer=buffer.slice(end+2);
@@ -159,7 +159,7 @@ test('cards talk over channels the user opens; both sides see the messages, also
     for(let i=0;i<400;i++){try{process.kill(ownerPid,0);await sleep(25);}catch{break;}}
     const next=base;
     await until(async()=>{try{await request('/api/acp/'+shen,{action:'ensure',agent:'fixture',cwd:work});return true;}catch{return false;}},'a new owner');
-    const history=(await (await fetch(next+'/api/acp/'+shen,{signal:AbortSignal.timeout(30000)})).json()).turns;
+    const history=(await (await fetch(next+'/api/acp/'+shen,{signal:AbortSignal.timeout(30000),headers:{'x-que-token':apiToken}})).json()).turns;
     const kept=history.flatMap(t=>t.blocks.filter(b=>b.type==='message').map(b=>[t.text,b.direction,b.text]));
     assert.deepEqual(kept,[['permission please','out','请拉取后重启'],['permission please','in','构建好了，版本 1.2'],['permission please','in','测试也过了']]);
   } finally {

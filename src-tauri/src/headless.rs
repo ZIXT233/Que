@@ -56,7 +56,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let state = crate::api::build_state(None);
         let terminals = state.terminals.clone();
         let port = crate::api::start_server(state.clone()).await?;
-        println!("{}", serde_json::json!({"base":format!("http://127.0.0.1:{port}"),"profile":root,"home":home}));
+        println!("{}", serde_json::json!({"base":format!("http://127.0.0.1:{port}"),"token":&*state.api_token,"profile":root,"home":home}));
         // The parent owns stdin: it stands in for the main window's native
         // commands, one JSON line each. EOF cleanly stops only this instance.
         let handle = tokio::runtime::Handle::current();
