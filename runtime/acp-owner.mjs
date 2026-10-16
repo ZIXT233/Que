@@ -176,18 +176,37 @@ function mcpServers(id) {
 
 const cardOf = process => process.scope?.kind === 'runtime-session' && sessions[process.scope.sessionKey] ? process.scope.sessionKey : undefined;
 const stage = (process, value) => { const id = cardOf(process); if (id) { sessions[id].stage = value; publish(id); } };
+/**
+ * What connecting a card did, step by step, for the card to show while it waits:
+ * Que's own steps and acpx's process events — the command, its pid, its exit.
+ * The agent's own output is not here: acpx keeps it, and puts it in the error.
+ */
+function log(id, text) {
+  const s = id && sessions[id];
+  if (!s?.startLog) return;
+  s.startLog.push({ at: Date.now(), text });
+  publish(id);
+}
 const lifecycle = {
-  onBeforeSpawn: launch => stage(launch, 'spawning'),
+  onBeforeSpawn(launch) {
+    log(cardOf(launch), `启动 ${[launch.command, ...launch.args].join(' ')}（目录 ${launch.cwd}）`);
+    stage(launch, 'spawning');
+  },
   onSpawned(started) {
     reaper.add(started.pid);
     const l = live.get(cardOf(started));
     if (l) { l.pid = started.pid; l.disconnected = false; }
+    log(cardOf(started), `进程已启动，pid ${started.pid}；ACP 握手中`);
     stage(started, 'connecting');
   },
-  onSpawnFailed: failure => stage(failure, 'failed'),
+  onSpawnFailed(failure) {
+    log(cardOf(failure), `无法启动：${failure.error instanceof Error ? failure.error.message : String(failure.error)}`);
+    stage(failure, 'failed');
+  },
   onExit(exit) {
     reaper.remove(exit.pid);
     const id = cardOf(exit), l = live.get(id);
+    if (l?.starting) log(id, `进程退出：${exit.signal ? `信号 ${exit.signal}` : `退出码 ${exit.exitCode}`}`);
     if (!l || l.pid !== exit.pid) return;
     // Losing the process proves a lost connection, not the outcome of a turn.
     l.disconnected = true; settle(id); publish(id, true);
@@ -245,16 +264,22 @@ async function ensure(req) {
   s.mcpRelay = req.mcpRelay === true || s.mcpRelay;
   s.connectionId = randomUUID();
   delete s.error; s.stage = 'preparing';
+  const begun = Date.now(), took = since => `${((Date.now() - since) / 1000).toFixed(1)}s`;
+  s.startLog = [];
+  log(id, req.terminalRc ? '运行工作区启动脚本，读取环境变量' : '使用 Que 的环境变量（工作区没有启动脚本）');
   l.starting = (async () => {
     try {
+      const prepared = Date.now();
       const { runtime, agentProcessEnv } = await runtimeFor(cwd, req.env || {}, req.terminalRc);
+      log(id, `环境就绪，用时 ${took(prepared)}`);
       const missing = missingAgentCommand(registry, agent, agentProcessEnv);
       if (missing) throw Error(missing);
       // npx-launched adapters download on first use; say so instead of looking stuck.
-      if (normalize(registry.resolve(agent))[0] === 'npx') { s.stage = 'installing'; publish(id); }
+      if (normalize(registry.resolve(agent))[0] === 'npx') { s.stage = 'installing'; log(id, '通过 npx 取得 adapter：首次使用要下载，会慢一些'); }
       l.runtime = runtime;
       // An empty conversation is not restored: there is nothing in it to keep.
       const saved = await store.load(id);
+      log(id, saved || s.resumeSessionId ? '恢复已有会话' : '新建会话');
       if (saved && !saved.messages?.some(m => m.User)) {
         const empty = await runtime.findSession({ sessionKey: id, agent });
         if (empty) await runtime.prepareFreshSession({ handle: empty });
@@ -267,9 +292,13 @@ async function ensure(req) {
       // Turns submitted in this run already show their full live content.
       if (!s.turns.some(t => t.state !== 'history')) s.turns = conversation(id, record);
       await metadata(id).catch(() => {});
+      log(id, `已连接，共用时 ${took(begun)}`);
+      // The log is for waiting; a failed start keeps it, next to the error.
+      delete s.startLog;
       return s;
     } catch (e) {
       s.error = sessionErrorMessage(e);
+      log(id, `失败：${s.error}`);
       if (live.get(id) === l) live.delete(id);
       throw e;
     } finally {

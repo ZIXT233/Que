@@ -7,7 +7,7 @@ import { machineRequest } from "./RemoteHostsSettings";
 import { needsSshSecret } from "@/lib/workspace-machine-errors";
 import { ErrorDialog } from "./ErrorDialog";
 import { useI18n } from "@/hooks/useI18n";
-import { AcpStartup } from "./AcpStartup";
+import { AcpStartup, type StartLogEntry } from "./AcpStartup";
 import { AcpConversation } from "./AcpConversation";
 import type { QueueCard } from "@/lib/card-queue";
 
@@ -23,6 +23,7 @@ export function HarnessCard({ card, active, sshHost, sshHostName, onAction }: {
   const [error, setError] = useState<unknown>(null);
   const [starting, setStarting] = useState("");
   const [stage, setStage] = useState("preparing");
+  const [startLog, setStartLog] = useState<StartLogEntry[]>([]);
   const [retry, setRetry] = useState(0);
   const auth = useSshAuthChallenge();
   useEffect(() => {
@@ -38,11 +39,11 @@ export function HarnessCard({ card, active, sshHost, sshHostName, onAction }: {
   useEffect(() => {
     if (!busy || !starting) return;
     let gone = false;
-    const timer = setInterval(() => { void fetch(`/api/acp/${encodeURIComponent(card.id)}`).then(r => r.ok ? r.json() : null).then(s => { if (!gone && s?.stage) setStage(s.stage); }).catch(() => {}); }, 650);
+    const timer = setInterval(() => { void fetch(`/api/acp/${encodeURIComponent(card.id)}`).then(r => r.ok ? r.json() : null).then(s => { if (gone) return; if (s?.stage) setStage(s.stage); if (Array.isArray(s?.startLog)) setStartLog(s.startLog); }).catch(() => {}); }, 650);
     return () => { gone = true; clearInterval(timer); };
   }, [busy, starting, card.id]);
   const start = async (kind: string) => {
-    setBusy(true); setStarting(kind); setStage("preparing"); setError(null);
+    setBusy(true); setStarting(kind); setStage("preparing"); setStartLog([]); setError(null);
     try {
       if (card.archivedAt !== undefined && !await onAction("restore", { id: card.id })) return;
       if (!await onAction("card_nickname", { id: card.id, nickname: nickname.trim() })) return;
@@ -58,7 +59,7 @@ export function HarnessCard({ card, active, sshHost, sshHostName, onAction }: {
       catch (e) { if (!auth.present(e)) setError(e); }
       finally { setBusy(false); }
     }} />}
-    {card.harness ? <AcpConversation card={card} active={active} onResume={() => start(card.harness!.kind)} /> : busy ? <div className="cq-harness-empty"><AcpStartup agent={starting} stage={stage} /></div> : <div className="cq-harness-empty"><div className="cq-harness-picker">
+    {card.harness ? <AcpConversation card={card} active={active} onResume={() => start(card.harness!.kind)} /> : busy ? <div className="cq-harness-empty"><AcpStartup agent={starting} stage={stage} log={startLog} /></div> : <div className="cq-harness-empty"><div className="cq-harness-picker">
       <div className="cq-harness-picker-head"><div>{card.workspaceId === "queacp-butler"
         ? <><h3>选择管家使用的 Agent</h3><p>之后点管家按钮会直接用它；这里列出的是这台机器上检测到的 Agent</p></>
         : <><h3>选择 Agent</h3><p>选择 Agent，在当前工作区开始会话</p></>}</div></div>

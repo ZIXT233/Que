@@ -16,6 +16,7 @@ import { CardMessage } from './chat/CardMessage';
 import { Disclosure } from './chat/Disclosure';
 import { ImageViewer } from './chat/ImageViewer';
 import { createPortal } from 'react-dom';
+import { AcpStartup, type StartLogEntry } from './AcpStartup';
 import { peekSessionSnapshot } from '@/lib/session-store';
 import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
@@ -26,7 +27,7 @@ type Turn = { withdrawn?: boolean; source?: 'event' | 'user' | 'agent'; sender?:
 const TURN_WINDOW = 15;
 /** A card behind the front one in the deck is a preview: its last turns only. */
 const PREVIEW_TURNS = 3;
-type Snapshot = { ownerEpoch?:string;revision?:number; hostAccess?: boolean; promptCapabilities?: { image?: boolean; audio?: boolean }; state: string; stage?: string; error?: string; turns: Turn[]; commands?: { name: string; description?: string }[]; context?: { used?: number; size?: number }; status?: { models?: { currentModelId?: string; availableModelIds: string[]; availableModels?: { modelId: string; name: string }[] }; availableCommands?: { name: string; description?: string }[]; usage?: SessionUsage; details?: { configOptions?: Config[] } } };
+type Snapshot = { ownerEpoch?:string;revision?:number; hostAccess?: boolean; promptCapabilities?: { image?: boolean; audio?: boolean }; state: string; stage?: string; startLog?: StartLogEntry[]; error?: string; turns: Turn[]; commands?: { name: string; description?: string }[]; context?: { used?: number; size?: number }; status?: { models?: { currentModelId?: string; availableModelIds: string[]; availableModels?: { modelId: string; name: string }[] }; availableCommands?: { name: string; description?: string }[]; usage?: SessionUsage; details?: { configOptions?: Config[] } } };
 const busyTurn = (t: Turn) => ['queued','running','cancelling'].includes(t.state);
 type EditingDraft = {text:string;quote:string;attachments:Turn['attachments']; original:Turn; restoreId:string};
 type Admission = {id:string;text:string;attachments:Turn['attachments']};
@@ -352,6 +353,8 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}
       {active && first>0 && <button type="button" className="cq-acp-earlier" onClick={earlier}>显示更早的 {Math.min(first, TURN_WINDOW)} 轮</button>}
       {shownTurns.slice(start).map((turn,i,shown)=><TurnView key={turn.id} turn={turn} folded={i<shown.length-1 && !busyTurn(turn)} archived={archived} controlBusy={controlBusy} onQuote={onQuote} onAnswer={onAnswer}/>)}
+      {/* Connecting: what it is doing, step by step, where the conversation will be. */}
+      {snapshot?.state==='starting' && card.harness && <div className="cq-acp-connecting"><AcpStartup agent={card.harness.kind} stage={snapshot.stage || 'preparing'} log={snapshot.startLog}/></div>}
       <MissingReceiptsNotice key={viewKey} identity={viewKey} receiptIds={missingReceipts}/>
     </div></div>
     {!follow && <button className="cq-acp-latest" onClick={()=>setFollow(true)}>↓ 回到最新</button>}
