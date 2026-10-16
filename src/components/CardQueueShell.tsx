@@ -123,6 +123,8 @@ const openDetachedCardTab = async (cardId: string) => {
 // "New session" reuses the one blank draft card (see select_workspace_for_draft).
 // A Butler card is blank until it is given an agent; it is never the draft.
 const draftCard = (cards: QueueCard[]) => cards.find(card => !card.session && !card.harness && card.workspaceId !== "queacp-butler");
+/** The card a "new conversation" made: one that was not there before, or else the reused draft. */
+const createdCard = (before: QueueCard[], after: QueueCard[]) => after.find(card => !before.some(old => old.id === card.id)) ?? draftCard(after);
 
 export function CardQueueShell() {
   return <PersistentTerminalProvider><CardQueueShellContent /></PersistentTerminalProvider>;
@@ -1247,7 +1249,7 @@ function CardQueueShellContent() {
     }} onSelect={async (workspaceId) => {
       if (historyMode) { setHistoryWorkspaceId(workspaceId); setCreating(false); setHistory([]); return; }
       setBusy(true); const result = await run("create", { workspaceId }); setBusy(false);
-      if (result) { setCreating(false); setInspecting(draftCard(result.cards)?.id ?? null); }
+      if (result) { setCreating(false); setInspecting(createdCard(cards, result.cards)?.id ?? null); }
     }} />}
     {addingWorkspace && <WorkspaceForm key={typeof workspaceFormEntry === "string" ? workspaceFormEntry : workspaceFormEntry.id} entry={workspaceFormEntry} defaultCwd={defaultCwd} busy={busy} error={error} onClose={() => setAddingWorkspace(false)} onBack={() => { setAddingWorkspace(false); setCreating(true); }} onSave={async (value) => {
       setBusy(true); const result = await run("workspace_create", { ...value, createCard: workspaceThenCreate }); setBusy(false);
@@ -1255,7 +1257,7 @@ function CardQueueShellContent() {
         setAddingWorkspace(false);
         setWorkspaceThenCreate(false);
         if (historyMode) { const added = result.workspaces?.find(w => !workspaces.some(old => old.id === w.id)); if(added) {setHistoryWorkspaceId(added.id);setHistory([]);} else setCreating(true); }
-        if (workspaceThenCreate) setInspecting(draftCard(result.cards)?.id ?? null);
+        if (workspaceThenCreate) setInspecting(createdCard(cards, result.cards)?.id ?? null);
       }
     }} />}
     {archiveConfirm && <div className="cq-overlay" onClick={() => !busy && setArchiveConfirm(null)}><section className="cq-dialog cq-archive-confirm" role="dialog" aria-modal="true" aria-label={t("queue.确认归档")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="archive" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setArchiveConfirm(null)}><Icon name="close" /></button></div><h2>{t("queue.确认归档")}</h2><p>{t("queue.归档后会话将移到历史对话，之后仍可重新打开。")}</p><label className="cq-archive-skip"><input type="checkbox" checked={skipArchiveChecked} disabled={busy} onChange={event => setSkipArchiveChecked(event.target.checked)} /><span>{t("queue.skipArchiveThisPage")}<small>{t("queue.skipArchiveThisPageHint")}</small></span></label><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setArchiveConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { setBusy(true); const result = await run("archive", { id: archiveConfirm.id }); setBusy(false); if (result) { if (skipArchiveChecked) setSkipArchiveConfirmation(true); advanceToNextCard(archiveConfirm.id); setArchiveConfirm(null); } }}>{t("queue.归档")}</button></div></section></div>}
