@@ -1711,6 +1711,10 @@ html.que-desktop .desktop-drag-sidebar {
 @media (max-width: 1050px) {
   html.que-desktop .desktop-drag-sidebar { width: 210px; }
 }
+/* The overview has no sidebar, so the toolbar would sit under the traffic
+   lights and their drag strip; it moves down below them instead. */
+html[data-desktop-platform="darwin"] .cq-content:has(.cq-main[data-overview]) .cq-content-toolbar { top: 56px; }
+html[data-desktop-platform="darwin"] .cq-overview { padding-top: 104px; }
 html.que-desktop .cq-shell { height: 100dvh; }
 html.que-desktop .cq-sidebar { padding-top: 60px; }
 html.que-desktop .cq-task-left { padding-top: 60px; }
