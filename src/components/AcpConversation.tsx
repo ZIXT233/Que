@@ -63,6 +63,7 @@ async function request(id: string, body?: object): Promise<any> {
 function Decision({ block, answer, disabled }: { block: Block; answer: (answer: unknown) => void; disabled: boolean }) {
   const [values, setValues] = useState<Record<string,any>>({});
   const q = block.request;
+  if (block.state === 'refused') return <div className="cq-acp-decision-receipt">已拒绝：{q?.toolCall?.title || '权限请求'}（当时没有进行中的对话，Que 不会代你同意）</div>;
   if (block.state !== 'pending') return <div className="cq-acp-decision-receipt">{block.state === 'expired' ? '请求已失效' : block.kind === 'permission' ? ({ allow_once:'已允许一次',allow_always:'已允许后续同类操作',reject_once:'已拒绝一次',reject_always:'已拒绝后续同类操作',cancel:'已取消' } as Record<string,string>)[block.answer?.outcome] : '已回复询问'}</div>;
   if (block.kind === 'permission') return <PermissionCard request={q} disabled={disabled} onAnswer={answer} />;
   const schema = q.requestedSchema || {};

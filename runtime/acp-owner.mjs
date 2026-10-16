@@ -99,15 +99,29 @@ function learnRecordIds(s, record) {
 }
 /** The card's conversation as the UI shows it: the acpx record, with its notes in place. */
 const conversation = (id, record) => placeNotes(projectRecord(record), readNotes(id));
-function note(id, block) {
-  const s = sessions[id], turn = s?.turns.findLast(t => ['running', 'cancelling'].includes(t.state));
-  if (!turn) return { noted: false };
-  const value = { ...block, type: 'message', at: Date.now() };
-  const tool = turn.blocks.findLast(b => b.type === 'tool_call')?.toolCallId;
+/** Adds a block of Que's own to a turn, kept across restarts beside the tool call it follows. */
+function record(id, turn, value, tool) {
   turn.blocks.push(value);
   writeNotes(id, [...readNotes(id), { turn: turn.id, record: turn.recordId, tool, block: value }]);
   publish(id, false, [{ op: 'block', turn: turn.id, block: turn.blocks.length - 1, value: plain(value) }]);
+}
+function note(id, block) {
+  const s = sessions[id], turn = s?.turns.findLast(t => ['running', 'cancelling'].includes(t.state));
+  if (!turn) return { noted: false };
+  record(id, turn, { ...block, type: 'message', at: Date.now() }, turn.blocks.findLast(b => b.type === 'tool_call')?.toolCallId);
   return { noted: true };
+}
+/**
+ * An agent's permission request that arrives while no turn of its card is
+ * running (a background task after the reply, say) has no approval card to show
+ * it. Que never answers for the user, so it is cancelled — the protocol's own
+ * refusal, whatever options the agent offered — and the card says so, after
+ * the turn it followed.
+ */
+function refuseOutsideTurn(id, request) {
+  const turn = sessions[id]?.turns.at(-1);
+  if (turn) record(id, turn, { type: 'decision', id: randomUUID(), kind: 'permission', request: plain(request), state: 'refused', at: Date.now() });
+  return { outcome: 'cancel' };
 }
 const customAgents = path.join(root, 'agents.json');
 const registry = createAgentRegistry({ overrides: fs.existsSync(customAgents) ? JSON.parse(fs.readFileSync(customAgents, 'utf8')) : {} });
@@ -187,7 +201,10 @@ function runtimeFor(cwd, env, terminalRc = '') {
       const agentProcessEnv = await sessionEnvironment({ root, cwd, env, terminalRc });
       const runtime = createAcpRuntime({ cwd, agentProcessEnv, sessionStore: store, agentRegistry: registry,
         mcpServers: ({ sessionKey }) => mcpServers(sessionKey),
-        sessionPermissions: ({ sessionKey }) => ({ permissionMode: sessions[sessionKey]?.hostAccess === false ? 'deny-all' : 'approve-all' }),
+        // The mode governs acpx's own file and terminal work for the agent (the card's host access).
+        // The agent's permission requests go to the running turn's approval card, or are refused.
+        sessionPermissions: ({ sessionKey }) => ({ permissionMode: sessions[sessionKey]?.hostAccess === false ? 'deny-all' : 'approve-all',
+          onPermissionRequest: request => refuseOutsideTurn(sessionKey, request.raw) }),
         permissionMode: 'approve-all', nonInteractivePermissions: 'deny', elicitationModes: ['form'], processLifecycle: lifecycle });
       return { runtime, agentProcessEnv };
     })();

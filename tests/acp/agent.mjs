@@ -30,6 +30,13 @@ readline.createInterface({input:process.stdin}).on('line', async line => {
   if(method==='session/set_model'){model=params.modelId;}
   if(method==='session/set_config_option')result={configOptions:[{id:'mode',name:'权限模式',category:'mode',type:'select',currentValue:params.value,options:[{value:'ask',name:'每次询问'},{value:'auto',name:'自动模式'}]}]};
   if(method==='session/prompt'){
+    // A permission request after the turn has ended: no turn can show it.
+    if(params.prompt[0].text==='after-turn-request'){
+      send({id,result:{stopReason:'end_turn'}});
+      setTimeout(()=>{respond=answer=>fs.writeFileSync(process.env.QUEACP_TEST_LATE_FILE,JSON.stringify(answer));
+        send({id:98,method:'session/request_permission',params:{sessionId:'test-session',toolCall:{toolCallId:'late1',title:'后台写入文件',kind:'edit'},options:[{optionId:'yes',kind:'allow_once',name:'允许一次'},{optionId:'no',kind:'reject_once',name:'拒绝'}]}});},300);
+      return;
+    }
     if(params.prompt[0].text.includes('mid-turn-config')){
       notify({sessionUpdate:'config_option_update',configOptions:[{id:'mode',name:'权限模式',category:'mode',type:'select',currentValue:'auto',options:[{value:'ask',name:'每次询问'},{value:'auto',name:'自动模式'}]}]});
       await new Promise(resolve=>setTimeout(resolve,8000));
