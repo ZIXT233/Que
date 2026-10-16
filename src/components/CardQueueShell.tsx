@@ -44,7 +44,7 @@ import { ThemeIcon } from "./ThemeIcon";
 import { LanguageIcon } from "./LanguageIcon";
 import { CardTransfers } from "./CardTransfers";
 import { CardInspectionOverlay } from "./CardInspectionOverlay";
-import { CardCanvas } from "./CardCanvas";
+import { CardOverview } from "./CardOverview";
 import { CardDeck } from "./CardDeck";
 import { Icon } from "./QueueIcon";
 import { QueLogo, QueMark } from "./QueLogo";
@@ -172,7 +172,8 @@ function CardQueueShellContent() {
   const [inspecting, setInspecting] = useState<string | null>(null);
   // Tile mode: all cards on one canvas. The open card is the inspected one, so
   // everything that opens a card (search, notifications, Butler) zooms to it.
-  const tiles = attentionMode === "tile" && !detachedId;
+  // The overview is a view of the queue, not a mode: opening a card leaves it.
+  const [overview, setOverview] = useState(false);
   const [inspectionLeaving, setInspectionLeaving] = useState<{ id: string; to: "deck" | "sidebar" } | null>(null);
   // Keep-in-view mode: a card that just joined the Working list stays on screen here.
   const [watching, setWatching] = useState<string | null>(null);
@@ -378,22 +379,20 @@ function CardQueueShellContent() {
   const deckIndex = resolveQueueFocus(ready, focus?.id ?? null, focus?.index ?? 0);
   const leaveInspection = useCallback((cardId: string) => {
     setWatching(current => current === cardId ? null : current);
-    if (tiles) { setInspecting(null); return; }
     // A working card morphs back onto its Working button; anything else has
     // no surface to morph onto and closes instantly.
     const card = cards.find((item) => item.id === cardId);
     if (card && card.phase === "working" && !card.detached && !pendingDetach.has(card.id)) setInspectionLeaving({ id: card.id, to: "sidebar" });
     else setInspecting(null);
-  }, [cards, pendingDetach, tiles]);
+  }, [cards, pendingDetach]);
   const selectQueueCard = useCallback((index: number) => {
     const card = ready[index];
     if (!card) return;
-    if (tiles) { setInspecting(card.id); return; }
     if (!inspecting && index === deckIndex) return;
     if (inspecting) leaveInspection(inspecting);
     setFocus({ id: card.id, index });
     setDeckReset((key) => key + 1);
-  }, [ready, inspecting, deckIndex, leaveInspection, tiles]);
+  }, [ready, inspecting, deckIndex, leaveInspection]);
   const cardSearchItems: CardQuickSearchItem[] = [
     ...working.map((card) => ({ card, location: "working" as const })),
     ...ready.map((card) => ({ card, location: "queue" as const })),
@@ -572,12 +571,11 @@ function CardQueueShellContent() {
       return true;
     }
     setHistory(null);
-    if (tiles) { setInspecting(id); return true; }
     setInspecting(index < 0 ? id : null);
     setFocus({ id, index: Math.max(0, index) });
     setDeckReset(key => key + 1);
     return true;
-  }, [queue, detachedId, ready, pendingDetach, tiles]);
+  }, [queue, detachedId, ready, pendingDetach]);
   const [returnedCardId, setReturnedCardId] = useState<string | null>(null);
   useEffect(() => {
     if (detachedId || !isDesktopApp()) return;
@@ -637,8 +635,6 @@ function CardQueueShellContent() {
     // One banner for both sources: that is the whole point of the overlay reusing
     // the deck, so a notice arrives exactly like a card coming back.
     const announce = (key: string, cardId: string, title: string, reply: string) => {
-      // Tile mode has no banners: the card lights up where it is.
-      if (tiles) return false;
       const side = queueArrivalSide(orderedIds, focusedId, cardId);
       if (!side) return false;
       const quiet = shouldQuietRearQueueArrival(attentionMode, side, document.visibilityState);
@@ -663,7 +659,7 @@ function CardQueueShellContent() {
         .catch(() => {});
     }
 
-  }, [queue, detachedId, ready, focus?.id, active?.id, attentionMode, tiles, t, titleOf]);
+  }, [queue, detachedId, ready, focus?.id, active?.id, attentionMode, t, titleOf]);
 
   // Replies can arrive after the completion hook. Enrich only the same turn's notice.
   useEffect(() => {
@@ -1084,8 +1080,8 @@ function CardQueueShellContent() {
       attentionMode={attentionMode}
       focusedId={focus?.id ?? active?.id}
     >
-    <div className="cq-layout" inert={!!inspected && !detachedId && !tiles}>
-      {!detachedId && !tiles && <aside className="cq-sidebar">
+    <div className="cq-layout" inert={!!inspected && !detachedId}>
+      {!detachedId && <aside className="cq-sidebar">
         <div className="cq-sidebar-brand"><a className="cq-brand" href={QUE_REPO_URL} aria-label="Que GitHub" title="GitHub" onClick={(event) => { event.preventDefault(); void openUrl(QUE_REPO_URL).catch(() => showQueueToast(t("settings.aboutOpenFailed"))); }}><span className="cq-logo"><QueLogo /></span>QueACP</a><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
         <button className="cq-new" onClick={showNew}><Icon name="plus" /> {t("queue.新会话")}</button>
         <button className="cq-history-entry" onClick={openHistory}><Icon name="history" />{t("queue.历史对话")}</button>
@@ -1150,6 +1146,7 @@ function CardQueueShellContent() {
               <button type="button" role="menuitemradio" aria-checked={queue?.sortMode === "fifo"} disabled={busy || !queue} onClick={(event) => { void chooseSortMode("fifo"); event.currentTarget.blur(); }}><span>→</span><span>{t("queue.先进先出")}</span></button>
             </div>
           </div>
+          <button type="button" className="cq-insertion-position cq-overview-toggle" aria-pressed={overview} disabled={!queue} title={t("overview.hint")} onClick={() => setOverview(open => !open)}><Icon name="stack" size={13} /> <span className="cq-mode-label">{t("overview.title")}</span></button>
           <div className="cq-toolbar-menu">
             <button type="button" className="cq-insertion-position cq-attention-mode" aria-haspopup="menu" aria-label={t("queue.切换工作模式")} title={t("queue.切换工作模式")}>{attentionOption.icon} <span className="cq-mode-label">{t(attentionOption.label)}</span></button>
             <div className="cq-toolbar-popover cq-mode-popover" role="menu" aria-label={t("queue.切换工作模式")}>
@@ -1175,7 +1172,7 @@ function CardQueueShellContent() {
         setArrivalNotices((current) => current.slice(1));
         focusNotificationCard(cardId);
       }} />}
-      <main className="cq-main" data-tiles={tiles || undefined}>
+      <main className="cq-main" data-overview={overview || undefined}>
         {(error || connectionError) && <ErrorDialog
           message={[error, connectionError].filter(Boolean).map(entry => harnessErrorText(entry, t)).join("\n\n")}
           onDismiss={() => setError(null)}
@@ -1186,15 +1183,12 @@ function CardQueueShellContent() {
           onDismiss={() => setClaimError("")}
           extraAction={{ label: t("queue.返回主页面"), onClick: () => void returnToQueue() }}
         />}
-        {tiles ? <CardCanvas
-          cards={cards.filter(card => card.archivedAt === undefined && !card.detached && !pendingDetach.has(card.id)).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))}
-          focused={inspected?.id ?? null}
-          onFocus={setInspecting}
-          renderCard={card => renderCard(card)}
+        {overview ? <CardOverview
+          queued={ready} working={working} later={reminding}
           titleOf={titleOf}
           subtitleOf={card => `${displayProject(card)} · ${cardHostLabel(card, workspaceOf(card))}`}
-          needsYou={card => !!(card.harness || card.session) && card.phase === "attention" && card.remindAt === undefined}
-          toolbar={<><button type="button" onClick={showNew}><Icon name="plus" size={15} />{t("queue.新会话")}</button><button type="button" onClick={openHistory}><Icon name="history" size={15} />{t("queue.历史对话")}</button></>}
+          onOpen={id => { setOverview(false); focusNotificationCard(id); }}
+          onClose={() => setOverview(false)}
         /> : <>
         <div className="cq-stage" ref={stageRef} style={stageWidth !== null ? { width: stageWidth } : undefined}>
           {!queue ? <div className="cq-empty"><span className="cq-orbit"><QueMark size={34} /></span><h2>{(error ? harnessErrorText(error, t) : "") || "Connecting Que…"}</h2></div> : active && canShowDetached ? <>
@@ -1213,7 +1207,7 @@ function CardQueueShellContent() {
         </div>
         </>}
 
-        {!detachedId && !tiles && <CardQueueMinimap
+        {!detachedId && !overview && <CardQueueMinimap
           cards={ready.map((card) => {
             const workspace = workspaceOf(card);
             return {
@@ -1236,7 +1230,7 @@ function CardQueueShellContent() {
       </main>
       </div>
     </div>
-    {inspected && !detachedId && !tiles && <CardInspectionOverlay anchor={stageRef} transferId={inspected.id} leaving={inspectionLeaving?.id === inspected.id ? inspectionLeaving.to : null}
+    {inspected && !detachedId && <CardInspectionOverlay anchor={stageRef} transferId={inspected.id} leaving={inspectionLeaving?.id === inspected.id ? inspectionLeaving.to : null}
       onClose={() => leaveInspection(inspected.id)}
       onSettled={() => { setInspectionLeaving(null); setInspecting(null); }}>{renderCard(inspected)}</CardInspectionOverlay>}
     </CardTransfers>

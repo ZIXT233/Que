@@ -104,7 +104,6 @@ function GeneralSettings() {
         <div className="settings-attention-mode-copy">
           <p className="settings-general-description">{t("settings.attentionModeDailyDescription")}</p>
           <p className="settings-general-description">{t("settings.attentionModeFocusDescription")}</p>
-          <p className="settings-general-description">{t("settings.attentionModeTileDescription")}</p>
         </div>
         <div role="radiogroup" aria-label={t("settings.attentionMode")} className="settings-theme-options settings-attention-mode-options">
           {ATTENTION_MODES.map((option) => {

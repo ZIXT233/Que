@@ -2141,48 +2141,40 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-channel-request .cq-confirm-actions > .cq-primary { background:var(--cq-accent); border-color:var(--cq-accent); color:var(--cq-paper); }
 .cq-channel-request .cq-confirm-actions > .cq-primary:hover { background:var(--cq-accent-hover); border-color:var(--cq-accent-hover); }
 
-/* Tile mode: one canvas, scaled as a whole; CardCanvas paints the camera every
-   frame and sets --cq-zoom (1 / scale) so tiles and frames keep their size on screen. */
-.cq-canvas { position:relative; flex:1; min-width:0; height:100%; overflow:hidden; background:var(--cq-surface); }
-.cq-canvas[data-zoomed] { cursor:grab; touch-action:none; }
-.cq-canvas-frame { position:absolute; left:0; top:0; }
-.cq-canvas-world { position:relative; transform-origin:0 0; }
-/* Lengths a cell draws are in screen pixels: the canvas is scaled, so a 1px
-   border would be a fraction of a pixel in the overview and drop out in places. */
-.cq-canvas-cell { position:absolute; overflow:hidden; box-sizing:border-box; border:calc(1px * var(--cq-zoom, 1)) solid var(--cq-line); border-radius:calc(16px * var(--cq-zoom, 1)); background:var(--cq-paper); cursor:pointer; }
-.cq-canvas-cell[data-open] { cursor:auto; }
-/* Needing you is a lit frame, never motion. In canvas units: thin at overview, a halo up close. */
-.cq-canvas-cell[data-attention] { border-color:var(--cq-accent); box-shadow:0 0 0 calc(3px * var(--cq-zoom, 1)) color-mix(in srgb, var(--cq-accent) 40%, transparent); }
-.cq-canvas-cell[data-urgent] { border-color:#c24b3f; box-shadow:0 0 0 calc(3px * var(--cq-zoom, 1)) color-mix(in srgb, #c24b3f 45%, transparent); }
-/* The open card is the one being handled: no frame. */
-.cq-canvas-cell[data-open] { border-color:var(--cq-line); box-shadow:none; }
-.cq-canvas .cq-static-card.cq-canvas-card { inset:0; }
-/* A tile is the card's own header and bubbles, laid out at overview
-   size and zoomed to its cell (see TilePoster). Only what differs is here. */
-.cq-tile { display:flex; flex-direction:column; overflow:hidden; background:var(--cq-paper); color:var(--cq-ink); pointer-events:none; }
-/* At tile size the header stacks: title and nickname, then the state. */
-.cq-shell:not(.cq-detached) .cq-tile .cq-card-header:has(.cq-card-heading) { display:block; padding:14px 18px 12px; }
+/* The overview: three columns of card faces, told apart by their paper alone —
+   the queue on the card's own white, working on yellow, later on brown. */
+.cq-shell .cq-main[data-overview] { max-width:none; padding:0; }
+.cq-overview { --cq-overview-working:#fbf0c9; --cq-overview-later:#ecdcc8; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:22px; height:100%; padding:64px 26px 22px; box-sizing:border-box; }
+html.dark .cq-overview { --cq-overview-working:#3a3522; --cq-overview-later:#3a2d22; }
+.cq-overview-column { display:flex; flex-direction:column; min-height:0; }
+.cq-overview-column > header { display:flex; justify-content:space-between; padding:0 4px 10px; color:var(--cq-muted); font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; }
+.cq-overview-cards { display:flex; flex-direction:column; gap:14px; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.cq-overview-card { flex:none; height:280px; overflow:hidden; border-radius:14px; background:var(--cq-paper); cursor:pointer; }
+.cq-overview-card[data-column="working"] { background:var(--cq-overview-working); }
+.cq-overview-card[data-column="later"] { background:var(--cq-overview-later); }
+.cq-overview-card:focus-visible { outline:2px solid var(--cq-accent); outline-offset:2px; }
+/* A face is the card's own header and bubbles. Only what differs is here. */
+.cq-tile { display:flex; flex-direction:column; height:100%; overflow:hidden; color:var(--cq-ink); pointer-events:none; }
+.cq-tile .cq-harness-body { background:transparent; }
+/* At this size the header stacks: title and nickname, then the state. */
+.cq-shell:not(.cq-detached) .cq-tile .cq-card-header:has(.cq-card-heading) { display:block; padding:14px 18px 10px; background:transparent; border:0; }
 .cq-tile .cq-card-title-split { gap:10px; }
-.cq-tile .cq-card-title-split > h2 { flex:1 1 auto !important; min-width:0; margin:0; font-size:17px; }
-.cq-tile .cq-card-nickname { display:block; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0; font-size:15px; }
+.cq-tile .cq-card-title-split > h2 { flex:1 1 auto !important; min-width:0; margin:0; font-size:15px; }
+.cq-tile .cq-card-nickname { display:block; flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0; font-size:13px; }
 .cq-tile .cq-card-state { margin-top:6px; }
 .cq-tile .cq-card-state span { margin-left:6px; }
 .cq-tile[data-status="decision"] .cq-card-state { color:#c27a2c; }
 /* The face is not interactive, except its summary, which scrolls. Short
    content sits at the bottom, as a conversation does. */
-.cq-tile-transcript { display:flex; flex-direction:column; overflow-y:auto; overscroll-behavior:contain; pointer-events:auto; }
+.cq-tile-transcript { display:flex; flex-direction:column; padding:0 18px 10px; overflow-y:auto; overscroll-behavior:contain; pointer-events:auto; font-size:13px; }
 .cq-tile-transcript > :first-child { margin-top:auto; }
 .cq-tile-transcript a { pointer-events:none; }
 .cq-tile-transcript p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
 /* One line, refreshed in place, of what the Agent does this moment. */
-.cq-tile-live { display:flex; flex:none; align-items:baseline; gap:8px; min-width:0; padding:8px 28px 12px; border-top:1px solid color-mix(in srgb, var(--cq-line) 60%, transparent); font-size:12px; color:var(--cq-muted); }
+.cq-tile-live { display:flex; flex:none; align-items:baseline; gap:8px; min-width:0; padding:8px 18px 12px; border-top:1px solid color-mix(in srgb, var(--cq-line) 60%, transparent); font-size:12px; color:var(--cq-muted); }
 .cq-tile-live-label { flex:none; font-weight:600; }
 .cq-tile-live-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cq-tile-live[data-kind="tool"] .cq-tile-live-text { color:var(--cq-external-blue); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; }
 .cq-tile-live[data-kind="thought"] .cq-tile-live-text { font-style:italic; }
 .cq-tile-live[data-kind="decision"] { color:#c27a2c; }
-.cq-canvas-toolbar { position:absolute; z-index:5; top:12px; left:16px; display:flex; gap:8px; }
-.cq-canvas-toolbar button { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px; border:1px solid var(--cq-line); border-radius:8px; background:var(--cq-paper); color:var(--cq-ink); font:inherit; font-size:12px; cursor:pointer; }
-.cq-canvas-toolbar button:hover { background:var(--cq-surface); }
-.cq-canvas-toolbar button:focus-visible { outline:2px solid var(--cq-accent); outline-offset:2px; }
-.cq-shell .cq-main[data-tiles] { max-width:none; padding:0; }
+.cq-overview-toggle[aria-pressed="true"] { border-color:var(--cq-accent); color:var(--cq-accent); }
