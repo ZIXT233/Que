@@ -56,10 +56,11 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   onIndexRef.current = onIndexChange;
   const [liveCards, setLiveCards] = useState<Set<string>>(() => new Set());
 
-  // The card in view when scrolling stops becomes the front one.
+  // The card nearest the start of the view is the front one: it turns bright and
+  // usable as soon as it passes the middle, not once the scroll comes to rest.
   const settle = () => {
     const element = scrollerRef.current;
-    if (!element || element.classList.contains("cq-pointer-drag")) return;
+    if (!element) return;
     const index = Math.max(0, Math.min(cards.length - 1, Math.round(element.scrollLeft / stepRef.current)));
     setRest(current => current.selected === index ? current : { ...current, selected: index });
     if (index !== reported.current) {
@@ -72,6 +73,7 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   const scrollIdle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(scrollIdle.current), []);
   const onScroll = () => {
+    settleRef.current();
     clearTimeout(scrollIdle.current);
     scrollIdle.current = setTimeout(() => settleRef.current(), 120);
   };
