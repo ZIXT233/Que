@@ -17,7 +17,7 @@ import { Disclosure } from './chat/Disclosure';
 import { ImageViewer } from './chat/ImageViewer';
 import { createPortal } from 'react-dom';
 import { AcpStartup, type StartLogEntry } from './AcpStartup';
-import { peekSessionSnapshot, subscribeSessionEvents, useSessionStreamHealthy } from '@/lib/session-store';
+import { cacheSessionSnapshot, peekSessionSnapshot, subscribeSessionEvents, useSessionStreamHealthy } from '@/lib/session-store';
 import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
 
@@ -25,8 +25,6 @@ type Block = { type: string; direction?: 'in' | 'out'; from?: { cardId: string; 
 type Turn = { withdrawn?: boolean; source?: 'event' | 'user' | 'agent'; sender?:{cardId:string;name:string;epoch:string}; at?: number; endedAt?: number; id: string; text: string; state: string; blocks: Block[]; attachments: { mediaType: string; data: string; name?: string }[]; result?: { stopReason?: string; error?: { message: string } } };
 /** How many turns a conversation opens with, and adds each time the user scrolls up. */
 const TURN_WINDOW = 15;
-/** A card behind the front one in the deck is a preview: its last turns only. */
-const PREVIEW_TURNS = 3;
 type Snapshot = { ownerEpoch?:string;revision?:number; hostAccess?: boolean; promptCapabilities?: { image?: boolean; audio?: boolean }; state: string; stage?: string; startLog?: StartLogEntry[]; error?: string; turns: Turn[]; commands?: { name: string; description?: string }[]; context?: { used?: number; size?: number }; status?: { models?: { currentModelId?: string; availableModelIds: string[]; availableModels?: { modelId: string; name: string }[] }; availableCommands?: { name: string; description?: string }[]; usage?: SessionUsage; details?: { configOptions?: Config[] } } };
 const busyTurn = (t: Turn) => ['queued','running','cancelling'].includes(t.state);
 type EditingDraft = {text:string;quote:string;attachments:Turn['attachments']; original:Turn; restoreId:string};
@@ -58,6 +56,7 @@ async function request(id: string, body?: object): Promise<any> {
   if(!data || (sending ? typeof data.id!=='string' || !Array.isArray(data.blocks) : !Array.isArray(data.turns))) {
     throw new Error('会话服务返回格式不匹配；已保留输入，请检查连接后重试');
   }
+  if (!sending) cacheSessionSnapshot(id, data);
   return data;
 }
 function Decision({ block, answer, disabled }: { block: Block; answer: (answer: unknown) => void; disabled: boolean }) {
@@ -183,8 +182,11 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       if(gap)void resync();
     };
     const stop=subscribeSessionEvents(card.id,event=>{queue.push(event as unknown as StreamEvent<Snapshot>);frame??=setTimeout(flush,16);});
-    // The stream delivered this card already (the snapshot above): nothing to read.
-    if(!peekSessionSnapshot(card.id))void resync();
+    // The shared stream keeps all cards current, including inactive ones.
+    // Switching focus needs that cache, not another full-history request.
+    const known = peekSessionSnapshot(card.id);
+    if (known) setSnapshot(known as unknown as Snapshot);
+    else void resync();
     return()=>{closed=true;clearTimeout(frame);stop();};
   },[active,card.id,setSnapshot]);
   const streamHealthy=useSessionStreamHealthy();
@@ -197,6 +199,9 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   // its place, and a card opened again returns to it.
   const following = useRef(follow); following.current = follow;
   const userScrolling = useRef(false);
+  const measured = useRef({ viewport: 0, content: Infinity });
+  const fitsViewport = useRef(false);
+  const fillViewport = useRef(() => {});
   const toEnd = useCallback(() => {
     const box = scroll.current;
     if (!box || !following.current) return;
@@ -213,12 +218,23 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   useEffect(() => {
     const box = scroll.current, body = content.current;
     if (!box || !body) return;
-    const observer = new ResizeObserver(toEnd);
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target === box) measured.current.viewport = entry.contentRect.height;
+        if (entry.target === body) measured.current.content = entry.contentRect.height;
+      }
+      fitsViewport.current = measured.current.viewport > 0 && measured.current.content <= measured.current.viewport;
+      toEnd();
+      fillViewport.current();
+    });
     observer.observe(box); observer.observe(body);
     return () => observer.disconnect();
   }, [toEnd]);
   const userScroll = () => { userScrolling.current = true; };
   const scrolled = (box: HTMLDivElement) => {
+    // Inert cards can still receive scroll events from layout. They must not
+    // replace the reading position or turn following back on.
+    if (!active) return;
     // Moved by something else while following: back to the end, at once.
     if (!userScrolling.current) { toEnd(); return; }
     setFollow(box.scrollHeight - box.scrollTop - box.clientHeight < 80);
@@ -229,7 +245,18 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   // as the user scrolls up to them, the page held still where it was.
   const shownTurns=(snapshot?.turns || []).filter(turn=>turn.state!=='queued'&&!turn.withdrawn&&!missingReceipt(turn));
   const first=shownFrom<0 ? Math.max(0, shownTurns.length-TURN_WINDOW) : Math.min(shownFrom, shownTurns.length);
-  const start=active ? first : Math.max(first, shownTurns.length-PREVIEW_TURNS);
+  // A focus change must not force style/layout of the long chat just to check
+  // whether it fills its viewport. ResizeObserver supplies those sizes after
+  // layout; reuse them when the card is activated.
+  fillViewport.current = () => {
+    if (!active || first === 0 || !fitsViewport.current) return;
+    fitsViewport.current = false;
+    setShownFrom(Math.max(0, first - TURN_WINDOW));
+  };
+  useEffect(() => { fillViewport.current(); }, [active]);
+  // Mounted cards keep the same history window across focus changes. Trimming
+  // it in the background and expanding it on activation makes the content jump.
+  // Cards outside the mounted cache have a separate lightweight deck preview.
   const anchor=useRef<number|null>(null);
   const earlier=()=>{
     const box=scroll.current;
@@ -243,10 +270,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     if(shownFrom<0 && snapshot){ setShownFrom(first); return; }
     if(!box)return;
     if(anchor.current!==null){ box.scrollTop=box.scrollHeight-anchor.current; anchor.current=null; setReadingAt(box.scrollTop); }
-    // Too short to scroll up: nothing would ever ask for more.
-    // A hidden view (no height) is not short: it would load the whole history.
-    else if(active && first>0 && box.clientHeight>0 && box.scrollHeight<=box.clientHeight) setShownFrom(Math.max(0, first-TURN_WINDOW));
-  },[first, shownFrom, snapshot, active]); // eslint-disable-line react-hooks/exhaustive-deps
+  },[first, shownFrom, snapshot]); // eslint-disable-line react-hooks/exhaustive-deps
   const command=async(body:{action:string;[key:string]:unknown})=> {
     if(mutationActive.current)return;
     mutationActive.current=true;setControlBusy(true);
@@ -341,8 +365,8 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       onWheel={userScroll} onTouchMove={userScroll} onPointerDown={userScroll} onKeyDown={userScroll} onClick={viewImage}><div ref={content}>
       {loading && !connectionError && <div className="cq-acp-loading" role="status"><span className="cq-acp-spinner" aria-hidden="true"/>{t('acp.loading.history')}</div>}
       {snapshot && !connectionError && !loading && snapshot.state!=='starting' && !sending && !disconnected && !turns.length && <div className="cq-acp-welcome"><h3>开始处理这个任务</h3><p>消息、执行过程和需要你确认的操作会显示在这里。</p></div>}
-      {active && first>0 && <button type="button" className="cq-acp-earlier" onClick={earlier}>显示更早的 {Math.min(first, TURN_WINDOW)} 轮</button>}
-      {shownTurns.slice(start).map((turn,i,shown)=><TurnView key={turn.id} turn={turn} folded={i<shown.length-1 && !busyTurn(turn)} archived={archived} controlBusy={controlBusy} onQuote={onQuote} onAnswer={onAnswer}/>)}
+      {first>0 && <button type="button" className="cq-acp-earlier" disabled={!active} onClick={earlier}>显示更早的 {Math.min(first, TURN_WINDOW)} 轮</button>}
+      {shownTurns.slice(first).map((turn,i,shown)=><TurnView key={turn.id} turn={turn} folded={i<shown.length-1 && !busyTurn(turn)} archived={archived} controlBusy={controlBusy} onQuote={onQuote} onAnswer={onAnswer}/>)}
       {/* Connecting: what it is doing, step by step, where the conversation will be. */}
       {snapshot?.state==='starting' && card.harness && <div className="cq-acp-connecting"><AcpStartup agent={card.harness.kind} stage={snapshot.stage || 'preparing'} log={snapshot.startLog}/></div>}
       <MissingReceiptsNotice key={viewKey} identity={viewKey} receiptIds={missingReceipts}/>

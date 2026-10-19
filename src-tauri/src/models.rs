@@ -158,8 +158,6 @@ pub struct QueueCard {
     #[serde(default)]
     pub session: Option<SessionInfo>,
     pub phase: CardPhase,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manual_placement: Option<ManualCardPlacement>,
     pub created_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ready_at: Option<i64>,
@@ -218,16 +216,6 @@ pub struct CardPermissions {
 }
 impl CardPermissions {
     pub fn is_none(&self) -> bool { *self == Self::default() }
-}
-
-/// Queue placement only; never alter the actual CLI state. Expires when that
-/// state changes or a different terminal replaces the process.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ManualCardPlacement {
-    pub background: bool,
-    pub terminal_id: String,
-    pub observed_state: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

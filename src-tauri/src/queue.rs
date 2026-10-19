@@ -82,6 +82,39 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_placement_does_not_override_agent_state() {
+        let mut state = CardQueue::empty();
+        state.cards = vec![
+            serde_json::from_value(json!({
+                "id": "running", "cwd": "/tmp", "phase": "attention", "createdAt": 0,
+                "harness": {"kind": "codex", "terminalId": "running", "state": "working", "version": "1"},
+                "manualPlacement": {"background": false, "terminalId": "running", "observedState": "working"}
+            })).unwrap(),
+            serde_json::from_value(json!({
+                "id": "waiting", "cwd": "/tmp", "phase": "working", "createdAt": 0,
+                "harness": {"kind": "codex", "terminalId": "waiting", "state": "attention", "version": "1"},
+                "manualPlacement": {"background": true, "terminalId": "waiting", "observedState": "attention"}
+            })).unwrap(),
+        ];
+        state.order = vec!["running".into()];
+
+        reconcile(&mut state);
+
+        assert!(matches!(state.cards[0].phase, CardPhase::Working));
+        assert!(matches!(state.cards[1].phase, CardPhase::Attention));
+        assert_eq!(state.order, vec!["waiting".to_string()]);
+        for card in &state.cards {
+            assert!(serde_json::to_value(card).unwrap().get("manualPlacement").is_none());
+        }
+    }
+}
+
 pub fn reconcile(state: &mut CardQueue) {
     let now = now_ms();
     for card in &mut state.cards {
@@ -90,7 +123,7 @@ pub fn reconcile(state: &mut CardQueue) {
                 card.detached = None;
             }
         }
-        let mut phase = if let Some(harness) = &card.harness {
+        let phase = if let Some(harness) = &card.harness {
             if harness.state == "working" {
                 CardPhase::Working
             } else {
@@ -99,23 +132,6 @@ pub fn reconcile(state: &mut CardQueue) {
         } else {
             CardPhase::Attention
         };
-        if let Some(placement) = &card.manual_placement {
-            let valid = card.archived_at.is_none()
-                && card.harness.as_ref().is_some_and(|h| {
-                    h.terminal_id == placement.terminal_id
-                        && h.state == placement.observed_state
-                        && !matches!(h.state.as_str(), "exited" | "error" | "not_running")
-                });
-            if valid {
-                phase = if placement.background {
-                    CardPhase::Working
-                } else {
-                    CardPhase::Attention
-                };
-            } else {
-                card.manual_placement = None;
-            }
-        }
         if card.archived_at.is_some() {
             if matches!(phase, CardPhase::Working) {
                 card.archived_at = None;

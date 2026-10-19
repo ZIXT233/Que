@@ -174,17 +174,22 @@
 .fc-diff-scroll td:last-child { white-space:pre; }
 .fc-diff-scroll tr[data-kind=add] { background:rgba(82,139,86,.1); }
 .fc-diff-scroll tr[data-kind=remove] { background:rgba(197,82,66,.09); }
-.fc-native-history { margin:16px 0; }
+.fc-native-history { margin:0; }
 .fc-history-tabs { display:flex; gap:20px; border-bottom:1px solid var(--cq-line); margin:0 0 20px; }
 .fc-history-tabs button { padding:10px 0; background:none; border:0; border-bottom:2px solid transparent; color:var(--cq-muted); }
 .fc-history-tabs button[aria-selected=true] { color:var(--cq-ink); border-bottom-color:var(--cq-accent); }
-.fc-history-workspace { display:flex; align-items:center; gap:10px; width:100%; text-align:left; margin:0 0 16px; }
-.fc-history-workspace > span:first-of-type { flex:1; }.fc-history-workspace small { display:block; color:var(--cq-muted); font-size:12px; }
+.fc-history-selector { display:flex; align-items:center; gap:10px; box-sizing:border-box; width:100%; padding:12px 14px; margin:0 0 16px; border:1px solid var(--cq-line); border-radius:10px; background:var(--cq-paper); color:var(--cq-ink); text-align:left; font:inherit; cursor:pointer; }
+.fc-history-selector:hover { background:var(--cq-surface); }
+.fc-history-selector:focus-visible { outline:2px solid var(--cq-accent); outline-offset:2px; }
+.fc-history-selector > svg { flex:none; }
+.fc-history-selector-label { flex:1; min-width:0; }
+.fc-history-selector small { display:block; margin-top:4px; color:var(--cq-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fc-history-search { margin-bottom:4px; }
 
-.fc-agent-picker { position:relative; margin:12px 0; width:fit-content; }
-.fc-agent-picker summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px; padding:6px 0; }
+.fc-agent-picker { position:relative; margin:0 0 16px; width:100%; }
+.fc-agent-picker summary { list-style:none; margin:0; }
 .fc-agent-picker summary::-webkit-details-marker { display:none; }
-.fc-agent-picker-options { position:absolute; top:100%; left:0; z-index:5; width:240px; max-height:240px; overflow:auto; background:var(--cq-paper); border:1px solid var(--cq-line); border-radius:12px; padding:6px; box-shadow:0 10px 28px #00000012; }
+.fc-agent-picker-options { position:absolute; top:calc(100% + 6px); left:0; z-index:5; box-sizing:border-box; width:100%; max-height:240px; overflow:auto; background:var(--cq-paper); border:1px solid var(--cq-line); border-radius:10px; padding:6px; box-shadow:0 10px 28px #00000012; }
 .fc-agent-picker-options > button { display:flex; align-items:center; gap:10px; width:100%; border:0; background:none; text-align:left; padding:8px 10px; border-radius:6px; }
 .fc-agent-picker-label { flex:1; }
 .fc-agent-picker-options svg { flex-shrink:0; }

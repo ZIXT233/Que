@@ -2,8 +2,8 @@
 // The queue: the cards side by side, one slot each, all the same size. The
 // browser's own horizontal scrolling and snapping moves them — on its scrolling
 // thread, so a swipe keeps up even while a conversation loads — and nothing runs
-// per frame. The card that comes to rest in view is the front one; the
-// neighbours show at the edges, dimmed.
+// per frame beyond tracking the nearest card. It turns bright as it passes the
+// middle; its conversation becomes active only once scrolling stops.
 import { useI18n } from "@/hooks/useI18n";
 import { memo, startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { hasUrgentCall } from "@/lib/urgent-call";
@@ -12,6 +12,8 @@ import type { QueueCard } from "@/lib/card-queue";
 const GAP = 24;
 /** Cards this close to the front one get their conversation, one per idle moment. */
 const LIVE_RANGE = 2;
+/** Recently opened conversations keep their DOM and reading position. */
+const RECENT_CARDS = 8;
 
 /** The deck's card slots: the track's own children, never a selector search through the cards' conversations. */
 const deckLayers = (scroller: HTMLElement | null) =>
@@ -24,7 +26,7 @@ const DeckContent = memo(function DeckContent({ card, isFront, renderCard }: {
   renderCard: (card: QueueCard, isFront: boolean) => ReactNode;
 }) { return renderCard(card, isFront); });
 
-export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndexChange, renderCard, suspended = false, withheldCardId = null }: {
+export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndexChange, renderCard, renderPreview, suspended = false, withheldCardId = null }: {
   cards: QueueCard[];
   resetKey: number;
   focusedIndex: number;
@@ -33,6 +35,7 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   withheldCardId?: string | null;
   onIndexChange: (index: number) => void;
   renderCard: (card: QueueCard, isFront: boolean) => ReactNode;
+  renderPreview: (card: QueueCard) => ReactNode;
 }) {
   const { t } = useI18n();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -45,8 +48,8 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   // reorders; each card's place on screen comes from its flex `order`.
   const stableCards = useMemo(() => cards.map((card, index) => ({ card, index }))
     .sort((a, b) => a.card.id.localeCompare(b.card.id)), [cards]);
-  // The front card changes only when scrolling comes to rest, or when the queue
-  // focuses another card.
+  // The nearest layer follows the gesture; conversation focus stays in the
+  // shell until scrolling ends. Explicit queue focus rebases both.
   const [rest, setRest] = useState({ orderKey, resetKey, focusedIndex, selected: focusedIndex });
   const rebased = rest.orderKey !== orderKey || rest.resetKey !== resetKey || rest.focusedIndex !== focusedIndex;
   if (rebased) setRest({ orderKey, resetKey, focusedIndex, selected: focusedIndex });
@@ -55,14 +58,26 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   const onIndexRef = useRef(onIndexChange);
   onIndexRef.current = onIndexChange;
   const [liveCards, setLiveCards] = useState<Set<string>>(() => new Set());
+  const recentCards = useRef<string[]>([]);
+  const [scrolling, setScrolling] = useState(false);
+  const scrollingRef = useRef(false);
 
-  // The card nearest the start of the view is the front one: it turns bright and
-  // usable as soon as it passes the middle, not once the scroll comes to rest.
-  const settle = () => {
+  // Only the light deck layer follows the gesture. Reporting focus to the shell
+  // also expands history and resumes the session, so wait until it comes to rest.
+  const preview = () => {
     const element = scrollerRef.current;
-    if (!element) return;
+    if (!element) return null;
     const index = Math.max(0, Math.min(cards.length - 1, Math.round(element.scrollLeft / stepRef.current)));
     setRest(current => current.selected === index ? current : { ...current, selected: index });
+    return index;
+  };
+  const settle = () => {
+    const element = scrollerRef.current;
+    if (!element || element.classList.contains("cq-pointer-drag") || element.classList.contains("cq-vertical-wheel")) return;
+    const index = preview();
+    if (index === null) return;
+    scrollingRef.current = false;
+    setScrolling(false);
     if (index !== reported.current) {
       reported.current = index;
       onIndexRef.current(index);
@@ -73,9 +88,19 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
   const scrollIdle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(scrollIdle.current), []);
   const onScroll = () => {
-    settleRef.current();
+    const element = scrollerRef.current;
+    if (!element) return;
+    if (!scrollingRef.current) {
+      scrollingRef.current = true;
+      setScrolling(true);
+    }
+    preview();
     clearTimeout(scrollIdle.current);
-    scrollIdle.current = setTimeout(() => settleRef.current(), 120);
+    // Native scrollend also waits for the gesture and snapping to finish. Older
+    // engines use an idle timeout, guarded against an ongoing mouse drag/wheel.
+    if (!("onscrollend" in element)) {
+      scrollIdle.current = setTimeout(() => settleRef.current(), 120);
+    }
   };
 
   // Stage width is the card width; the scroller reaches past the stage to the
@@ -119,7 +144,9 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     const current = () => Math.round(element.scrollLeft / stepRef.current);
     const scrollToCard = (index: number) => {
       const last = Math.max(0, deckLayers(element).length - 1);
-      element.scrollTo({ left: Math.max(0, Math.min(last, index)) * stepRef.current, behavior: smooth() });
+      const left = Math.max(0, Math.min(last, index)) * stepRef.current;
+      if (Math.abs(element.scrollLeft - left) < 1) { settleRef.current(); return; }
+      element.scrollTo({ left, behavior: smooth() });
     };
     navigationRef.current = direction => scrollToCard(current() + direction);
     const outsideFront = (target: EventTarget | null) => {
@@ -219,25 +246,40 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
     };
   }, [suspended, orderKey, resetKey, navigationRef]);
 
-  // Cards near the front one get their conversation, one per idle moment, once
-  // the deck is at rest; those far away let it go.
   useEffect(() => {
-    const near = (index: number) => Math.abs(index - selected) <= LIVE_RANGE;
-    const kept = [...liveCards].filter(id => near(cards.findIndex(card => card.id === id)));
-    if (kept.length !== liveCards.size) { setLiveCards(new Set(kept)); return; }
+    const id = cards[focusedIndex]?.id;
+    if (id && id !== withheldCardId) recentCards.current = [id, ...recentCards.current.filter(previous => previous !== id)].slice(0, RECENT_CARDS);
+  }, [cards, focusedIndex, withheldCardId]);
+
+  // Warm nearby conversations at rest. Keep recent visits as well, so swiping
+  // back reuses their DOM instead of unloading and rebuilding the same card.
+  useEffect(() => {
+    if (scrolling) return;
+    const near = (index: number) => Math.abs(index - focusedIndex) <= LIVE_RANGE;
+    const kept = new Set([...liveCards].filter(id => {
+      const index = cards.findIndex(card => card.id === id);
+      return index >= 0 && (near(index) || recentCards.current.includes(id));
+    }));
+    // The focused conversation is already mounted, even before an idle load.
+    const focusedId = cards[focusedIndex]?.id;
+    if (focusedId && focusedId !== withheldCardId) kept.add(focusedId);
+    if (kept.size !== liveCards.size || [...kept].some(id => !liveCards.has(id))) { setLiveCards(kept); return; }
     if (suspended) return;
-    const next = cards.map((card, index) => ({ card, distance: Math.abs(index - selected) }))
+    const next = cards.map((card, index) => ({ card, distance: Math.abs(index - focusedIndex) }))
       .filter(({ card, distance }) => distance <= LIVE_RANGE && card.id !== withheldCardId && !liveCards.has(card.id))
       .sort((a, b) => a.distance - b.distance)[0];
     if (!next) return;
-    const load = () => startTransition(() => setLiveCards(previous => new Set(previous).add(next.card.id)));
+    const load = () => {
+      if (scrollingRef.current) return;
+      startTransition(() => setLiveCards(previous => scrollingRef.current ? previous : new Set(previous).add(next.card.id)));
+    };
     if (typeof window.requestIdleCallback === "function") {
       const idle = window.requestIdleCallback(load, { timeout: 100 });
       return () => window.cancelIdleCallback(idle);
     }
     const timer = setTimeout(load, 32);
     return () => clearTimeout(timer);
-  }, [cards, selected, liveCards, suspended, withheldCardId]);
+  }, [cards, focusedIndex, liveCards, suspended, withheldCardId, scrolling]);
 
   return <div className="cq-deck-scroller" inert={suspended} aria-hidden={suspended} ref={scrollerRef} onScroll={onScroll} aria-label={t("queue.左右滑动浏览卡片，停下后自动吸附")}>
     <div className="cq-deck-track">
@@ -247,7 +289,7 @@ export function CardDeck({ cards, focusedIndex, resetKey, navigationRef, onIndex
         return <div key={card.id} className="cq-deck-layer" data-urgent-call={hasUrgentCall(card)} data-transfer-id={suspended ? undefined : card.id} data-transfer-zone="deck" data-deck-index={index} aria-hidden={!isFront}
           style={{ order: index, width }}>
           <div className="cq-deck-layer-body" inert={!isFront}>
-            {live ? <DeckContent card={card} isFront={index === focusedIndex && !suspended} renderCard={renderCard} /> : <div className="cq-back-card" />}
+            {live ? <DeckContent card={card} isFront={index === focusedIndex && !suspended} renderCard={renderCard} /> : <DeckContent card={card} isFront={false} renderCard={renderPreview} />}
           </div>
         </div>;
       })}

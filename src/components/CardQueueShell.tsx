@@ -32,6 +32,7 @@ import { ChannelRequests } from "./ChannelRequests";
 import { CardNames } from "@/lib/card-names";
 import { nicknameHue } from "@/lib/card-nickname";
 import { VSCodeButton } from "./VSCodeButton";
+import { CardLogButton } from "./CardLogButton";
 import { PersistentTerminalProvider } from "./PersistentTerminalViews";
 import { SettingsPanel } from "./SettingsPanel";
 import { QUE_REPO_URL, releaseUrl, useAppUpdate } from "@/hooks/useAppUpdate";
@@ -49,6 +50,7 @@ import { CardTransfers } from "./CardTransfers";
 import { CardInspectionOverlay } from "./CardInspectionOverlay";
 import { CardOverview } from "./CardOverview";
 import { CardDeck } from "./CardDeck";
+import { CardDeckPreview } from "./CardDeckPreview";
 import { Icon } from "./QueueIcon";
 import { QueLogo, QueMark } from "./QueLogo";
 import { CardQueueMinimap } from "./CardQueueMinimap";
@@ -484,7 +486,7 @@ function CardQueueShellContent() {
   // PersistentTerminalProvider retains the actual terminal across that move.
   if (submissionBehavior === "keep-in-view" && !detachedId && queue) {
     for (const card of cards) {
-      if (card.phase !== "working" || card.detached || pendingDetach.has(card.id) || card.manualPlacement?.background) continue;
+      if (card.phase !== "working" || card.detached || pendingDetach.has(card.id)) continue;
       const prior = priorHarnessPhases.current.get(card.id);
       if (prior === undefined || prior === "working") continue;
       if (inspecting === card.id) {
@@ -967,27 +969,6 @@ function CardQueueShellContent() {
     const remoteAddress = remoteHost ? `${remoteHost.user ? `${remoteHost.user}@` : ""}${remoteHost.hostname}${remoteHost.port && remoteHost.port !== 22 ? `:${remoteHost.port}` : ""}` : hostLabel;
     const isTmux = false;
     const showScore = !!(visibleCard.session || visibleCard.harness) && queue?.sortMode === "score" && visibleCard.phase === "attention";
-    const bringForward = visibleCard.phase === "working";
-    const placementLabel = t(bringForward ? "queue.manualForeground" : "queue.manualBackground");
-    const placementButton = !detachedId && !visibleCard.detached && visibleCard.harness && !visibleCard.archivedAt
-      && (visibleCard.phase === "attention" || bringForward) ? <button
-        type="button" className="cq-tools-trigger" title={placementLabel} aria-label={placementLabel}
-        disabled={busy || ["exited", "error", "not_running"].includes(visibleCard.harness.state)}
-        onClick={async () => {
-          if (busy) return;
-          setBusy(true);
-          try {
-            if (!await run("card_placement", { id: visibleCard.id, background: !bringForward })) return;
-            if (!bringForward) {
-              setWatching(current => current === visibleCard.id ? null : current);
-              finishCard(visibleCard.id);
-            }
-          } finally { setBusy(false); }
-        }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d={bringForward ? "M12 19V5m-6 6 6-6 6 6" : "M12 5v14m-6-6 6 6 6-6"} />
-        </svg><span>{placementLabel}</span>
-      </button> : null;
     const showHeaderMeta = visibleCard.phase !== "attention" || hasUrgentCall(visibleCard) || visibleCard.remindAt !== undefined || !(visibleCard.session || visibleCard.harness);
     const harness = (
               <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} sshHost={workspace?.kind === "ssh" ? workspace.sshHost : undefined} sshHostName={remoteHost?.name ?? workspace?.sshHost} extensionHarnesses={extensionHarnesses} startingAll={startingAll} onStartAll={startable.length > 1 || startingAll ? startAllHarnesses : undefined} onAction={async (action, data) => {
@@ -1008,9 +989,9 @@ function CardQueueShellContent() {
                 <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />
                 <span className="cq-score-term"><span className="cq-score-operator">+</span><ScoreChipTooltip text={t("queue.等待分钟", { minutes: waitMinutes })}><span className="cq-score-chip cq-score-wait"><span aria-hidden="true">⏳</span> {t("queue.Wait")} <b>{cardScore.waiting}</b></span></ScoreChipTooltip></span>
                 {cardScore.tags.map(tag => <span className="cq-score-term" key={tag.name}><span className="cq-score-operator">+</span><ScoreChipTooltip text={tag.description}><span className="cq-score-chip" style={tagColor(tag.name)}>{tag.name} <b>{tag.weight}</b></span></ScoreChipTooltip></span>)}
-              </ScoreFormulaPopover>}</div><div className="cq-card-title-row"><div className="cq-title-primary">{workspace?.kind === "ssh" ? <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="remote" size={14} />{hostLabel}{isTmux && <span className="cq-tmux-badge">TMUX</span>}</span><small>{remoteAddress}</small></div>}><span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="remote" size={15} />{isTmux && <span className="cq-tmux-badge">TMUX</span>}<b title={hostWithHarness}>{hostWithHarness}</b></span></ScoreChipTooltip> : <span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="local" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span>}<ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{workspaceLabel}</span><small>{workspace?.cwd || visibleCard.cwd}</small></div>}><span className="cq-title-environment cq-title-workspace" aria-label={workspaceLabel}><WorkspaceMachineIcon name="folder" size={15} /><b>{workspaceLabel}</b></span></ScoreChipTooltip></div><div className="cq-title-controls"><div className="cq-title-harness" /><div className="cq-title-branches" /><div className="cq-title-actions"><div className="cq-title-tools"><VSCodeButton key={visibleCard.id} cardId={visibleCard.id} />{layout ? <SideTerminalButton pressed={layout.terminalOpen} label={t("queue.sideTerminal")} onClick={layout.toggleTerminal} /> : sideButton}</div>{(placementButton || visibleCard.harness) && <div className="cq-card-more">
+              </ScoreFormulaPopover>}</div><div className="cq-card-title-row"><div className="cq-title-primary">{workspace?.kind === "ssh" ? <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="remote" size={14} />{hostLabel}{isTmux && <span className="cq-tmux-badge">TMUX</span>}</span><small>{remoteAddress}</small></div>}><span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="remote" size={15} />{isTmux && <span className="cq-tmux-badge">TMUX</span>}<b title={hostWithHarness}>{hostWithHarness}</b></span></ScoreChipTooltip> : <span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="local" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span>}<ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{workspaceLabel}</span><small>{workspace?.cwd || visibleCard.cwd}</small></div>}><span className="cq-title-environment cq-title-workspace" aria-label={workspaceLabel}><WorkspaceMachineIcon name="folder" size={15} /><b>{workspaceLabel}</b></span></ScoreChipTooltip></div><div className="cq-title-controls"><div className="cq-title-harness" /><div className="cq-title-branches" /><div className="cq-title-actions"><div className="cq-title-tools"><VSCodeButton key={visibleCard.id} cardId={visibleCard.id} />{layout ? <SideTerminalButton pressed={layout.terminalOpen} label={t("queue.sideTerminal")} onClick={layout.toggleTerminal} /> : sideButton}</div>{visibleCard.harness && <div className="cq-card-more">
                 <button type="button" className="cq-tools-trigger" aria-label={t("queue.more")} aria-haspopup="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg><span>{t("queue.more")}</span></button>
-                <div className="cq-card-more-popover">{placementButton}<div className="cq-title-logs" /></div>
+                <div className="cq-card-more-popover"><CardLogButton cardId={visibleCard.id} /></div>
               </div>}</div></div></div></div>
                 <div className="cq-card-actions">
                   {!detachedId && (visibleCard.remindAt !== undefined
@@ -1079,7 +1060,14 @@ function CardQueueShellContent() {
       attentionMode={attentionMode}
       focusedId={focus?.id ?? active?.id}
     >
-    <div className="cq-layout" inert={!!inspected && !detachedId}>
+    <div className="cq-layout" inert={!!inspected && !detachedId} onDoubleClick={(event) => {
+      if (detachedId || overview || !(ready.length || working.length || reminding.length)) return;
+      // Only the canvas itself: double-clicking card text still selects words,
+      // and controls and the native title-bar drag region keep their actions.
+      if (event.target instanceof Element && event.target.matches(".cq-layout,.cq-sidebar,.cq-working-list,.cq-content,.cq-main,.cq-stage,.cq-deck-scroller,.cq-deck-track,.cq-deck-end,.cq-empty")) {
+        setOverview(true);
+      }
+    }}>
       {!detachedId && !overview && <aside className="cq-sidebar">
         <div className="cq-sidebar-brand"><a className="cq-brand" href={QUE_REPO_URL} aria-label="Que GitHub" title="GitHub" onClick={(event) => { event.preventDefault(); void openUrl(QUE_REPO_URL).catch(() => showQueueToast(t("settings.aboutOpenFailed"))); }}><span className="cq-logo"><QueLogo /></span>QueACP</a><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
         <button className="cq-new" onClick={showNew}><Icon name="plus" /> {t("queue.新会话")}</button>
@@ -1188,7 +1176,8 @@ function CardQueueShellContent() {
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
               : <>
-                  <CardDeck cards={ready} navigationRef={deckNavigationRef} focusedIndex={deckIndex} resetKey={deckReset} suspended={!!inspected} withheldCardId={inspected?.id ?? inspectionLeaving?.id ?? null} onIndexChange={(index) => { if (ready[index]) setFocus({id: ready[index].id, index}); }} renderCard={renderCard} />
+                  <CardDeck cards={ready} navigationRef={deckNavigationRef} focusedIndex={deckIndex} resetKey={deckReset} suspended={!!inspected} withheldCardId={inspected?.id ?? inspectionLeaving?.id ?? null} onIndexChange={(index) => { if (ready[index]) setFocus({id: ready[index].id, index}); }} renderCard={renderCard}
+                    renderPreview={card => <CardDeckPreview card={card} title={titleOf(card)} subtitle={`${displayProject(card)} · ${cardHostLabel(card, workspaceOf(card))}`} />} />
                 </>}
           </> : <div className="cq-empty">
             {detachedId && <div className="cq-detached-window-drag" data-tauri-drag-region aria-hidden="true" />}
@@ -1254,7 +1243,7 @@ function CardQueueShellContent() {
     }} onRemove={async (workspaceId) => {
       setBusy(true); const result = await run("workspace_remove", { workspaceId }); setBusy(false); return !!result;
     }} onSelect={async (workspaceId) => {
-      if (historyMode) { setHistoryWorkspaceId(workspaceId); setCreating(false); setHistory([]); return; }
+      if (historyMode) { setHistoryWorkspaceId(workspaceId); setHistorySearch(""); setCreating(false); setHistory([]); return; }
       setCreating(false); setNewCardWorkspace(workspaceId);
     }} />}
     {addingWorkspace && <WorkspaceForm key={typeof workspaceFormEntry === "string" ? workspaceFormEntry : workspaceFormEntry.id} entry={workspaceFormEntry} defaultCwd={defaultCwd} busy={busy} error={error} onClose={() => setAddingWorkspace(false)} onBack={() => { setAddingWorkspace(false); setCreating(true); }} onSave={async (value) => {
@@ -1270,7 +1259,33 @@ function CardQueueShellContent() {
       }
     }} />}
     {archiveConfirm && <div className="cq-overlay" onClick={() => !busy && setArchiveConfirm(null)}><section className="cq-dialog cq-archive-confirm" role="dialog" aria-modal="true" aria-label={t("queue.确认归档")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="archive" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setArchiveConfirm(null)}><Icon name="close" /></button></div><h2>{t("queue.确认归档")}</h2><p>{t("queue.归档后会话将移到历史对话，之后仍可重新打开。")}</p><label className="cq-archive-skip"><input type="checkbox" checked={skipArchiveChecked} disabled={busy} onChange={event => setSkipArchiveChecked(event.target.checked)} /><span>{t("queue.skipArchiveThisPage")}<small>{t("queue.skipArchiveThisPageHint")}</small></span></label><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setArchiveConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { setBusy(true); const result = await run("archive", { id: archiveConfirm.id }); setBusy(false); if (result) { if (skipArchiveChecked) setSkipArchiveConfirmation(true); advanceToNextCard(archiveConfirm.id); setArchiveConfirm(null); } }}>{t("queue.归档")}</button></div></section></div>}
-    {history && <div className="cq-overlay" onClick={() => setHistory(null)}><section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div><h2>{t("queue.历史对话")}</h2><div className="fc-history-tabs" role="tablist"><button role="tab" aria-selected={!agentHistory} onClick={()=>{setAgentHistory(false);setHistoryMode(true);setHistoryError("");}}>{t("history.workspaceTab")}</button><button role="tab" aria-selected={agentHistory} onClick={()=>{setAgentHistory(true);setHistoryMode(false);setHistoryError("");setHistoryLoading(false);}}>{t("history.agentTab")}</button></div>{!agentHistory && <button className="fc-history-workspace" onClick={() => {setHistory(null);setCreating(true);}}><Icon name="stack" /><span>{historyWorkspace?.name || t("history.chooseWorkspace")}<small>{historyWorkspace?.cwd}</small></span><span>⌄</span></button>}<input aria-label="搜索会话" placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><>{historyError && agentHistory && <p role="alert">{historyError}</p>}</>{agentHistory ? <NativeHistory opening={openingHistory} activeIds={cards.filter(c=>c.archivedAt==null).map(c=>c.id)} search={historySearch} onOpen={entry=>void openHistorySession(entry.recordId,entry)}/> : <div className="cq-history-list">{historyLoading && <p role="status">正在读取 acpx 会话…</p>}{historyError && <p role="alert">{historyError}</p>}{!historyLoading && historyMatches.map(item => <button key={item.recordId} disabled={busy} onClick={()=>void openHistorySession(item.recordId)}><span>{item.title}</span><small>{item.agent} · {new Date(item.updatedAt).toLocaleString()}</small></button>)}{!!historyWorkspaceId && !historyLoading && !historyError && !historyMatches.length && <p>这个工作区没有匹配的 acpx 会话。</p>}</div>}</section></div>}
+    {history && <div className="cq-overlay" onClick={() => setHistory(null)}>
+      <section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={event => event.stopPropagation()}>
+        <div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div>
+        <h2>{t("queue.历史对话")}</h2>
+        <div className="fc-history-tabs" role="tablist">
+          <button role="tab" aria-selected={!agentHistory} onClick={() => { setAgentHistory(false); setHistoryMode(true); setHistorySearch(""); setHistoryError(""); }}>{t("history.workspaceTab")}</button>
+          <button role="tab" aria-selected={agentHistory} onClick={() => { setAgentHistory(true); setHistoryMode(false); setHistorySearch(""); setHistoryError(""); setHistoryLoading(false); }}>{t("history.agentTab")}</button>
+        </div>
+        {!agentHistory && <>
+          <button className="fc-history-selector fc-history-workspace" onClick={() => { setHistory(null); setCreating(true); }}>
+            <Icon name="stack" size={20}/>
+            <span className="fc-history-selector-label">{historyWorkspace?.name || t("history.chooseWorkspace")}
+              {historyWorkspace && <small>{hostLabelOf(historyWorkspace)} · {historyWorkspace.cwd}</small>}
+            </span>
+            <span aria-hidden="true">⌄</span>
+          </button>
+          {historyWorkspace && <input className="fc-history-search" aria-label={t("queue.搜索会话或项目…")} placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={event => setHistorySearch(event.target.value)} />}
+        </>}
+        {historyError && agentHistory && <p role="alert">{historyError}</p>}
+        {agentHistory ? <NativeHistory opening={openingHistory} activeIds={cards.filter(c => c.archivedAt == null).map(c => c.id)} search={historySearch} onSearchChange={setHistorySearch} onOpen={entry => void openHistorySession(entry.recordId, entry)}/> : <div className="cq-history-list">
+          {historyLoading && <p role="status">正在读取 acpx 会话…</p>}
+          {historyError && <p role="alert">{historyError}</p>}
+          {!historyLoading && historyMatches.map(item => <button key={item.recordId} disabled={busy} onClick={() => void openHistorySession(item.recordId)}><span>{item.title}</span><small>{item.agent} · {new Date(item.updatedAt).toLocaleString()}</small></button>)}
+          {!!historyWorkspaceId && !historyLoading && !historyError && !historyMatches.length && <p>这个工作区没有匹配的 acpx 会话。</p>}
+        </div>}
+      </section>
+    </div>}
     {settings && <SettingsPanel cwd={active?.cwd || defaultCwd || null} sessionId={active?.session?.id || null} initialSection={settingsSection} onClose={() => { setSettings(false); setModelsRefreshKey((key) => key + 1); void refreshRemoteHosts(); }} onSessionReloaded={() => { setSessionRefreshKey((key) => key + 1); void refresh(); }} appUpdate={appUpdate} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={setQuoteSelectionEnabled} />}
   </div></CardNames.Provider>;
 }

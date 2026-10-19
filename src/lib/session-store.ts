@@ -29,7 +29,7 @@ function setFailures(count: number) {
 async function resync(id: string) {
   try {
     const response = await fetch(`/api/acp/${encodeURIComponent(id)}`, { cache: "no-store" });
-    if (response.ok) { snapshots.set(id, await response.json()); changed(id); }
+    if (response.ok) cacheSessionSnapshot(id, await response.json());
   } catch { /* the stream keeps trying */ }
 }
 
@@ -64,8 +64,13 @@ function connect() {
 function hold() {
   if (!source && !retry) connect();
   return () => {
-    if (listeners.size || handlers.size) return;
-    source?.close(); source = undefined; clearTimeout(retry); retry = undefined;
+    // React cleans up the old card before subscribing the new one. That
+    // handoff is not a disconnected view: reopening here replays every cached
+    // conversation (often many megabytes) on each swipe.
+    queueMicrotask(() => {
+      if (listeners.size || handlers.size) return;
+      source?.close(); source = undefined; clearTimeout(retry); retry = undefined;
+    });
   };
 }
 
@@ -97,6 +102,12 @@ export function subscribeSessionEvents(id: string, handler: (event: StreamEvent<
 
 /** What the shared stream already knows of a card, without subscribing. */
 export const peekSessionSnapshot = (id: string) => snapshots.get(id);
+
+/** Full reads and stream snapshots feed the same versioned cache. A read may
+ * discover a session after the stream's initial replay, with no later event. */
+export function cacheSessionSnapshot(id: string, snapshot: SessionSnapshot) {
+  apply(id, { event: "snapshot", data: snapshot });
+}
 
 /** The live conversation of a connected card; undefined until it is connected, or for "". */
 export function useSessionSnapshot(id: string): SessionSnapshot | undefined {

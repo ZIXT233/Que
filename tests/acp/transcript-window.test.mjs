@@ -85,9 +85,10 @@ export async function run(){
  assert.equal(shown()[0],45,'opened again, the same turns are shown');assert.equal(box().scrollTop,1700);
  await act(async()=>document.querySelector('.cq-acp-earlier').click());
  assert.equal(shown()[0],30,'the button shows 15 more');
+ const retained=shown();
  await render('preview',false);
- assert.deepEqual(shown(),[73,74,75],'a card behind the front one shows its last turns only');
- assert.equal(document.querySelector('.cq-acp-earlier'),null);
+ assert.deepEqual(shown(),retained,'a mounted inactive card retains its history window');
+ assert.equal(document.querySelector('.cq-acp-earlier').disabled,true,'the earlier-history row stays in place while inactive');
  await act(async()=>root.unmount());
  globalThis.__hidden=true;
  const hidden=createRoot(document.getElementById('root'));

@@ -27,7 +27,6 @@ export interface QueueCard {
   workspaceId?: string;
   session: SessionInfo | null;
   phase: CardPhase;
-  manualPlacement?: { background: boolean; terminalId: string; observedState: string };
   createdAt: number;
   readyAt?: number;
   priorityWeight?: number;
@@ -73,13 +72,7 @@ export function reconcileQueue(state: CardQueue, running: Set<string>, attention
     if (card.detached && card.detached.expiresAt <= now) delete card.detached;
     if (!card.session && !card.harness) continue;
     const sessionId = card.session?.id ?? card.id;
-    let phase: CardPhase = card.harness ? (card.harness.state === "working" ? "working" : "attention") : attention.has(sessionId) ? "attention" : running.has(sessionId) ? "working" : "attention";
-    if (card.manualPlacement) {
-      const h = card.harness;
-      if (card.archivedAt === undefined && h && h.terminalId === card.manualPlacement.terminalId && h.state === card.manualPlacement.observedState && h.state !== "exited" && h.state !== "error" && h.state !== "not_running") {
-        phase = card.manualPlacement.background ? "working" : "attention";
-      } else delete card.manualPlacement;
-    }
+    const phase: CardPhase = card.harness ? (card.harness.state === "working" ? "working" : "attention") : attention.has(sessionId) ? "attention" : running.has(sessionId) ? "working" : "attention";
     if (card.archivedAt !== undefined) {
       if (phase === "working" || attention.has(sessionId)) delete card.archivedAt;
       else { next.order = next.order.filter((id) => id !== card.id); continue; }

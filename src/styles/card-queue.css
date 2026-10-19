@@ -241,6 +241,10 @@ html.dark .cq-history-list .cq-history-nickname { color: hsl(var(--cq-nickname-h
 .cq-deck-layer-body{position:absolute;inset:0}
 .cq-deck-layer-body > .cq-continuous-card{inset:0;transform:none;transition:none;animation:none}
 .cq-deck-layer-body > .cq-back-card{inset:0}
+.cq-deck-preview-content{flex:1;min-height:0;overflow:hidden;padding:22px 28px;color:var(--cq-ink);font-size:14px;line-height:1.7}
+.cq-deck-preview-content p{margin:0 0 18px;white-space:pre-wrap;overflow-wrap:anywhere}
+.cq-deck-preview-ask{padding:12px 16px;border-radius:12px;background:var(--cq-surface)}
+.cq-deck-preview-status{color:var(--cq-muted);font-size:12px}
 .cq-deck-end{flex:none;width:calc(var(--cq-deck-bleed-right,24px) - 24px)}
 .cq-deck-layer::after{content:"";position:absolute;inset:0;z-index:5;border-radius:22px;pointer-events:none;background:rgb(255 255 255 / 32%);opacity:0}
 .cq-deck-layer[aria-hidden="true"]::after{opacity:1}

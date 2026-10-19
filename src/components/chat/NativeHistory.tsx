@@ -1,10 +1,11 @@
 import { useI18n } from '@/hooks/useI18n';
 import { useEffect, useRef, useState } from 'react';
 import { ProviderIcon } from '../ProviderIcon';
+import { Icon } from '../QueueIcon';
 import { harnessName, providerIconId, type HarnessCatalogEntry } from '@/lib/harness/catalog';
 import type { AcpHistoryEntry } from '@/hooks/useAcpHistory';
 
-export function NativeHistory({workspace, onOpen, activeIds, search, opening}: {workspace?:string; onOpen:(entry:AcpHistoryEntry)=>void;activeIds:string[];search:string;opening?:string|null}) {
+export function NativeHistory({workspace, onOpen, activeIds, search, onSearchChange, opening}: {workspace?:string; onOpen:(entry:AcpHistoryEntry)=>void;activeIds:string[];search:string;onSearchChange:(search:string)=>void;opening?:string|null}) {
   const {t}=useI18n();
   const [catalog,setCatalog]=useState<HarnessCatalogEntry[]>([]);
   const [agent,setAgent]=useState('');
@@ -31,7 +32,7 @@ export function NativeHistory({workspace, onOpen, activeIds, search, opening}: {
     pending.current?.abort();const c=new AbortController();pending.current=c;
     setAgent(id);setBusy(true);setError('');if(picker.current)picker.current.open=false;
     let collected=next?entries:[],pageCursor=next;const seen=new Set<string>();
-    if(!next){setEntries([]);setCursor(undefined);}
+    if(!next){onSearchChange('');setEntries([]);setCursor(undefined);}
     try {
       for(let pageIndex=0;pageIndex<100;pageIndex++){
         const r=await fetch(`/api/acp-history?${workspace?'workspace='+encodeURIComponent(workspace)+'&':''}agent=${encodeURIComponent(id)}${pageCursor?'&cursor='+encodeURIComponent(pageCursor):''}`,{signal:c.signal});
@@ -50,10 +51,15 @@ export function NativeHistory({workspace, onOpen, activeIds, search, opening}: {
   const visible=entries.filter(e=>!activeIds.includes(e.cardId||'')&&`${e.title} ${e.agent} ${e.cwd}`.toLowerCase().includes(search.toLowerCase()));
   return <section className="fc-native-history">
     <details ref={picker} className="fc-agent-picker" onKeyDown={e=>{if(e.key==='Escape'&&picker.current){picker.current.open=false;picker.current.querySelector('summary')?.focus();}}}>
-      <summary>{agent&&<ProviderIcon id={providerIconId(agent)} size={20}/>}<span>{agent?harnessName(agent):t('history.agentTab')}</span><span>⌄</span></summary>
+      <summary className="fc-history-selector" aria-label={t('history.chooseHarness')}>
+        {agent ? <ProviderIcon id={providerIconId(agent)} size={20}/> : <Icon name="stack" size={20}/>}
+        <span className="fc-history-selector-label">{agent?harnessName(agent):t('history.chooseHarness')}<small>{t(workspace ? 'history.workspaceMode' : 'history.agentScope')}</small></span>
+        <span aria-hidden="true">⌄</span>
+      </summary>
       <div className="fc-agent-picker-options">{catalog.map(a=><button type="button" key={a.id} aria-pressed={agent===a.id} onClick={()=>void load(a.id)}><ProviderIcon id={providerIconId(a.id)} size={20}/><span className="fc-agent-picker-label">{harnessName(a.id)}</span>{agent===a.id&&<span>✓</span>}</button>)}</div>
     </details>
     {agent&&<>
+      <input className="fc-history-search" aria-label={t('queue.搜索会话或项目…')} placeholder={t('queue.搜索会话或项目…')} value={search} onChange={event=>onSearchChange(event.target.value)}/>
       <div className="cq-history-list">{visible.map(e=><button key={e.recordId} disabled={!!opening} aria-busy={opening===e.recordId} onClick={()=>onOpen(e)}><span>{e.title}{opening===e.recordId ? " · 正在打开…" : ""}</span><small title={e.cwd}>{e.cwd}</small></button>)}</div>
       {busy&&<p role="status">{t('acp.history.loading')}</p>}
       {!busy&&!error&&!visible.length&&<p role="status">没有匹配的历史会话。</p>}

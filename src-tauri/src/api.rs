@@ -681,33 +681,6 @@ pub(crate) fn apply_action(
     let id = body.get("id").and_then(|v| v.as_str());
     let mut created = None;
     match action {
-        "card_placement" => {
-            let background = body
-                .get("background")
-                .and_then(Value::as_bool)
-                .ok_or_else(|| AppError::msg("缺少卡片前后台状态"))?;
-            let card = queue
-                .cards
-                .iter_mut()
-                .find(|c| Some(c.id.as_str()) == id)
-                .ok_or_else(|| AppError::msg("CLI 卡片不存在"))?;
-            let harness = card
-                .harness
-                .as_ref()
-                .ok_or_else(|| AppError::msg("请先启动 CLI"))?;
-            if card.archived_at.is_some()
-                || card.detached.is_some()
-                || matches!(harness.state.as_str(), "exited" | "error" | "not_running")
-            {
-                return Err(AppError::msg("当前卡片无法切换前后台"));
-            }
-            card.remind_at = None;
-            card.manual_placement = Some(crate::models::ManualCardPlacement {
-                background,
-                terminal_id: harness.terminal_id.clone(),
-                observed_state: harness.state.clone(),
-            });
-        }
         "shell_background" => {
             let card = queue
                 .cards
