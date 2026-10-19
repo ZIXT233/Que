@@ -1,12 +1,12 @@
 //! Channels: which cards may talk to each other.
 //!
 //! A channel joins two cards in both directions: either may message the other
-//! and read its session. The Butler is joined to every card. Channels are made
-//! by the user, either directly on a card or by allowing an Agent's request —
-//! a message to a card it has no channel with waits in the inbox until then.
-//! Only the main window changes channels: the local HTTP API is not
-//! authenticated, and an Agent must not open its own channels.
-use crate::{api::AppState, error::{AppError, AppResult}, models::CardQueue};
+//! and read its session. A card the user gave "all channels" is joined to every
+//! card. Channels are made by the user, either directly on a card or by allowing
+//! an Agent's request — a message to a card it has no channel with waits in the
+//! inbox until then. Only the main window changes channels and permissions: an
+//! Agent must not grant itself either.
+use crate::{api::AppState, error::{AppError, AppResult}, models::{CardPermissions, CardQueue}};
 use serde_json::{json, Value};
 
 fn pair(a: &str, b: &str) -> [String; 2] {
@@ -14,8 +14,20 @@ fn pair(a: &str, b: &str) -> [String; 2] {
 }
 
 pub fn open(queue: &CardQueue, a: &str, b: &str) -> bool {
-    let butler = |id: &str| queue.cards.iter().any(|c| c.id == id && crate::butler::is_card(c));
-    a != b && (butler(a) || butler(b) || queue.channels.contains(&pair(a, b)))
+    let everyone = |id: &str| queue.cards.iter().any(|c| c.id == id && c.permissions.all_channels);
+    a != b && (everyone(a) || everyone(b) || queue.channels.contains(&pair(a, b)))
+}
+
+/// Sets what a card's Agent may do beyond its own session.
+pub async fn set_permissions(state: &AppState, id: &str, permissions: CardPermissions) -> AppResult<()> {
+    state.queue.with_queue(false, |queue| {
+        let card = queue.cards.iter_mut().find(|c| c.id == id).ok_or_else(|| AppError::msg("Card not found"))?;
+        card.permissions = permissions;
+        Ok(())
+    }).await?;
+    // Joined to everyone now: what waited for a channel from or to it goes.
+    if permissions.all_channels { crate::inbox::release_all(id).await?; }
+    Ok(())
 }
 
 /// Joins or separates two cards.
@@ -76,7 +88,7 @@ pub async fn decide(state: &AppState, from: &str, to: &str, allow: bool) -> AppR
 mod tests {
     use super::*;
     #[test]
-    fn a_channel_works_both_ways_and_the_butler_reaches_everyone() {
+    fn a_channel_works_both_ways_and_all_channels_reaches_everyone() {
         let mut queue = CardQueue::empty();
         queue.cards = serde_json::from_value(json!([
             {"id":"a","cwd":"/w","phase":"attention","createdAt":0},
@@ -86,5 +98,7 @@ mod tests {
         queue.channels.push(pair("b", "a"));
         assert!(open(&queue, "a", "b") && open(&queue, "b", "a"));
         assert!(!open(&queue, "a", "c") && !open(&queue, "a", "a"));
+        queue.cards[2].permissions.all_channels = true;
+        assert!(open(&queue, "a", "c") && open(&queue, "c", "b") && !open(&queue, "c", "c"));
     }
 }

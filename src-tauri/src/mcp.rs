@@ -4,7 +4,7 @@
 //! target's conversation with the sender named in its header. acpx queues it when
 //! the target is busy. Answers are ordinary messages back; nothing is relayed
 //! automatically. Every card is the user's own, so messaging needs no approval;
-//! managing cards and settings is the Butler's.
+//! managing cards and settings needs the permissions the user gave that card.
 use crate::api::AppState;
 use crate::error::{AppError, AppResult};
 use axum::{
@@ -118,7 +118,6 @@ pub fn publish(state: &AppState, port: u16) -> AppResult<()> {
         )?;
     }
     start_remote_dispatch(state);
-    crate::butler::install()?;
     Ok(())
 }
 
@@ -374,12 +373,15 @@ async fn run_tool(
     let principal = source_card
         .map(|c| format!("card:{}:{}", c.id, state.harness.epoch(&c.id)))
         .unwrap_or_else(|| format!("client:{client}"));
-    let butler = source_card.is_some_and(crate::butler::is_card);
-    let butler_only = || if butler { Ok(()) } else { Err(AppError::msg("This operation is the Butler's; ask the user or the Butler")) };
+    let permissions = source_card.map(|c| c.permissions).unwrap_or_default();
+    let manager = permissions.manage_cards;
+    let granted = |allowed: bool, what: &str| if allowed { Ok(()) } else {
+        Err(AppError::msg(format!("This card may not {what}; the user can allow it on the card")))
+    };
     match tool {
         "list_settings" => return Ok(crate::mcp_settings::catalog()),
         "read_settings" | "update_settings" | "create_workspace" | "list_remote_hosts" | "configure_remote_host" => {
-            butler_only()?;
+            granted(permissions.settings, "read or change settings")?;
             return match tool {
                 "read_settings" => crate::mcp_settings::read(state, body).await,
                 "update_settings" => crate::mcp_settings::update(state, body).await,
@@ -394,8 +396,8 @@ async fn run_tool(
             let ws = queue.workspaces.as_ref().and_then(|items| items.iter().find(|w| w.id == id)).ok_or_else(|| AppError::msg("Workspace not found"))?;
             return state.harness.request(&crate::workspace_rc::effective_workspace(&queue, ws), &state.bin_dir, json!({"action":"catalog"})).await;
         }
-        "create_card" => { butler_only()?; return crate::mcp_cards::create(state, source_terminal, body).await; }
-        "archive_card" => { butler_only()?; return crate::mcp_cards::archive(state, source_terminal, body).await; }
+        "create_card" => return crate::mcp_cards::create(state, source_terminal, source_card.map(|c| c.id.as_str()), manager, body).await,
+        "archive_card" => { granted(manager, "archive cards")?; return crate::mcp_cards::archive(state, source_terminal, body).await; }
         "list_cards" => return Ok(list_cards(state, &queue, source_card)),
         "wait_messages" => {
             let source = source_card.ok_or_else(|| AppError::msg("wait_messages is for a card's own Agent"))?;
@@ -415,15 +417,15 @@ async fn run_tool(
         .find(|c| c.id == card_id && c.archived_at.is_none())
         .ok_or_else(|| AppError::msg("Card is missing or archived"))?;
     if tool == "set_card_nickname" {
-        if !butler && source_card.is_some_and(|source| source.id != card_id) {
-            return Err(AppError::msg("A card can rename only itself; the Butler can rename any card"));
+        if !manager && source_card.is_some_and(|source| source.id != card_id) {
+            return Err(AppError::msg("This card may rename only itself; the user can allow it to manage cards"));
         }
         return set_nickname(state, tools, body, client, card_id).await;
     }
     if card.harness.is_none() { return Err(AppError::msg("This card has not started an Agent yet")); }
     if let Some(source) = source_card.filter(|source| source.id != card_id) {
-        if tool == "cancel_turn" && !butler {
-            return Err(AppError::msg("Only the user or the Butler can stop another card's turn; send it a message to ask it to stop"));
+        if tool == "cancel_turn" && !manager {
+            return Err(AppError::msg("This card may not stop another card's turn; send it a message to ask it to stop"));
         }
         if !crate::channels::open(&queue, &source.id, card_id) {
             return Err(AppError::msg("No channel with this card. Send it a message: the user is asked to open a channel, and the message goes once they do"));
@@ -515,7 +517,7 @@ fn list_cards(state: &AppState, queue: &crate::models::CardQueue, source: Option
             "nickname":card.nickname,"sessionTitle":h.as_ref().and_then(|h| h.session_name.as_ref()),
             "workspaceName":workspace.map(|w| &w.name),
             "kind":h.as_ref().map(|h| &h.kind), "state":h.as_ref().map(|h| h.state.as_str()).unwrap_or("not_started"),
-            "butler":crate::butler::is_card(card),
+            "permissions":card.permissions,
             "channel":source.is_none_or(|s| crate::channels::open(queue, &s.id, &card.id)),
             "remote":h.as_ref().and_then(|h| h.remote),
             "connected":h.as_ref().is_some_and(|h| state.harness.is_live(&h.terminal_id))})

@@ -66,6 +66,15 @@ pub async fn release(a: &str, b: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// `card` was joined to every card: whatever waited for a channel from or to it may go.
+pub async fn release_all(card: &str) -> AppResult<()> {
+    with_inbox(|letters| for letter in letters.iter_mut().filter(|l| l.held) {
+        if letter.to == card || letter.from["cardId"] == card { letter.held = false; }
+    }).await?;
+    ARRIVED.notify_waiters();
+    Ok(())
+}
+
 /// The user refused a channel: drops what waited for it, returning how many.
 pub async fn drop_held(from: &str, to: &str) -> AppResult<usize> {
     with_inbox(|letters| {

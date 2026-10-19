@@ -76,7 +76,6 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/cwd/browse", get(browse_cwd))
         .route("/api/preferences", get(crate::mcp_settings::get_preferences).put(crate::mcp_settings::put_preferences))
-        .route("/api/butler/digest", post(butler_digest))
         .route("/api/tools/settings", get(get_tools).put(put_tools))
         .route("/api/logs", get(get_logs).post(post_log))
         .route(
@@ -184,14 +183,6 @@ pub(crate) async fn post_queue(
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    if action == "butler_open" {
-        crate::butler::install()?;
-        // No Butler card yet: the app asks for its agent, then makes it with `create`.
-        let id = state.queue.with_queue(false, |q| Ok(crate::butler::ensure(q))).await?;
-        let mut queue = with_cwd(state.queue.read_snapshot()?, &state);
-        queue["butlerId"] = json!(id);
-        return Ok(Json(queue));
-    }
     if action == "workspace_rc_verify" {
         let queue = state.queue.read_snapshot()?;
         let mut workspace = if let Some(key) = body["machineKey"].as_str() {
@@ -376,13 +367,6 @@ async fn acp_history_open(State(state): State<AppState>, Json(body): Json<Value>
     }
     Ok(Json(json!({"cardId":id})))
 }
-// "Summarize now" from settings; same request the schedule sends.
-async fn butler_digest(State(state): State<AppState>) -> AppResult<Json<Value>> {
-    let sent = crate::digest::run(&state, &format!("digest:manual:{}", uuid::Uuid::new_v4())).await?;
-    if !sent { return Err(crate::error::AppError::msg("管家还没有启动：先在管家卡里选择 Agent 并开始一次对话")); }
-    Ok(Json(json!({"sent":true})))
-}
-
 async fn acp_read(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Json<Value>> {
     let ws = acp_workspace(&state, &id).await?;
     Ok(Json(state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":id})).await?))
@@ -2259,7 +2243,6 @@ pub async fn start_server(state: AppState) -> AppResult<u16> {
     crate::mcp::migrate_legacy_cards(&state).await?;
     crate::mcp::publish(&state, port)?;
     crate::acp_supervisor::start(state.clone());
-    crate::digest::start(state.clone());
     crate::inbox::start(state.clone());
     let app = router(state);
     tokio::spawn(async move {

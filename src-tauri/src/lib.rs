@@ -17,13 +17,11 @@ pub mod headless;
 mod hosts;
 mod live;
 mod mcp;
-mod digest;
 mod mcp_cards;
 mod mcp_settings;
 mod channels;
 mod inbox;
 mod session_view;
-mod butler;
 mod models;
 mod notify;
 mod paste;
@@ -65,6 +63,21 @@ async fn channel_decide(state: tauri::State<'_, api::AppState>, window: tauri::W
 async fn channel_set(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow, a: String, b: String, joined: bool) -> Result<(), String> {
     main_window(&window)?;
     channels::set(&state, &a, &b, joined).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn card_permissions_set(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow, id: String, permissions: models::CardPermissions) -> Result<(), String> {
+    main_window(&window)?;
+    channels::set_permissions(&state, &id, permissions).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn create_requests(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {
+    main_window(&window)?;
+    mcp_cards::requests(&state).await.map_err(|e| e.to_string())
+}
+#[tauri::command]
+async fn create_decide(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow, id: String, allow: bool) -> Result<(), String> {
+    main_window(&window)?;
+    mcp_cards::decide(&state, &id, allow).await.map_err(|e| e.to_string())
 }
 
 /// The API's address and the token every request must carry; only Que's own windows can ask.
@@ -221,6 +234,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             api_access,
             channel_requests,
+            card_permissions_set,
+            create_requests,
+            create_decide,
             channel_decide,
             channel_set,
             editor::open_in_vscode,

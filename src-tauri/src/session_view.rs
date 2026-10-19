@@ -16,7 +16,7 @@ pub fn excerpt(text: &str, limit: usize) -> String {
 }
 
 /// The agent's visible answer for one turn: message text, without thoughts or tools.
-pub fn reply_text(turn: &Value) -> String {
+fn reply_text(turn: &Value) -> String {
     turn["blocks"].as_array().map(|blocks| blocks.iter()
         .filter(|b| b["type"] == "text_delta" && b["stream"] != "thought")
         .filter_map(|b| b["text"].as_str()).collect::<String>()).unwrap_or_default()
@@ -58,7 +58,7 @@ pub fn session_view(card_id: &str, snapshot: &Value, body: &Value) -> Value {
         "note":"Replies are excerpts. Pass turnId for one complete turn (tool calls, diffs). Pending decisions belong to the user."})
 }
 
-/// How a card is named to other agents and in digests: the user's nickname, else
+/// How a card is named to other agents: the user's nickname, else
 /// the session title, else the Agent's name.
 pub fn card_name(card: &QueueCard, snapshot: &Value) -> String {
     card.nickname.clone().or_else(|| snapshot["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string))

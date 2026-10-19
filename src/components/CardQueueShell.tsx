@@ -123,9 +123,6 @@ const openDetachedCardTab = async (cardId: string) => {
   return tab;
 };
 
-// "New session" reuses the one blank draft card (see select_workspace_for_draft).
-// A Butler card is blank until it is given an agent; it is never the draft.
-
 export function CardQueueShell() {
   return <PersistentTerminalProvider><CardQueueShellContent /></PersistentTerminalProvider>;
 }
@@ -171,7 +168,7 @@ function CardQueueShellContent() {
   useViewportHeight();
   const [inspecting, setInspecting] = useState<string | null>(null);
   // Tile mode: all cards on one canvas. The open card is the inspected one, so
-  // everything that opens a card (search, notifications, Butler) zooms to it.
+  // everything that opens a card (search, notifications) zooms to it.
   // The overview is a view of the queue, not a mode: opening a card leaves it.
   const [overview, setOverview] = useState(false);
   const [inspectionLeaving, setInspectionLeaving] = useState<{ id: string; to: "deck" | "sidebar" } | null>(null);
@@ -1005,7 +1002,7 @@ function CardQueueShellContent() {
     return (
     <CardSideTerminal key={visibleCard.id} cardId={visibleCard.id} cwd={visibleCard.cwd} remoteShell={remoteShellOf(workspace)} active={isFront} enabled={!layout} saved={visibleCard.sideTerminals} savedOpen={visibleCard.sideTerminalOpen}>
       {({ button: sideButton, panel: sidePanel }) => (
-    <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card" data-transfer-id={visibleCard.id} data-transfer-zone="deck" data-card-id={visibleCard.id} data-butler={visibleCard.workspaceId === "queacp-butler"} data-phase={visibleCard.phase} data-working-view={visibleCard.phase === "working"} data-urgent-call={hasUrgentCall(visibleCard)}>
+    <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card" data-transfer-id={visibleCard.id} data-transfer-zone="deck" data-card-id={visibleCard.id} data-phase={visibleCard.phase} data-working-view={visibleCard.phase === "working"} data-urgent-call={hasUrgentCall(visibleCard)}>
               <div className="cq-card-header">{detachedId && <div className="cq-detached-drag" data-tauri-drag-region aria-hidden="true" />}{layout?.leftToggle}<div className="cq-card-identity"><div className="cq-card-heading"><div className="cq-card-title-split"><h2 title={titleOf(visibleCard)}>{titleOf(visibleCard)}</h2><CardNicknameEditor cardId={visibleCard.id} nickname={visibleCard.nickname} onSave={async nickname => !!(await run("card_nickname", { id: visibleCard.id, nickname }))} />{!detachedId && <CardChannels card={visibleCard} cards={queue?.cards ?? []} channels={queue?.channels ?? []} nameOf={nameOf} />}</div>{showHeaderMeta && <div className="cq-card-meta">{visibleCard.phase !== "attention" && <div className="cq-card-state"><i className={visibleCard.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{visibleCard.phase === "draft" ? t("queue.新的思路") : t("queue.WORKING")}</div>}{hasUrgentCall(visibleCard) && <span className="cq-urgent-label" title={t("queue.urgentPriority")}>🚨 Urgent Call</span>}{visibleCard.remindAt !== undefined && <span className="cq-remind-label" title={t("queue.稍后提醒")}>⏰ {t("queue.稍后提醒")} · {formatRemainder((visibleCard.remindAt ?? 0) - remindNow)}</span>}{!(visibleCard.session || visibleCard.harness) && <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />}<div className="cq-meta-harness" /></div>}{showScore && <ScoreFormulaPopover label={<><span aria-hidden="true">🧮</span> {t("queue.Score")} {hasUrgentCall(visibleCard) ? "∞" : cardScore.total}</>}>
                 <span className="cq-score-operator">=</span>
                 <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />
@@ -1120,17 +1117,8 @@ function CardQueueShellContent() {
         </div>
       </aside>}
       <div className="cq-content" ref={contentRef}>
-        {!detachedId && <button type="button" className="cq-butler-launch" aria-label="Butler" title="召唤 Butler" disabled={busy} onClick={async () => {
-          setBusy(true);
-          // Open it the way every card is opened: in the deck when it is queued,
-          // otherwise inspected. Without one, its agent is chosen first, as for any card.
-          try {
-            const id = (await act("butler_open")).butlerId;
-            if (!id) setNewCardWorkspace("queacp-butler");
-            else if (!focusNotificationCard(id)) setInspecting(id);
-          }
-          finally {setBusy(false);}
-        }}><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 15a7 7 0 0 1 14 0M3 18h18M12 6V4M10 4h4"/><path d="m9 21 3-2 3 2"/></svg></button>}
+        {!detachedId && <button type="button" className="cq-overview-launch" aria-pressed={overview} aria-label={t("overview.title")} title={t("overview.hint")} disabled={!queue}
+          onClick={() => setOverview(open => !open)}><Icon name="grid" size={20} /></button>}
         {!detachedId && <div className="cq-content-drag" data-tauri-drag-region aria-hidden="true" />}
         {!detachedId && <div className={`cq-content-toolbar${toolbarCompact ? " is-compact" : ""}`} ref={toolbarRef}>
           <div className="cq-toolbar-menu">
@@ -1152,7 +1140,6 @@ function CardQueueShellContent() {
               <button type="button" role="menuitemradio" aria-checked={queue?.sortMode === "fifo"} disabled={busy || !queue} onClick={(event) => { void chooseSortMode("fifo"); event.currentTarget.blur(); }}><span>→</span><span>{t("queue.先进先出")}</span></button>
             </div>
           </div>
-          <button type="button" className="cq-insertion-position cq-overview-toggle" aria-pressed={overview} disabled={!queue} title={t("overview.hint")} onClick={() => setOverview(open => !open)}><Icon name="stack" size={13} /> <span className="cq-mode-label">{t("overview.title")}</span></button>
           <div className="cq-toolbar-menu">
             <button type="button" className="cq-insertion-position cq-attention-mode" aria-haspopup="menu" aria-label={t("queue.切换工作模式")} title={t("queue.切换工作模式")}>{attentionOption.icon} <span className="cq-mode-label">{t(attentionOption.label)}</span></button>
             <div className="cq-toolbar-popover cq-mode-popover" role="menu" aria-label={t("queue.切换工作模式")}>
@@ -1247,7 +1234,7 @@ function CardQueueShellContent() {
         <article className="cq-large-card cq-continuous-card">
           <div className="cq-card-header"><div className="cq-card-identity"><div className="cq-card-heading"><h2>{t("queue.新会话")}</h2></div>
             <div className="cq-card-state">{workspace?.name ?? newCardWorkspace}</div></div></div>
-          <AgentPicker catalog={`?workspace=${encodeURIComponent(newCardWorkspace)}`} butler={newCardWorkspace === "queacp-butler"}
+          <AgentPicker catalog={`?workspace=${encodeURIComponent(newCardWorkspace)}`}
             sshHost={workspace?.kind === "ssh" ? workspace.sshHost : undefined} sshHostName={remote?.name}
             onPick={async (kind, nickname) => {
               const id = (await act("create", { workspaceId: newCardWorkspace, kind, nickname })).createdId;

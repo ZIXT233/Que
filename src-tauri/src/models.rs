@@ -197,6 +197,27 @@ pub struct QueueCard {
     pub harness: Option<HarnessSession>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_sources: Option<Value>,
+    /// What this card's Agent may do beyond its own session. All off by default;
+    /// only the user turns them on, on the card.
+    #[serde(default, skip_serializing_if = "CardPermissions::is_none")]
+    pub permissions: CardPermissions,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardPermissions {
+    /// Create and archive cards, stop other cards' turns, rename any card.
+    #[serde(default)]
+    pub manage_cards: bool,
+    /// A channel with every card, without asking for each.
+    #[serde(default)]
+    pub all_channels: bool,
+    /// Read and change settings, workspaces and remote hosts.
+    #[serde(default)]
+    pub settings: bool,
+}
+impl CardPermissions {
+    pub fn is_none(&self) -> bool { *self == Self::default() }
 }
 
 /// Queue placement only; never alter the actual CLI state. Expires when that

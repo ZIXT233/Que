@@ -12,9 +12,8 @@ import { useI18n } from "@/hooks/useI18n";
  * Choosing the agent for a session: the agents the workspace's machine has, and
  * a nickname. `catalog` names the machine (`?workspace=` or `?card=`).
  */
-export function AgentPicker({ catalog: query, butler, initialNickname = "", sshHost, sshHostName, onPick }: {
+export function AgentPicker({ catalog: query, initialNickname = "", sshHost, sshHostName, onPick }: {
   catalog: string;
-  butler: boolean;
   initialNickname?: string;
   sshHost?: string;
   sshHostName?: string;
@@ -51,9 +50,7 @@ export function AgentPicker({ catalog: query, butler, initialNickname = "", sshH
       finally { setBusy(false); }
     }} />}
     <div className="cq-harness-empty"><div className="cq-harness-picker">
-      <div className="cq-harness-picker-head"><div>{butler
-        ? <><h3>选择管家使用的 Agent</h3><p>之后点管家按钮会直接用它；这里列出的是这台机器上检测到的 Agent</p></>
-        : <><h3>选择 Agent</h3><p>选择 Agent，在当前工作区开始会话</p></>}</div></div>
+      <div className="cq-harness-picker-head"><div><h3>选择 Agent</h3><p>选择 Agent，在当前工作区开始会话</p></div></div>
       <label className="cq-harness-nickname"><span>{t("harness.nicknameOptional")}</span><input autoComplete="off" maxLength={48} value={nickname} placeholder={t("harness.nicknamePlaceholder")} onChange={e => setNickname(e.target.value)} /></label>
       {[catalog.filter(item => item.available !== false), catalog.filter(item => item.available === false)].map((items, group) => items.length > 0 && <div key={group}>
         {group === 1 && <p className="cq-harness-missing-head">未检测到（需要先安装并登录对应的命令行工具）</p>}

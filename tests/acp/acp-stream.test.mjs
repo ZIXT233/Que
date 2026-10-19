@@ -63,9 +63,9 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
     };
     const acpRoot = path.join(root, 'que', 'acp'); await mkdir(acpRoot, { recursive: true });
     await writeFile(path.join(acpRoot, 'agents.json'), JSON.stringify({ codex: [process.execPath, path.resolve('tests/acp/agent.mjs')] }));
-    // No Butler card yet: the button gives none, and the card is made with its agent.
-    assert.equal((await request('/api/card-queue', { action: 'butler_open' })).butlerId, null);
-    card = (await request('/api/card-queue', { action: 'create', workspaceId: 'queacp-butler', kind: 'codex' })).createdId;
+    const home = path.join(root, 'home'); await mkdir(home, { recursive: true });
+    const workspaceId = (await request('/api/card-queue', { action: 'workspace_create', kind: 'local', cwd: home, name: 'Home' })).workspaces.find(w => w.name === 'Home').id;
+    card = (await request('/api/card-queue', { action: 'create', workspaceId, kind: 'codex' })).createdId;
     await request('/api/card-queue', { action: 'harness_resume', id: card });
 
     stream = await subscribe(`${base}/api/acp/events?token=${apiToken}`, card);

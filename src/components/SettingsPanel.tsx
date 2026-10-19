@@ -24,7 +24,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { setDeveloperProbesEnabled } from "@/lib/developer-probes";
 import { QueLogo } from "./QueLogo";
 import { AboutSettings } from "./AboutSettings";
-import { ButlerDigestSettings } from "./ButlerDigestSettings";
 import type { AppUpdateState } from "@/hooks/useAppUpdate";
 
 interface Props {
@@ -178,8 +177,6 @@ function GeneralSettings() {
           {audioBlocked && <p role="status" className="settings-general-error">{t("settings.audioBlocked")}</p>}
         </div>
       </section>
-
-      <ButlerDigestSettings />
 
       <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("settings.diagnostics")}</h3>

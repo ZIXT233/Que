@@ -3,24 +3,34 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "@/hooks/useI18n";
 import { Icon } from "./QueueIcon";
+import { harnessName } from "@/lib/harness/catalog";
 
 type Peer = { cardId: string; name: string };
 type Request = { from: Peer; to: Peer; preview: string; count: number };
+type Creation = { id: string; from: Peer; workspace: string; kind: string; nickname?: string | null };
 
-/** An Agent messaged a card it has no channel with; the message waits for this answer. */
+/**
+ * What Agents ask of the user, one at a time: a message to a card it has no
+ * channel with, which waits for this answer, and a card it asks to create.
+ */
 export function ChannelRequests() {
   const { t } = useI18n();
   const [requests, setRequests] = useState<Request[]>([]);
+  const [creations, setCreations] = useState<Creation[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const active = requests[0];
-  const key = active ? `${active.from.cardId}>${active.to.cardId}` : "";
+  const creation = active ? undefined : creations[0];
+  const key = active ? `${active.from.cardId}>${active.to.cardId}` : creation ? `create:${creation.id}` : "";
   useEffect(() => {
     let gone = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
-      try { const values = await invoke<Request[]>("channel_requests"); if (!gone) setRequests(values); }
-      catch { /* Without the native window nothing can be allowed; messages keep waiting. */ }
+      try {
+        const [values, created] = await Promise.all([invoke<Request[]>("channel_requests"), invoke<Creation[]>("create_requests")]);
+        if (!gone) { setRequests(values); setCreations(created); }
+      }
+      catch { /* Without the native window nothing can be allowed; requests keep waiting. */ }
       if (!gone) timer = setTimeout(refresh, 1000);
     };
     void refresh();
@@ -28,14 +38,33 @@ export function ChannelRequests() {
   }, []);
   useEffect(() => setError(""), [key]);
   const decide = async (allow: boolean) => {
-    if (!active || busy) return;
+    if ((!active && !creation) || busy) return;
     setBusy(true); setError("");
     try {
-      await invoke("channel_decide", { from: active.from.cardId, to: active.to.cardId, allow });
-      setRequests(current => current.filter(r => `${r.from.cardId}>${r.to.cardId}` !== key));
+      if (active) {
+        await invoke("channel_decide", { from: active.from.cardId, to: active.to.cardId, allow });
+        setRequests(current => current.filter(r => `${r.from.cardId}>${r.to.cardId}` !== key));
+      } else if (creation) {
+        await invoke("create_decide", { id: creation.id, allow });
+        setCreations(current => current.filter(r => r.id !== creation.id));
+      }
     } catch (cause) { setError(String(cause)); }
     finally { setBusy(false); }
   };
+  if (creation) return <div className="cq-overlay">
+    <section className="cq-dialog cq-channel-request" role="alertdialog" aria-modal="true" aria-labelledby="cq-create-request-title"
+      onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape" && !busy) void decide(false); }}>
+      <div className="cq-dialog-heading"><Icon name="plus" /></div>
+      <h2 id="cq-create-request-title">{t("create.requestTitle")}</h2>
+      <p>{t("create.requestHint", { from: creation.from.name, workspace: creation.workspace, agent: harnessName(creation.kind) })}</p>
+      {creation.nickname && <p>{t("create.nickname", { nickname: creation.nickname })}</p>}
+      {error && <p role="alert">{error}</p>}
+      <div className="cq-confirm-actions">
+        <button type="button" disabled={busy} onClick={() => void decide(false)}>{t("create.deny")}</button>
+        <button type="button" className="cq-primary" autoFocus disabled={busy} onClick={() => void decide(true)}>{t("create.allow")}</button>
+      </div>
+    </section>
+  </div>;
   if (!active) return null;
   return <div className="cq-overlay">
     <section className="cq-dialog cq-channel-request" role="alertdialog" aria-modal="true" aria-labelledby="cq-channel-request-title"

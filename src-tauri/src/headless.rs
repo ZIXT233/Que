@@ -70,6 +70,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Some("channel_requests") => crate::channels::requests(&state).await,
                         Some("channel_decide") => crate::channels::decide(&state, &text("from"), &text("to"), body["allow"] == true).await.map(|_| serde_json::Value::Null),
                         Some("channel_set") => crate::channels::set(&state, &text("a"), &text("b"), body["joined"] == true).await.map(|_| serde_json::Value::Null),
+                        Some("card_permissions_set") => match serde_json::from_value(body["permissions"].clone()) {
+                            Ok(permissions) => crate::channels::set_permissions(&state, &text("id"), permissions).await.map(|_| serde_json::Value::Null),
+                            Err(error) => Err(error.into()),
+                        },
+                        Some("create_requests") => crate::mcp_cards::requests(&state).await,
+                        Some("create_decide") => crate::mcp_cards::decide(&state, &text("id"), body["allow"] == true).await.map(|_| serde_json::Value::Null),
                         _ => Err(crate::error::AppError::msg("Unknown test control")),
                     }
                 });

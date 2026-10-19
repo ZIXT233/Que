@@ -36,6 +36,6 @@ export function HarnessCard({ card, active, sshHost, sshHostName, onAction }: {
   </>;
   if (starting) return <div className="cq-harness-empty"><AcpStartup agent={starting} stage={progress?.stage ?? "preparing"} log={progress?.startLog} /></div>;
   if (!active) return <div className="cq-harness-empty" />;
-  return <AgentPicker catalog={`?card=${encodeURIComponent(card.id)}`} butler={card.workspaceId === "queacp-butler"} initialNickname={card.nickname ?? ""}
+  return <AgentPicker catalog={`?card=${encodeURIComponent(card.id)}`} initialNickname={card.nickname ?? ""}
     sshHost={sshHost} sshHostName={sshHostName} onPick={start} />;
 }

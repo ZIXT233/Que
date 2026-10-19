@@ -14,10 +14,14 @@ export interface MachineSessionSettings {
   terminalRc?: string;
   sessionEnv?: Record<string, string>;
 }
+export type CardPermissions = { manageCards?: boolean; allChannels?: boolean; settings?: boolean };
+
 export interface QueueCard {
   harness?: import("./harness/types").HarnessSession;
   promptSources?: import("./prompt-sources").PromptSourcesConfig;
   nickname?: string;
+  /** What its Agent may do beyond its own session; all off unless the user turns them on. */
+  permissions?: CardPermissions;
   id: string;
   cwd: string;
   workspaceId?: string;

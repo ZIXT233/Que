@@ -26,20 +26,20 @@ test('cards talk over channels the user opens; both sides see the messages, also
       readline.createInterface({input:child.stdout}).on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v);if(v.controlId)controls.get(v.controlId)?.(v)}catch{}});
       child.once('exit',code=>reject(Error('headless exited '+code)));child.stderr.on('data',()=>{});
     });
-    const data=path.join(root,'que'),home=path.join(root,'home','.queacp','butler'),work=path.join(root,'work');
+    const data=path.join(root,'que'),home=path.join(root,'home'),work=path.join(root,'work');
     for(const dir of [home,work,path.join(data,'acp')])mkdirSync(dir,{recursive:true});
     writeFileSync(path.join(data,'acp','agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-    const butler='b071e000-0000-4000-8000-000000000001',shen='5be00000-0000-4000-8000-000000000001',yang='7a000000-0000-4000-8000-000000000001',zhou='20000000-0000-4000-8000-000000000001';
-    const card=(id,cwd,workspaceId,nickname)=>({id,cwd,workspaceId,nickname,phase:'attention',createdAt:0,harness:{kind:'fixture',terminalId:id,state:'not_running'}});
-    writeFileSync(path.join(data,'queue.json'),JSON.stringify({version:1,revision:0,order:[butler,shen,yang,zhou],
-      cards:[card(butler,home,'queacp-butler'),card(shen,work,'w','沈一石'),card(yang,work,'w','杨金水'),card(zhou,work,'w','周知县')],
-      workspaces:[{id:'queacp-butler',name:'Butler',kind:'local',cwd:home,runtimeCwd:home},{id:'w',name:'Distro',kind:'local',cwd:work,runtimeCwd:work}]}));
+    const lead='b071e000-0000-4000-8000-000000000001',shen='5be00000-0000-4000-8000-000000000001',yang='7a000000-0000-4000-8000-000000000001',zhou='20000000-0000-4000-8000-000000000001';
+    const card=(id,cwd,workspaceId,nickname,permissions)=>({id,cwd,workspaceId,nickname,permissions,phase:'attention',createdAt:0,harness:{kind:'fixture',terminalId:id,state:'not_running'}});
+    writeFileSync(path.join(data,'queue.json'),JSON.stringify({version:1,revision:0,order:[lead,shen,yang,zhou],
+      cards:[card(lead,home,'h','海瑞',{allChannels:true}),card(shen,work,'w','沈一石'),card(yang,work,'w','杨金水'),card(zhou,work,'w','周知县')],
+      workspaces:[{id:'h',name:'Home',kind:'local',cwd:home,runtimeCwd:home},{id:'w',name:'Distro',kind:'local',cwd:work,runtimeCwd:work}]}));
     const request=async(url,body,headers={})=>{
       const r=await fetch(base+url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-que-token':apiToken,...headers},body:body&&JSON.stringify(body),signal:AbortSignal.timeout(30000)});
       const value=await r.json();if(!r.ok)throw Error(JSON.stringify(value));return value;
     };
     const sessions={};
-    for(const [id,cwd] of [[butler,home],[shen,work],[yang,work],[zhou,work]]) sessions[id]=await request('/api/acp/'+id,{action:'ensure',agent:'fixture',cwd});
+    for(const [id,cwd] of [[lead,home],[shen,work],[yang,work],[zhou,work]]) sessions[id]=await request('/api/acp/'+id,{action:'ensure',agent:'fixture',cwd});
     // One stream for every card, as the tile canvas reads it.
     const all=[],stream=new AbortController();
     void (async()=>{try{
@@ -85,8 +85,8 @@ test('cards talk over channels the user opens; both sides see the messages, also
     assert.match(told.text,/did not open a channel/);
     await settled(shen);
     assert.equal((await turns(zhou)).length,0);
-    // Only the user and the Butler stop another card's turn.
-    await assert.rejects(tool(shen,{tool:'cancel_turn',cardId:yang,turnId:'x'}),/Butler/);
+    // Stopping another card's turn needs the permission the user gives on the card.
+    await assert.rejects(tool(shen,{tool:'cancel_turn',cardId:yang,turnId:'x'}),/may not stop/);
 
     // 1. Idle: once allowed, the message is the target's next turn, signed by the sender.
     const asked=await until(async()=>(await turns(yang)).find(t=>t.sender),'delivered as a turn');
@@ -98,8 +98,8 @@ test('cards talk over channels the user opens; both sides see the messages, also
     // 2. Busy: what a card sends shows in its own turn; a broadcast reaches every other card.
     const decision=await busy(shen,'work-1');
     const shout=await send(shen,'all','shout','请拉取后重启');
-    assert.ok(shout.sent.some(c=>c.name==='杨金水') && shout.sent.some(c=>c.cardId===butler));
-    assert.equal(shout.sent.length,2,'the Butler and 杨金水: cards with a channel, not 周知县 or the sender');
+    assert.ok(shout.sent.some(c=>c.name==='杨金水') && shout.sent.some(c=>c.cardId===lead));
+    assert.equal(shout.sent.length,2,'海瑞, joined to all, and 杨金水: cards with a channel, not 周知县 or the sender');
     const working=async()=>(await turns(shen)).find(t=>t.state==='running');
     const out=(await working()).blocks.find(b=>b.type==='message');
     assert.equal(out.direction,'out');assert.equal(out.all,true);assert.equal(out.text,'请拉取后重启');
@@ -139,13 +139,33 @@ test('cards talk over channels the user opens; both sides see the messages, also
     assert.equal((await turns(shen)).filter(t=>t.sender?.name==='杨金水').length,1,'the retried request posts nothing new');
     await assert.rejects(send(shen,shen,'self','hi'),/itself/);
 
-    // Managing cards is the Butler's.
-    await assert.rejects(tool(shen,{tool:'archive_card',cardId:yang,requestId:'x'}),/Butler/);
-
-    // The digest reports what ended since the last one, without watching cards.
-    assert.deepEqual(await request('/api/butler/digest',{}),{sent:true});
-    const digest=await until(async()=>(await turns(butler)).find(t=>t.text.includes('定时汇总请求')),'digest delivered');
-    assert.match(digest.text,/「杨金水」（Distro）/);assert.match(digest.text.split('「杨金水」')[1].split('\n- ')[0],/自上次汇总：完成 2 轮/);
+    // Managing cards needs the permission; without it a card asks, and the user decides.
+    await assert.rejects(tool(shen,{tool:'archive_card',cardId:yang,requestId:'x'}),/may not archive/);
+    const queued=await tool(shen,{tool:'create_card',workspaceId:'w',kind:'fixture',requestId:'new-1',nickname:'胡宗宪'});
+    assert.equal(queued.delivery,'waitingForUser');assert.equal(queued.cardId,undefined,'no card before the user allows it');
+    const [creation]=await native('create_requests');
+    assert.equal(creation.from.name,'沈一石');assert.equal(creation.workspace,'Distro');assert.equal(creation.kind,'fixture');assert.equal(creation.nickname,'胡宗宪');
+    await native('create_decide',{id:creation.id,allow:false});
+    assert.deepEqual(await native('create_requests'),[]);
+    await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='QueACP'&&/did not allow/.test(t.text)),'refusal told');
+    await settled(shen);
+    assert.ok(!(await request('/api/card-queue')).cards.some(c=>c.id===creation.id),'refused: nothing made');
+    await tool(shen,{tool:'create_card',workspaceId:'w',kind:'fixture',requestId:'new-2',nickname:'胡宗宪'});
+    const [allowed]=await native('create_requests');
+    await native('create_decide',{id:allowed.id,allow:true});
+    const made=await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='QueACP'&&/allowed/.test(t.text)),'creation told');
+    assert.match(made.text,/is started and joined to you/);
+    await settled(shen);
+    const queue=await request('/api/card-queue');
+    assert.equal(queue.cards.find(c=>c.id===allowed.id)?.nickname,'胡宗宪');
+    assert.ok(queue.channels.some(p=>p.includes(shen)&&p.includes(allowed.id)),'the new card is joined to the card that asked');
+    // Given the permission on the card, it makes cards itself.
+    await native('card_permissions_set',{id:shen,permissions:{manageCards:true}});
+    const direct=await tool(shen,{tool:'create_card',workspaceId:'w',kind:'fixture',requestId:'new-3'});
+    assert.equal(direct.delivery,'started');assert.deepEqual(await native('create_requests'),[]);
+    await tool(shen,{tool:'archive_card',cardId:direct.cardId,requestId:'archive-3'});
+    await native('card_permissions_set',{id:shen,permissions:{}});
+    await assert.rejects(tool(shen,{tool:'archive_card',cardId:allowed.id,requestId:'archive-2'}),/may not archive/,'and loses it when the user turns it off');
 
     // The shared stream carries every card, tagged, and folds to the same state.
     assert.ok(all.some(e=>e.event==='snapshot'&&e.id===shen)&&all.some(e=>e.event==='delta'&&e.id===yang));

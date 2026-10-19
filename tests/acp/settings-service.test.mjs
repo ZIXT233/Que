@@ -11,7 +11,12 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
  const root=await mkdtemp(path.join(tmpdir(),'queacp-settings-api-'));
  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin')},stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',d=>stderr+=d);
  const lines=readline.createInterface({input:child.stdout});
- const address=new Promise((resolve,reject)=>{lines.on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v)}catch{}});child.once('exit',()=>reject(Error(stderr)))});
+ const controls=new Map();
+ const address=new Promise((resolve,reject)=>{lines.on('line',line=>{try{const v=JSON.parse(line);if(v.base)resolve(v);if(v.controlId)controls.get(v.controlId)?.(v)}catch{}});child.once('exit',()=>reject(Error(stderr)))});
+ // The main window's native commands, which no Agent can call.
+ let control=0;
+ const native=(method,args={})=>new Promise((resolve,reject)=>{const id=String(++control);
+  controls.set(id,v=>v.error?reject(Error(v.error)):resolve(v.result));child.stdin.write(JSON.stringify({controlId:id,method,...args})+'\n');});
  let card,ownerPid;
  try{
   const {base,token:apiToken}=await address;
@@ -22,18 +27,20 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
   assert.notEqual((await fetch(base+'/api/mcp/tools',{method:'POST',body:'{}'})).status,200,'MCP keeps its own token');
   const request=async(route,body,headers={})=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-que-token':apiToken,...headers},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error||JSON.stringify(data));return data;};
   const acpRoot=path.join(root,'que','acp');await mkdir(acpRoot,{recursive:true});await writeFile(path.join(acpRoot,'agents.json'),JSON.stringify({codex:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-  // No Butler card yet: the button gives none, and the card is made with its agent.
-  assert.equal((await request('/api/card-queue',{action:'butler_open'})).butlerId,null);
-  card=(await request('/api/card-queue',{action:'create',workspaceId:'queacp-butler',kind:'codex'})).createdId;
+  const home=path.join(root,'home');await mkdir(home,{recursive:true});
+  const workspaceId=(await request('/api/card-queue',{action:'workspace_create',kind:'local',cwd:home,name:'Home'})).workspaces.find(w=>w.name==='Home').id;
+  // A card is made with its agent.
+  card=(await request('/api/card-queue',{action:'create',workspaceId,kind:'codex'})).createdId;
   await request('/api/card-queue',{action:'harness_resume',id:card});
-  assert.equal((await request('/api/card-queue',{action:'butler_open'})).butlerId,card,'then the button opens it');
   assert.ok((await request('/api/card-queue')).cards.every(c=>c.harness),'no card is ever blank');
   const session=await request('/api/acp/'+card);ownerPid=Number(await readFile(path.join(acpRoot,'owner.pid'),'utf8'));
   const discovery=JSON.parse(await readFile(path.join(root,'que','mcp','endpoint.json'),'utf8'));
   const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-QueACP-Source-Epoch':session.connectionId};
   const call=(tool,args={})=>request('/api/mcp/tools',{tool,...args},headers);
   const denied={...headers};delete denied['X-Que-Source-Terminal'];delete denied['X-QueACP-Source-Epoch'];
-  await assert.rejects(request('/api/mcp/tools',{tool:'update_settings',scope:'ui',patch:{theme:'dark'}},denied),/Butler/);
+  await assert.rejects(request('/api/mcp/tools',{tool:'update_settings',scope:'ui',patch:{theme:'dark'}},denied),/may not/);
+  await assert.rejects(call('update_settings',{scope:'ui',patch:{theme:'dark'}}),/may not read or change settings/,'settings need the permission');
+  await native('card_permissions_set',{id:card,permissions:{settings:true}});
   assert.ok((await call('list_settings')).ui.theme);
   await call('update_settings',{scope:'ui',patch:{theme:'dark',fontSize:18}});
   assert.equal((await request('/api/preferences')).theme,'dark');

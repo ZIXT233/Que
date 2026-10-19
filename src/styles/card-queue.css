@@ -2080,16 +2080,13 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
   .cq-card-header:has(.cq-card-heading) > .cq-card-actions { gap:4px; }
 }
 /* MCP approvals use the normal app palette, independent of urgent alerts. */
-.cq-mcp-all-cards { display:flex; align-items:flex-start; gap:8px; margin:18px 0; font-size:14px; line-height:1.5; cursor:pointer; }
-.cq-mcp-all-cards input { margin-top:3px; accent-color:var(--cq-ink); }
 
-/* Butler reuses the deck card and its controls. */
-.cq-butler-launch{position:absolute;left:20px;bottom:20px;z-index:24;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:#f5e3aa;color:#70551a;border:1px solid #ddc784;box-shadow:0 4px 16px #6a50151c;cursor:pointer;transition:transform .15s,box-shadow .15s}
-.cq-butler-launch:hover{transform:translateY(-2px);box-shadow:0 6px 20px #6a50152a}
-.cq-butler-launch:focus-visible{outline:2px solid #a27b24;outline-offset:3px}
-.cq-butler-launch:disabled{opacity:.5;cursor:wait}
-.cq-large-card[data-butler="true"] .cq-card-header{background:linear-gradient(110deg,#fbf0cc,#efda96);border-bottom-color:#dbc47f;color:#604d21}
-.cq-large-card[data-butler="true"] .cq-card-header h2{color:#604d21}
+/* The overview button: bottom left of the content area, in both views. */
+.cq-overview-launch{position:absolute;left:20px;bottom:20px;z-index:24;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--cq-paper);color:var(--cq-muted);border:1px solid color-mix(in srgb, var(--cq-muted) 22%, transparent);box-shadow:0 4px 16px #0000001a;cursor:pointer;transition:transform .15s,box-shadow .15s,color .15s}
+.cq-overview-launch:hover{transform:translateY(-2px);box-shadow:0 6px 20px #00000024;color:var(--cq-ink)}
+.cq-overview-launch:focus-visible{outline:2px solid var(--cq-accent);outline-offset:3px}
+.cq-overview-launch[aria-pressed="true"]{color:var(--cq-accent);border-color:var(--cq-accent)}
+.cq-overview-launch:disabled{opacity:.5;cursor:default}
 /* Agents whose CLI was not found on this machine: still selectable, de-emphasized. */
 .cq-harness-missing-head { margin:26px 0 0; font-size:12px; color:var(--cq-muted); }
 .cq-harness-options[data-missing] { margin-top:10px; opacity:.6; }
@@ -2102,6 +2099,7 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 .cq-channels-toggle[data-joined]:hover { background:color-mix(in srgb, var(--cq-accent) 20%, transparent); }
 .cq-channels-toggle:focus-visible { outline:2px solid var(--cq-accent); outline-offset:2px; }
 .cq-channel-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cq-channel-name small { display:block; margin-top:2px; color:var(--cq-muted); font-size:11px; white-space:normal; }
 .cq-channel-preview { margin:0 0 22px; padding:10px 12px; border-left:3px solid var(--cq-external-blue); border-radius:0 8px 8px 0; background:var(--cq-surface); color:var(--cq-ink); font-size:12px; line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; max-height:160px; overflow:auto; }
 .cq-channel-preview small { display:block; margin-top:6px; color:var(--cq-muted); }
 /* Allowing is not destructive: the app's own primary, not the red of archive. */
@@ -2145,4 +2143,3 @@ html.dark .cq-overview { --cq-overview-working:#3a3522; --cq-overview-later:#3a2
 .cq-tile-live[data-kind="tool"] .cq-tile-live-text { color:var(--cq-external-blue); font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11.5px; }
 .cq-tile-live[data-kind="thought"] .cq-tile-live-text { font-style:italic; }
 .cq-tile-live[data-kind="decision"] { color:#c27a2c; }
-.cq-overview-toggle[aria-pressed="true"] { border-color:var(--cq-accent); color:var(--cq-accent); }

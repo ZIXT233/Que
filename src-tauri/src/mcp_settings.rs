@@ -101,7 +101,7 @@ pub fn catalog() -> Value {
      "remote":{"tools":["list_remote_hosts","configure_remote_host"]},
      "workspaceCreation":{"tool":"create_workspace","directory":"must already exist"},
      "excluded":["OS microphone/notification permissions and SSH host trust require the system UI","MCP authorization grants remain in the existing authorization flow","live model/permission controls belong to their ACP session, not global settings"],
-     "access":"Settings tools require a live all-card Agent; Butler qualifies. Change only user-requested settings."
+     "access":"Settings tools require a live card the user allowed to change settings. Change only user-requested settings."
     })
 }
 pub async fn read(state: &AppState, body: &Value) -> AppResult<Value> {

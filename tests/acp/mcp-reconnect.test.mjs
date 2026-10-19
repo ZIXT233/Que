@@ -19,11 +19,11 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
    child.once('exit',code=>reject(Error('headless exited '+code)));
    child.stderr.on('data',()=>{});
   });
-  const data=path.join(root,'que'),cwd=path.join(root,'home','.queacp','butler');mkdirSync(cwd,{recursive:true});mkdirSync(path.join(data,'acp'),{recursive:true});
+  const data=path.join(root,'que'),cwd=path.join(root,'home');mkdirSync(cwd,{recursive:true});mkdirSync(path.join(data,'acp'),{recursive:true});
   writeFileSync(path.join(data,'acp','agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
   const source='b071e000-0000-4000-8000-000000000001',target='test-target';
-  const card=id=>({id,cwd,workspaceId:'queacp-butler',phase:'attention',createdAt:0,harness:{kind:'fixture',terminalId:id,state:'not_running'}});
-  const queue={version:1,revision:0,order:[source,target],cards:[card(source),card(target)],workspaces:[{id:'queacp-butler',name:'Butler',kind:'local',cwd,runtimeCwd:cwd}]};
+  const card=(id,permissions)=>({id,cwd,workspaceId:'home',permissions,phase:'attention',createdAt:0,harness:{kind:'fixture',terminalId:id,state:'not_running'}});
+  const queue={version:1,revision:0,order:[source,target],cards:[card(source,{allChannels:true}),card(target)],workspaces:[{id:'home',name:'Home',kind:'local',cwd,runtimeCwd:cwd}]};
   writeFileSync(path.join(data,'queue.json'),JSON.stringify(queue));
   const post=async(url,body,headers={})=>{
    const r=await fetch(base+url,{method:'POST',headers:{'Content-Type':'application/json','x-que-token':apiToken,...headers},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
