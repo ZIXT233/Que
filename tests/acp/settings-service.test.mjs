@@ -22,9 +22,12 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
   assert.notEqual((await fetch(base+'/api/mcp/tools',{method:'POST',body:'{}'})).status,200,'MCP keeps its own token');
   const request=async(route,body,headers={})=>{const r=await fetch(base+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','x-que-token':apiToken,...headers},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error||JSON.stringify(data));return data;};
   const acpRoot=path.join(root,'que','acp');await mkdir(acpRoot,{recursive:true});await writeFile(path.join(acpRoot,'agents.json'),JSON.stringify({codex:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-  // The Butler button only opens the card; the agent is chosen on it.
-  card=(await request('/api/card-queue',{action:'butler_open'})).butlerId;
-  await request('/api/card-queue',{action:'harness_start',id:card,kind:'codex'});
+  // No Butler card yet: the button gives none, and the card is made with its agent.
+  assert.equal((await request('/api/card-queue',{action:'butler_open'})).butlerId,null);
+  card=(await request('/api/card-queue',{action:'create',workspaceId:'queacp-butler',kind:'codex'})).createdId;
+  await request('/api/card-queue',{action:'harness_resume',id:card});
+  assert.equal((await request('/api/card-queue',{action:'butler_open'})).butlerId,card,'then the button opens it');
+  assert.ok((await request('/api/card-queue')).cards.every(c=>c.harness),'no card is ever blank');
   const session=await request('/api/acp/'+card);ownerPid=Number(await readFile(path.join(acpRoot,'owner.pid'),'utf8'));
   const discovery=JSON.parse(await readFile(path.join(root,'que','mcp','endpoint.json'),'utf8'));
   const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-QueACP-Source-Epoch':session.connectionId};

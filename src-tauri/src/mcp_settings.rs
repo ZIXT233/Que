@@ -305,7 +305,6 @@ pub async fn create_workspace(state: &AppState, body: &Value) -> AppResult<Value
     }
     let mut request = body.clone();
     request["action"] = json!("workspace_create");
-    request["createCard"] = json!(false);
     crate::api::normalize_workspace_create(&mut request).await?;
     if request["kind"] == "local" {
         request["cwd"] = json!(

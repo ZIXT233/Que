@@ -25,7 +25,7 @@ QueACP 是 Que 的 ACP 版本：卡片里的 Agent 通过 ACP（经由 acpx）�
 
 ## 规则
 
-1. **一张卡就是一段对话。** 卡片不换绑 Agent 或目录；会话坏了就归档，再新建一张。
+1. **一张卡就是一段对话。** 卡片不换绑 Agent 或目录；会话坏了就归档，再新建一张。选好 Agent 才有卡：新会话先选工作区、再选 Agent，这时才建卡（`create`，带着 Agent），随即打开并连接；没有空白卡，也就没有复用、没有猜。管家按钮同理：没有管家卡时先选 Agent。早先留下的空白卡照常显示在队列里，可以选 Agent，也可以归档。
 2. **空会话不恢复。** 还没有任何对话的会话，重连时直接新开（acpx `prepareFreshSession`）；有过对话的会话照常恢复，恢复失败如实报错。
 3. **对话只在 acpx 记录里。** 进行中的回合只在 owner 内存里；Que 或 owner 退出时，没进入 acpx 记录的东西就没有了，从不重放。唯一的附加是卡片之间的消息：acpx 不记工具输出，owner 把它们存成附注，挂在 acpx 的回合编号上，加载时放回原处（见 [agent-interaction.md](agent-interaction.md)）。
 4. **消息的来源写在消息里。** 来自其他卡片或 Que 通知的消息带一行固定格式的说明（`runtime/session-history.mjs`），Agent 读得到，记录里也就有，不另存。

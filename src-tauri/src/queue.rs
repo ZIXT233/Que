@@ -90,9 +90,6 @@ pub fn reconcile(state: &mut CardQueue) {
                 card.detached = None;
             }
         }
-        if card.session.is_none() && card.harness.is_none() {
-            continue;
-        }
         let mut phase = if let Some(harness) = &card.harness {
             if harness.state == "working" {
                 CardPhase::Working
@@ -182,27 +179,6 @@ pub fn reconcile(state: &mut CardQueue) {
     state
         .order
         .retain(|id| known.contains(id) && seen.insert(id.clone()));
-    pin_draft(state);
-}
-
-pub fn pin_draft(state: &mut CardQueue) {
-    let draft = state
-        .cards
-        .iter()
-        .filter(|c| c.session.is_none() && c.harness.is_none() && !crate::butler::is_card(c))
-        .max_by_key(|c| c.created_at)
-        .map(|c| c.id.clone());
-    let Some(draft_id) = draft else { return };
-    state
-        .cards
-        .retain(|c| c.session.is_some() || c.harness.is_some() || c.id == draft_id || crate::butler::is_card(c));
-    let ids: HashSet<_> = state
-        .cards
-        .iter()
-        .filter(|c| c.session.is_some() || c.harness.is_some())
-        .map(|c| c.id.clone())
-        .collect();
-    state.order.retain(|id| ids.contains(id));
 }
 
 pub fn move_card(state: &mut CardQueue, id: &str, position: &str) {
@@ -219,7 +195,6 @@ pub fn move_card(state: &mut CardQueue, id: &str, position: &str) {
     } else {
         state.order.push(id.to_string());
     }
-    pin_draft(state);
 }
 
 pub fn archive_card(state: &mut CardQueue, id: &str) -> AppResult<()> {
@@ -252,7 +227,6 @@ pub fn park_remind(state: &mut CardQueue, id: &str, remind_at: i64) -> bool {
     }
     card.remind_at = Some(remind_at);
     state.order.retain(|item| item != id);
-    pin_draft(state);
     true
 }
 
@@ -278,50 +252,21 @@ pub fn release_remind(state: &mut CardQueue, id: &str) -> bool {
             state.order.push(id.to_string());
         }
     }
-    pin_draft(state);
     true
 }
 
-pub fn select_workspace_for_draft(state: &mut CardQueue, workspace: &QueueWorkspace) {
-    if let Some(draft) = state
-        .cards
-        .iter_mut()
-        .find(|c| c.session.is_none() && c.harness.is_none() && !crate::butler::is_card(c))
-    {
-        draft.cwd = workspace.runtime_cwd.clone();
-        draft.workspace_id = Some(workspace.id.clone());
-        draft.priority_weight = Some(workspace.default_conversation_weight.unwrap_or(0));
-        draft.detached = None;
-        let id = draft.id.clone();
-        state.order.retain(|item| item != &id);
-        return;
-    }
-    let id = Uuid::new_v4().to_string();
-    state.cards.push(QueueCard {
-        id: id.clone(),
-        cwd: workspace.runtime_cwd.clone(),
-        nickname: None,
-        workspace_id: Some(workspace.id.clone()),
-        session: None,
-        phase: CardPhase::Draft,
-        manual_placement: None,
-        created_at: now_ms(),
-        ready_at: None,
-        priority_weight: Some(workspace.default_conversation_weight.unwrap_or(0)),
-        waiting_since: None,
-        turn_key: None,
-        urgent_call: None,
-        turn_tags: None,
-        tag_evaluation: None,
-        tag_history: None,
-        archived_at: None,
-        remind_at: None,
-        detached: None,
-        side_terminals: None,
-        side_terminal_open: None,
-        harness: None,
-        prompt_sources: None,
-    });
+/// Adds card `id` to `workspace`, with its agent chosen and not yet started.
+/// A card exists only once its agent is chosen: there are no blank cards.
+pub fn new_card(state: &mut CardQueue, id: &str, workspace: &QueueWorkspace, kind: &str, nickname: Option<&str>) -> AppResult<()> {
+    let card: QueueCard = serde_json::from_value(serde_json::json!({
+        "id": id, "cwd": workspace.runtime_cwd, "workspaceId": workspace.id, "nickname": nickname,
+        "priorityWeight": workspace.default_conversation_weight.unwrap_or(0),
+        "phase": "attention", "createdAt": now_ms(),
+        "harness": { "kind": kind, "terminalId": id, "state": "not_running", "remote": workspace.kind == "ssh" },
+    }))?;
+    state.cards.push(card);
+    state.order.push(id.into());
+    Ok(())
 }
 
 pub fn numeric_weight(value: &Value) -> i64 {

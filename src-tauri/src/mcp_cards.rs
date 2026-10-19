@@ -1,5 +1,5 @@
 //! Card lifecycle operations for the Butler.
-use crate::{api::AppState,error::{AppError,AppResult},models::{CardQueue,QueueCard}};
+use crate::{api::AppState,error::{AppError,AppResult},models::CardQueue};
 use serde_json::{json,Value};
 use sha2::{Digest,Sha256};
 fn required<'a>(body:&'a Value,key:&str)->AppResult<&'a str>{body[key].as_str().filter(|v|!v.trim().is_empty()).ok_or_else(||AppError::msg(format!("Missing {key}")))}
@@ -17,8 +17,11 @@ fn insert_card(queue:&mut CardQueue,id:&str,workspace:&str,kind:&str,nickname:Op
   return Ok(());
  }
  let ws=queue.workspaces.as_ref().and_then(|items|items.iter().find(|w|w.id==workspace)).ok_or_else(||AppError::msg("Workspace not found; use list_workspaces"))?;
- let card:QueueCard=serde_json::from_value(json!({"id":id,"cwd":ws.runtime_cwd,"workspaceId":ws.id,"nickname":nickname,"phase":"attention","createdAt":crate::queue::now_ms(),"harness":{"kind":kind,"terminalId":id,"state":"not_running","remote":ws.kind=="ssh"},"promptSources":{"queacpMcpCreate":{"key":key,"fingerprint":fingerprint}}}))?;
- queue.cards.push(card);queue.order.push(id.into());Ok(())
+ let ws=ws.clone();
+ crate::queue::new_card(queue,id,&ws,kind,nickname)?;
+ // The request that made it, so a retry finds it instead of making another.
+ if let Some(card)=queue.cards.iter_mut().find(|c|c.id==id) {card.prompt_sources=Some(json!({"queacpMcpCreate":{"key":key,"fingerprint":fingerprint}}));}
+ Ok(())
 }
 pub async fn create(state:&AppState,source:&str,body:&Value)->AppResult<Value> {
  let workspace=required(body,"workspaceId")?;let kind=required(body,"kind")?;
@@ -79,7 +82,7 @@ pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> 
   let mut q:CardQueue=serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
   insert_card(&mut q,"new","ws","codex",None,"key","fp").unwrap();
   assert!(insert_card(&mut q,"new","ws","claude",None,"key","other").is_err());
-  crate::queue::pin_draft(&mut q);assert_eq!(q.cards.len(),2);assert!(q.order.contains(&"new".to_string()));
+  assert_eq!(q.cards.len(),2);assert!(q.order.contains(&"new".to_string()));
   assert!(insert_card(&mut q,"bad","missing","codex",None,"key","fp").is_err());
  }
  #[test] fn requests_are_scoped_to_source(){let b=json!({"tool":"create_card","requestId":"one"});assert_ne!(identity("a",&b).unwrap().0,identity("b",&b).unwrap().0);}

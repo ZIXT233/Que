@@ -11,7 +11,7 @@ use crate::paste::{
 use crate::paths::{resolve_bin_dir, ssh_runtime_dir};
 use crate::queue::{
     archive_card, move_card, now_ms, numeric_weight, park_remind, release_remind,
-    select_workspace_for_draft, sync_queue, QueueStore, TAB_LEASE_MS,
+    sync_queue, QueueStore, TAB_LEASE_MS,
 };
 use crate::settings::SettingsStore;
 use crate::ssh::{connect_host, shell_quote, ssh_exec, test_target};
@@ -187,7 +187,8 @@ pub(crate) async fn post_queue(
         .to_string();
     if action == "butler_open" {
         crate::butler::install()?;
-        let id = state.queue.with_queue(false, |q| crate::butler::ensure(q)).await?;
+        // No Butler card yet: the app asks for its agent, then makes it with `create`.
+        let id = state.queue.with_queue(false, |q| Ok(crate::butler::ensure(q))).await?;
         let mut queue = with_cwd(state.queue.read_snapshot()?, &state);
         queue["butlerId"] = json!(id);
         return Ok(Json(queue));
@@ -253,19 +254,21 @@ pub(crate) async fn post_queue(
         action.as_str(),
         "dismiss_external" | "external_priority_weight" | "snooze_external"
     );
-    let queue = state
+    let (queue, created) = state
         .queue
         .with_queue(false, |queue| {
             refresh_queue(queue, &state);
             if external_action {
-                return Ok(queue.clone());
+                return Ok((queue.clone(), None));
             }
-            apply_action(queue, &body, &action, &state)?;
+            let created = apply_action(queue, &body, &action, &state)?;
             refresh_queue(queue, &state);
-            Ok(queue.clone())
+            Ok((queue.clone(), created))
         })
         .await?;
-    Ok(Json(with_cwd(queue, &state)))
+    let mut queue = with_cwd(queue, &state);
+    if let Some(id) = created { queue["createdId"] = json!(id); }
+    Ok(Json(queue))
 }
 
 pub(crate) async fn normalize_workspace_create(body: &mut Value) -> AppResult<()> {
@@ -360,7 +363,7 @@ async fn acp_history_open(State(state): State<AppState>, Json(body): Json<Value>
         let cwd=body["cwd"].as_str().filter(|p|std::path::Path::new(p).is_absolute()).ok_or_else(||AppError::msg("会话没有有效的工作目录"))?;
         let name=std::path::Path::new(cwd).file_name().and_then(|n|n.to_str()).unwrap_or(cwd);
         state.queue.with_queue(false,|queue| {
-            apply_action(queue,&json!({"action":"workspace_create","kind":"local","cwd":cwd,"name":name,"createCard":false}),"workspace_create",&state)?;
+            apply_action(queue,&json!({"action":"workspace_create","kind":"local","cwd":cwd,"name":name}),"workspace_create",&state)?;
             Ok(())
         }).await?;
         let queue=state.queue.read_snapshot()?;
@@ -761,13 +764,16 @@ fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCar
     );
 }
 
+/// Applies a queue action. Returns the card it made, for `create`, so the app
+/// opens exactly that card.
 pub(crate) fn apply_action(
     queue: &mut CardQueue,
     body: &Value,
     action: &str,
     state: &AppState,
-) -> AppResult<()> {
+) -> AppResult<Option<String>> {
     let id = body.get("id").and_then(|v| v.as_str());
+    let mut created = None;
     match action {
         "card_placement" => {
             let background = body
@@ -1024,8 +1030,7 @@ pub(crate) fn apply_action(
                     id,
                 )
             };
-            let create_card = body.get("createCard").and_then(|v| v.as_bool()) == Some(true);
-            let workspace = {
+            {
                 let workspaces = queue.workspaces.get_or_insert_with(Vec::new);
                 if let Some(existing) = workspaces
                     .iter_mut()
@@ -1035,9 +1040,8 @@ pub(crate) fn apply_action(
                     existing.default_conversation_weight = Some(numeric_weight(
                         body.get("defaultConversationWeight").unwrap_or(&json!(0)),
                     ));
-                    existing.clone()
                 } else {
-                    let workspace = crate::models::QueueWorkspace {
+                    workspaces.push(crate::models::QueueWorkspace {
                         terminal_rc: None,
                         session_env: Default::default(),
                         id,
@@ -1049,13 +1053,8 @@ pub(crate) fn apply_action(
                         default_conversation_weight: Some(numeric_weight(
                             body.get("defaultConversationWeight").unwrap_or(&json!(0)),
                         )),
-                    };
-                    workspaces.push(workspace.clone());
-                    workspace
+                    });
                 }
-            };
-            if create_card {
-                select_workspace_for_draft(queue, &workspace);
             }
         }
         "workspace_remove" => {
@@ -1094,8 +1093,16 @@ pub(crate) fn apply_action(
                 .and_then(|ws| ws.iter().find(|w| w.id == workspace_id))
                 .cloned()
                 .ok_or_else(|| AppError::msg("请选择一个工作区"))?;
-            select_workspace_for_draft(queue, &workspace);
-            crate::debuglog::info("queue", &format!("create workspace={}", workspace.id));
+            let kind = body.get("kind").and_then(Value::as_str).filter(|kind| !kind.trim().is_empty())
+                .ok_or_else(|| AppError::msg("请选择一个 Agent"))?;
+            let nickname = body.get("nickname").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty());
+            if nickname.is_some_and(|n| n.chars().count() > 48 || n.chars().any(char::is_control)) {
+                return Err(AppError::msg("昵称最多 48 个字符，且不能包含控制字符"));
+            }
+            let card = uuid::Uuid::new_v4().to_string();
+            crate::queue::new_card(queue, &card, &workspace, kind, nickname)?;
+            crate::debuglog::info("queue", &format!("create workspace={} kind={kind}", workspace.id));
+            created = Some(card);
         }
         "remind_later" => {
             let minutes = body.get("minutes").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1339,7 +1346,7 @@ pub(crate) fn apply_action(
         }
         _ => return Err(AppError::msg("未知队列操作")),
     }
-    Ok(())
+    Ok(created)
 }
 
 async fn queue_events(

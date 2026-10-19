@@ -72,7 +72,8 @@ export function useCardQueue() {
       if (generation === localGeneration.current) accept(result);
       else void refresh();
     }
-    return result as CardQueue;
+    // `create` names the card it made; `butler_open` the Butler card, or null when there is none yet.
+    return result as CardQueue & { createdId?: string; butlerId?: string | null };
   }, [accept, refresh]);
   useEffect(() => {
     mounted.current = true;
