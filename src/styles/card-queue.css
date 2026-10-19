@@ -2081,8 +2081,8 @@ html.dark .cq-score-formula-popover,html.dark .cq-card-more-popover { border-col
 }
 /* MCP approvals use the normal app palette, independent of urgent alerts. */
 
-/* The overview button: bottom left of the content area, in both views. */
-.cq-overview-launch{position:absolute;left:20px;bottom:20px;z-index:24;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--cq-paper);color:var(--cq-muted);border:1px solid color-mix(in srgb, var(--cq-muted) 22%, transparent);box-shadow:0 4px 16px #0000001a;cursor:pointer;transition:transform .15s,box-shadow .15s,color .15s}
+/* The overview button: bottom right of the content area, which stays put when the overview hides the sidebar. */
+.cq-overview-launch{position:absolute;right:20px;bottom:20px;z-index:24;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--cq-paper);color:var(--cq-muted);border:1px solid color-mix(in srgb, var(--cq-muted) 22%, transparent);box-shadow:0 4px 16px #0000001a;cursor:pointer;transition:transform .15s,box-shadow .15s,color .15s}
 .cq-overview-launch:hover{transform:translateY(-2px);box-shadow:0 6px 20px #00000024;color:var(--cq-ink)}
 .cq-overview-launch:focus-visible{outline:2px solid var(--cq-accent);outline-offset:3px}
 .cq-overview-launch[aria-pressed="true"]{color:var(--cq-accent);border-color:var(--cq-accent)}
