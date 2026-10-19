@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mergeQueueSnapshot, QUEUE_SSE_REFRESH_MS, queueFallbackPollMs, queuePollIntervalMs } from "@/lib/card-queue-snapshot";
 import type { CardQueue } from "@/lib/card-queue";
+import { subscribeLive } from "@/lib/live-events";
 import { useI18n } from "@/hooks/useI18n";
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -82,7 +83,6 @@ export function useCardQueue() {
     let cycle = 0;
     let live = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const events = new EventSource("/api/card-queue/events");
     let sseRefresh: ReturnType<typeof setTimeout> | undefined;
     const scheduleLiveRefresh = () => {
       if (disposed || sseRefresh) return;
@@ -91,9 +91,11 @@ export function useCardQueue() {
         if (!disposed) void refresh();
       }, QUEUE_SSE_REFRESH_MS);
     };
-    events.onopen = () => { live = true; };
-    events.onmessage = () => { if (!disposed) scheduleLiveRefresh(); };
-    events.onerror = () => { live = events.readyState !== EventSource.CLOSED; };
+    const stopLive = subscribeLive({
+      open: () => { live = true; },
+      change: () => { if (!disposed) scheduleLiveRefresh(); },
+      error: closed => { live = !closed; },
+    });
     const poll = async (owner: number) => {
       if (disposed) return;
       await refresh();
@@ -116,7 +118,7 @@ export function useCardQueue() {
       lifetime.current += 1;
       clearTimeout(sseRefresh);
       clearTimeout(timer);
-      events.close();
+      stopLive();
       request.current?.controller.abort();
       request.current = null;
       window.removeEventListener("online", reconcile);

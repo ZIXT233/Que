@@ -26,7 +26,7 @@ pub async fn set_permissions(state: &AppState, id: &str, permissions: CardPermis
         Ok(())
     }).await?;
     // Joined to everyone now: what waited for a channel from or to it goes.
-    if permissions.all_channels { crate::inbox::release_all(id).await?; }
+    if permissions.all_channels { crate::inbox::release_all(id).await?; state.live.notify("channels"); }
     Ok(())
 }
 
@@ -46,6 +46,8 @@ pub async fn set(state: &AppState, a: &str, b: &str, joined: bool) -> AppResult<
         Ok(())
     }).await?;
     if joined { crate::inbox::release(a, b).await?; }
+    // What waited for this channel is answered: the request dialog reads again.
+    state.live.notify("channels");
     Ok(())
 }
 

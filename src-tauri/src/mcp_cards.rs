@@ -49,7 +49,7 @@ pub async fn create(state:&AppState,source:&str,from:Option<&str>,allowed:bool,b
   match requests.iter().find(|r|r.key==key) {
    Some(r) if r.fingerprint!=fingerprint=>return Err(AppError::msg("requestId was already used for another creation")),
    Some(_)=>{},
-   None=>requests.push(Request{id:id.clone(),key,fingerprint,from:from.into(),workspace:workspace.into(),kind:kind.into(),nickname:nickname.map(str::to_string)}),
+   None=>{requests.push(Request{id:id.clone(),key,fingerprint,from:from.into(),workspace:workspace.into(),kind:kind.into(),nickname:nickname.map(str::to_string)});state.live.notify("channels");},
   }
   return Ok(json!({"delivery":"waitingForUser","note":"The user is asked whether to create this card. You get a message once they decide, with its cardId if they allow it; do not ask again. Finish your turn or call wait_messages."}));
  }
@@ -86,6 +86,7 @@ pub async fn decide(state:&AppState,id:&str,allow:bool)->AppResult<()> {
  let request={let mut requests=REQUESTS.lock().await;
   let at=requests.iter().position(|r|r.id==id).ok_or_else(||AppError::msg("This request was already answered"))?;
   requests.remove(at)};
+ state.live.notify("channels");
  let text=if allow {
   match make(state,&request.id,&request.workspace,&request.kind,request.nickname.as_deref(),&request.key,&request.fingerprint,Some(&request.from)).await {
    Ok(result) if result["delivery"]=="started"=>format!("The user allowed the card you asked for: card {id} is started and joined to you. Send it the task with send_message."),

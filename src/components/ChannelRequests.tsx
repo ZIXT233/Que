@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "@/hooks/useI18n";
 import { Icon } from "./QueueIcon";
 import { harnessName } from "@/lib/harness/catalog";
+import { subscribeLive } from "@/lib/live-events";
 
 type Peer = { cardId: string; name: string };
 type Request = { from: Peer; to: Peer; preview: string; count: number };
@@ -22,19 +23,21 @@ export function ChannelRequests() {
   const active = requests[0];
   const creation = active ? undefined : creations[0];
   const key = active ? `${active.from.cardId}>${active.to.cardId}` : creation ? `create:${creation.id}` : "";
+  // Read again whenever Que says requests or cards changed, and on (re)connecting.
   useEffect(() => {
     let gone = false;
-    let timer: ReturnType<typeof setTimeout>;
+    let reading = 0;
     const refresh = async () => {
+      const mine = ++reading;
       try {
         const [values, created] = await Promise.all([invoke<Request[]>("channel_requests"), invoke<Creation[]>("create_requests")]);
-        if (!gone) { setRequests(values); setCreations(created); }
+        if (!gone && mine === reading) { setRequests(values); setCreations(created); }
       }
       catch { /* Without the native window nothing can be allowed; requests keep waiting. */ }
-      if (!gone) timer = setTimeout(refresh, 1000);
     };
     void refresh();
-    return () => { gone = true; clearTimeout(timer); };
+    const stop = subscribeLive({ open: () => void refresh(), change: reason => { if (reason === "channels" || reason === "queue") void refresh(); } });
+    return () => { gone = true; stop(); };
   }, []);
   useEffect(() => setError(""), [key]);
   const decide = async (allow: boolean) => {
