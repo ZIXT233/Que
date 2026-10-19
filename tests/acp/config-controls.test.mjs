@@ -49,8 +49,11 @@ export async function run(){
  const option={id:'fast-mode',name:'Fast mode',category:'model_config',currentValue:'off',options:[{value:'off',name:'Off'},{value:'on',name:'On'}]};
  const snapshot={ownerEpoch:'e',revision:5,state:'attention',turns:[],commands:[{name:'compact'}],status:{details:{configOptions:[option]}}};
  const requests=[];
- const push=async(data)=>act(async()=>{globalThis.__streams.latest().emit('snapshot',data);await new Promise(r=>setTimeout(r,30))});
+ // Reading the card waits for the stream's first delivery, so the view is seen loading first.
+ let delivered;const streamed=new Promise(resolve=>delivered=resolve);
+ const push=async(data)=>act(async()=>{globalThis.__streams.latest().emit('snapshot',data,id);delivered();await new Promise(r=>setTimeout(r,30))});
  globalThis.fetch=async(url,init)=>{
+ if(!init?.body)await streamed;
  if(init?.body){const body=JSON.parse(init.body);requests.push(body);if(body.action==='config'){option.currentValue=body.value;snapshot.revision++;}if(body.action==='send'){const turn={id:body.requestId,text:body.text,attachments:body.attachments,state:'running',blocks:[]};snapshot.turns.push(turn);return {ok:true,json:async()=>structuredClone(turn)};}}
  return {ok:true,json:async()=>structuredClone(snapshot)};
  };

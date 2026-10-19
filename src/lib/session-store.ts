@@ -34,10 +34,13 @@ async function resync(id: string) {
 }
 
 function apply(id: string, event: StreamEvent<SessionSnapshot>) {
+  if (!id) return;
   handlers.get(id)?.forEach(handler => handler(event));
   const { snapshot, gap } = foldEvents(snapshots.get(id), [event]);
   if (snapshot && snapshot !== snapshots.get(id)) { snapshots.set(id, snapshot); changed(id); }
-  if (gap && listeners.has(id)) void resync(id);
+  // A missed event: repaired at once while folded views watch; otherwise
+  // forgotten, so whoever opens the card next reads it instead of a stale copy.
+  if (gap) { if (listeners.has(id)) void resync(id); else snapshots.delete(id); }
 }
 
 function connect() {

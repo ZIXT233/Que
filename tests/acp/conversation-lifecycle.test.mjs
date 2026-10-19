@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const dom=new JSDOM('<div id="root"></div>',{url:'http://localhost'});
-for(const key of ['window','document','HTMLElement','Element','Node','Event','MouseEvent','MutationObserver','sessionStorage'])globalThis[key]=dom.window[key];
+for(const key of ['window','document','HTMLElement','HTMLImageElement','Element','Node','Event','MouseEvent','MutationObserver','sessionStorage'])globalThis[key]=dom.window[key];
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 globalThis.__streams=installEventSource();
 globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);
@@ -23,7 +23,18 @@ const requests=[];
 globalThis.fetch=(url,options)=>new Promise((resolve,reject)=>requests.push({url,body:options?.body&&JSON.parse(options.body),resolve:result=>resolve({ok:true,json:async()=>result}),reject}));
 const root=createRoot(document.getElementById('root'));
 const card={id:'first',cwd:'/project',workspaceId:'local',harness:{kind:'fixture'},session:null};
-const render=async(key='deck',active=true,current=card)=>act(async()=>root.render(<AcpConversation key={key} card={current} active={active} onResume={async()=>{}}/>));
+// The card on screen: what the shared stream delivers is for it.
+let shown=card.id;
+// Opening a card the stream has not delivered reads it once; this returns how
+// many reads the opening made, and leaves them unanswered.
+const render=async(key='deck',active=true,current=card)=>{
+ shown=current.id;
+ await act(async()=>root.render(<AcpConversation key={key} card={current} active={active} onResume={async()=>{}}/>));
+ const reads=requests.filter(request=>!request.body);
+ for(const read of reads)requests.splice(requests.indexOf(read),1);
+ await act(async()=>reads.forEach(read=>read.reject(Error('not answered in this test'))));
+ return reads.length;
+};
 const turn=(id,text,state='completed')=>({id,text,state,attachments:[],blocks:[]});
 const answer=async(req,value)=>act(async()=>req.resolve(value));
 const takeSend=async()=>{
@@ -37,8 +48,8 @@ const takeSend=async()=>{
 export async function run(){
  const streams=globalThis.__streams,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  // The conversation is a subscription: a test pushes what the stream would deliver.
- const push=async data=>act(async()=>{streams.latest().emit('snapshot',data);await sleep(30)});
- const pushDelta=async data=>act(async()=>{streams.latest().emit('delta',data);await sleep(30)});
+ const push=async data=>act(async()=>{streams.latest().emit('snapshot',data,shown);await sleep(30)});
+ const pushDelta=async data=>act(async()=>{streams.latest().emit('delta',data,shown);await sleep(30)});
  const receipt=await admissionId('reload','private message',[]);
  assert.equal(await admissionId('reload','private message',[]),receipt,'a lost acknowledgement survives view reload');
  assert.doesNotMatch(sessionStorage.getItem('queacp:admission:reload'),/private message/,'the receipt is not a second transcript');
@@ -53,11 +64,10 @@ export async function run(){
  await act(async()=>globalThis.__composer.onDraft('next task'));
  await act(async()=>globalThis.__composer.onSend());const submission=await takeSend();assert.equal(submission.body.action,'send');
  await render('deck-again');assert.equal(globalThis.__composer.sending,true);assert.equal(globalThis.__composer.draft,'next task');
- const oldStream=streams.sources.at(-2);
  await answer(submission,turn(submission.body.requestId,'next task','running'));
  assert.equal(globalThis.__composer.sending,false);assert.equal(globalThis.__composer.draft,'','old component completion updates the new view');assert.match(document.body.textContent,/next task/);
- await act(async()=>oldStream.fail());
- assert.equal(document.querySelector('[role=alert]'),null,'a late failure of a closed stream cannot invalidate an accepted send');
+ await act(async()=>streams.latest().fail());
+ assert.equal(document.querySelector('[role=alert]'),null,'a failure of the stream cannot invalidate an accepted send');
  assert.equal(globalThis.__composer.running,true);
  await render('other',true,{...card,id:'other'});assert.ok(document.querySelector('.cq-acp-loading'));assert.doesNotMatch(document.body.textContent,/existing history/);
  await push({state:'attention',turns:[]});
@@ -109,7 +119,7 @@ export async function run(){
  assert.equal(document.querySelector('[role=alert]'),null);
  await act(async()=>globalThis.__composer.onConfig({id:'__legacy_model'},'large'));
  const config=requests.shift();assert.equal(config.body.action,'model');
- await render('health-pending-model',true,healthCard);
+ assert.equal(await render('health-pending-model',true,healthCard),0,'a card the stream delivered is not read again');
  assert.equal(requests.length,0,'a mutation in flight causes no extra reads');
  await answer(config,{...healthy,revision:11,status:{models:{currentModelId:'large',availableModelIds:['small','large']}}});
  assert.equal(globalThis.__composer.models.currentModelId,'large');
@@ -118,14 +128,14 @@ export async function run(){
  assert.equal(globalThis.__composer.models.currentModelId,'large','an older snapshot of the same owner cannot roll a confirmed change back');
 
  // Streaming: deltas extend the transcript, a delta that does not fit triggers one full read, a refused stream reconnects.
- await render('stream-start',true,{...card,id:'streaming'});
+ assert.equal(await render('stream-start',true,{...card,id:'streaming'}),1,'a card the stream has not delivered yet is read once');
  const running={ownerEpoch:'e2',revision:1,state:'working',turns:[{id:'t',text:'go',state:'running',attachments:[],blocks:[{type:'text_delta',stream:'message',text:'Hel'}]}]};
  await push(running);assert.match(document.body.textContent,/Hel/);
  await pushDelta({epoch:'e2',base:1,rev:2,ops:[{op:'append',turn:'t',block:0,text:'lo'}]});
  assert.match(document.body.textContent,/Hello/);
  await act(async()=>{const source=streams.latest();
-   source.emit('delta',{epoch:'e2',base:2,rev:3,ops:[{op:'append',turn:'t',block:0,text:' wor'}]});
-   source.emit('delta',{epoch:'e2',base:3,rev:4,ops:[{op:'append',turn:'t',block:0,text:'ld'}]});await sleep(30)});
+   source.emit('delta',{epoch:'e2',base:2,rev:3,ops:[{op:'append',turn:'t',block:0,text:' wor'}]},shown);
+   source.emit('delta',{epoch:'e2',base:3,rev:4,ops:[{op:'append',turn:'t',block:0,text:'ld'}]},shown);await sleep(30)});
  assert.match(document.body.textContent,/Hello world/,'deltas arriving in one frame apply together');
  assert.equal(requests.length,0,'in-order deltas never cause a read');
  await pushDelta({epoch:'e2',base:9,rev:10,ops:[{op:'append',turn:'t',block:0,text:'!'}]});
@@ -141,10 +151,10 @@ export async function run(){
  const refused=streams.latest(),before=streams.sources.length;
  await act(async()=>refused.fail(true));
  await act(async()=>sleep(1100));
- assert.equal(streams.sources.length,before+1,'a refused stream is reopened by the view');assert.notEqual(streams.latest(),refused);
+ assert.equal(streams.sources.length,before+1,'a refused stream is reopened');assert.notEqual(streams.latest(),refused);
  await render('original',false);assert.match(document.body.textContent,/existing history/);assert.match(document.body.textContent,/next task/);
  await act(async()=>root.unmount());
- console.log('PASS: initial load, reconnect, remount during send, late stream failure, isolated card histories, ordered deltas, resync and reconnect');
+ console.log('PASS: initial load, reconnect, remount during send, stream failure, isolated card histories, ordered deltas, resync and reconnect');
 }
 
 `,loader:'tsx',resolveDir:process.cwd()},bundle:true,write:false,platform:'node',format:'esm',jsx:'automatic',loader:{'.css':'empty'},plugins:[{name:'view-fixtures',setup(b){

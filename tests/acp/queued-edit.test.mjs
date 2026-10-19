@@ -57,7 +57,7 @@ export async function run(){
    return {ok:true,json:async()=>structuredClone(snapshot)};
  };
  const root=createRoot(document.getElementById('root'));const click=async e=>{assert.ok(e);await act(async()=>e.click())};
- const push=async()=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot));await new Promise(resolve=>setTimeout(resolve,30))});
+ const push=async()=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot),'card');await new Promise(resolve=>setTimeout(resolve,30))});
  await act(async()=>root.render(<I18nProvider><AcpConversation card={{id:'card'}} active={true} onResume={async()=>{}}/></I18nProvider>));
  await push();
  assert.equal(document.querySelectorAll('.cq-acp-turn').length,1);

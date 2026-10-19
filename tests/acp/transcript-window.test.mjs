@@ -57,7 +57,7 @@ export async function run(){
  globalThis.fetch=async()=>({ok:true,json:async()=>structuredClone(snapshot)});
  const root=createRoot(document.getElementById('root'));
  const render=(key,active=true)=>act(async()=>root.render(<I18nProvider><AcpConversation key={key} card={{id:'card'}} active={active} onResume={async()=>{}}/></I18nProvider>));
- const push=()=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot));await new Promise(r=>setTimeout(r,30))});
+ const push=(id='card')=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot),id);await new Promise(r=>setTimeout(r,30))});
  const box=()=>document.querySelector('.cq-acp-transcript');
  const shown=()=>[...document.querySelectorAll('.cq-acp-turn .cq-acp-user')].map(a=>Number(a.textContent.slice(1)));
  const scrollTo=async top=>act(async()=>{const b=box();b.dispatchEvent(new window.WheelEvent('wheel',{bubbles:true}));b.scrollTop=top;b.dispatchEvent(new window.Event('scroll'));});
@@ -91,7 +91,7 @@ export async function run(){
  await act(async()=>root.unmount());
  globalThis.__hidden=true;
  const hidden=createRoot(document.getElementById('root'));
- await act(async()=>hidden.render(<I18nProvider><AcpConversation card={{id:'hidden'}} active={true} onResume={async()=>{}}/></I18nProvider>));await push();
+ await act(async()=>hidden.render(<I18nProvider><AcpConversation card={{id:'hidden'}} active={true} onResume={async()=>{}}/></I18nProvider>));await push('hidden');
  assert.equal(shown().length,15,'a hidden conversation (no height) does not load its whole history');
  await act(async()=>hidden.unmount());globalThis.__hidden=false;
  console.log('PASS: long conversations render their last turns, fold finished steps, and grow upward on demand');

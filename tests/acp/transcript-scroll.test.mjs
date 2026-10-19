@@ -52,7 +52,7 @@ export async function run(){
  globalThis.fetch=async()=>({ok:true,json:async()=>structuredClone(snapshot)});
  const root=createRoot(document.getElementById('root'));
  const render=key=>act(async()=>root.render(<I18nProvider><AcpConversation key={key} card={{id:'card'}} active={true} onResume={async()=>{}}/></I18nProvider>));
- const push=()=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot));await new Promise(r=>setTimeout(r,30))});
+ const push=()=>act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot),'card');await new Promise(r=>setTimeout(r,30))});
  const box=()=>document.querySelector('.cq-acp-transcript');
  const scrollTo=async(top,user)=>act(async()=>{const b=box();if(user)b.dispatchEvent(new window.WheelEvent('wheel',{bubbles:true}));b.scrollTop=top;b.dispatchEvent(new window.Event('scroll'));});
  const latest=()=>[...document.querySelectorAll('button')].find(b=>/回到最新/.test(b.textContent));

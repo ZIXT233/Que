@@ -62,7 +62,7 @@ export async function run(){
  globalThis.fetch=async()=>({ok:true,json:async()=>structuredClone(snapshot)});
  const root=createRoot(document.getElementById('root'));
  await act(async()=>root.render(<I18nProvider><AcpConversation card={{id:'card'}} active={true} onResume={async()=>{}}/></I18nProvider>));
- await act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot));await new Promise(resolve=>setTimeout(resolve,30))});
+ await act(async()=>{globalThis.__streams.latest().emit('snapshot',structuredClone(snapshot),'card');await new Promise(resolve=>setTimeout(resolve,30))});
  const [peerTurn,myTurn]=document.querySelectorAll('.cq-acp-turn');
  assert.equal(peerTurn.querySelector('.cq-acp-user'),null,'another card is not drawn as the user');
  const received=peerTurn.querySelector('.cq-acp-msg--in');

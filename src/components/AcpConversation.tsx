@@ -183,7 +183,8 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       if(gap)void resync();
     };
     const stop=subscribeSessionEvents(card.id,event=>{queue.push(event as unknown as StreamEvent<Snapshot>);frame??=setTimeout(flush,16);});
-    void resync();
+    // The stream delivered this card already (the snapshot above): nothing to read.
+    if(!peekSessionSnapshot(card.id))void resync();
     return()=>{closed=true;clearTimeout(frame);stop();};
   },[active,card.id,setSnapshot]);
   const streamHealthy=useSessionStreamHealthy();
