@@ -7,7 +7,7 @@
 //! backend already speaks: quoting helpers, a login-shell wrapper, and the
 //! one-shot exec calls that harness probing and remote browsing are built on.
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::models::RemoteHost;
 
 /// Whether Que currently holds an authenticated connection to `host`.
@@ -59,18 +59,6 @@ pub fn ssh_login_command(command: &str) -> String {
         ))
     )
 }
-
-/// The one-shot "is this CLI on the host's PATH" probe a remote launch runs before
-/// opening a card.
-///
-/// `command -v` exits non-zero when the name is absent, and a non-zero exit would
-/// surface the login shell's rc noise (ioctl complaints from a pty-less shell) as the
-/// error text. The trailing `true` keeps the probe itself alive, so an empty answer is
-/// the "not installed" verdict and the caller gets to write the message.
-pub fn ssh_cli_probe(executable: &str) -> String {
-    format!("command -v {}; true", shell_quote(executable))
-}
-
 /// An interactive login shell on the remote host, started in `directory`.
 ///
 /// `exec` on an SSH channel runs the command through `$SHELL -c`, which reads no
@@ -101,26 +89,6 @@ pub async fn ssh_exec_stdin(host: &str, command: &str, stdin: &[u8]) -> AppResul
     crate::debuglog::debug("ssh", &format!("exec ok stdout_len={}", output.len()));
     Ok(output)
 }
-
-/// Run a command through the login shell and return only its output.
-///
-/// A login shell may print a banner or MOTD before the command runs; the marker
-/// lets us drop everything up to the real output.
-pub async fn ssh_login_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
-    let marker = format!("__QUE_LOGIN_{}__", uuid::Uuid::new_v4());
-    let wrapped = ssh_login_command(&format!(
-        "printf '%s' {}; {}",
-        shell_quote(&marker),
-        command
-    ));
-    let output = ssh_exec(host, &wrapped).await?;
-    let start = output
-        .windows(marker.len())
-        .position(|w| w == marker.as_bytes())
-        .ok_or_else(|| AppError::machine("REMOTE_SHELL_NO_OUTPUT"))?;
-    Ok(output[start + marker.len()..].to_vec())
-}
-
 /// Wrap a command with tmux session allowing the session to persist across disconnects/app restarts.
 pub fn wrap_remote_tmux(terminal_id: &str, cwd: &str, command: &str) -> String {
     wrap_remote_tmux_with_channel(terminal_id, cwd, command, None)
@@ -222,13 +190,5 @@ mod tests {
         assert!(command.contains(r#"-ilc"#), "{command}");
         assert!(command.contains(r#"'codex --version'"#), "{command}");
         assert!(!remote_login_shell("/srv/app", false).contains("-c "));
-    }
-
-    /// The probe must always exit zero — a non-zero exit would carry the shell's rc
-    /// noise back as the error text — and the CLI name must stay one shell word.
-    #[test]
-    fn a_cli_probe_always_succeeds_and_keeps_the_name_quoted() {
-        assert_eq!(ssh_cli_probe("codex"), "command -v 'codex'; true");
-        assert_eq!(ssh_cli_probe("my agent"), "command -v 'my agent'; true");
     }
 }

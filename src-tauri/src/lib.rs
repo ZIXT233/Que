@@ -9,7 +9,6 @@ pub mod debuglog;
 mod dev_tools;
 mod editor;
 mod error;
-mod focus;
 mod harness;
 mod acp;
 mod acp_supervisor;
@@ -81,6 +80,7 @@ fn open_devtools(window: tauri::WebviewWindow) {
 
 /// Reveal the file in Finder/Explorer and open it in the default editor.
 #[tauri::command]
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 fn reveal_log(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let path = std::path::PathBuf::from(path);
     if !path.exists() {
@@ -135,7 +135,7 @@ pub fn run() {
         "app",
         &format!(
         "process-start pid={} version={} arch={} debug={} panic_strategy={} exe={:?} log_time=UTC",
-        std::process::id(), env!("CARGO_PKG_VERSION"), std::env::consts::ARCH,
+        std::process::id(), concat!(env!("CARGO_PKG_VERSION"), "+", env!("QUE_COMMIT")), std::env::consts::ARCH,
         cfg!(debug_assertions), if cfg!(panic = "abort") { "abort" } else { "unwind" },
         std::env::current_exe().ok(),
     ),
@@ -183,7 +183,7 @@ pub fn run() {
                 "app",
                 &format!(
                     "que {} {} log={} level={}",
-                    env!("CARGO_PKG_VERSION"),
+                    concat!(env!("CARGO_PKG_VERSION"), "+", env!("QUE_COMMIT")),
                     std::env::consts::OS,
                     crate::debuglog::log_path().display(),
                     crate::debuglog::min_level()
@@ -230,7 +230,6 @@ pub fn run() {
             notify::open_notification_settings,
             notify::request_notification_permission,
             notify::check_notification_permission,
-            focus::focus_external_window,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

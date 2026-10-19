@@ -17,7 +17,7 @@ import { Disclosure } from './chat/Disclosure';
 import { ImageViewer } from './chat/ImageViewer';
 import { createPortal } from 'react-dom';
 import { AcpStartup, type StartLogEntry } from './AcpStartup';
-import { peekSessionSnapshot } from '@/lib/session-store';
+import { peekSessionSnapshot, subscribeSessionEvents, useSessionStreamHealthy } from '@/lib/session-store';
 import type { QueueCard } from '@/lib/card-queue';
 import '../styles/acp.css';
 
@@ -41,7 +41,6 @@ const useConversationView = createRetainedConversationView(key => {
     editingDraft: null as EditingDraft | null,
     error: '', connectionError: '', sending: false, controlBusy: false, follow: true, readingAt: 0, shownFrom: -1,
     mutationActive: {current: false},
-    streamHealth: {failures: 0},
     admission: {current: null as Admission | null},
   };
 }, value => value.sending || value.controlBusy || !!value.admission.current);
@@ -129,7 +128,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const {t}=useI18n();
   const viewKey=JSON.stringify([card.id, card.workspaceId, card.cwd, card.harness?.kind]);
   const view = useConversationView(viewKey);
-  const {mutationActive, admission, streamHealth} = view.value;
+  const {mutationActive, admission} = view.value;
   const [editingDraft,setEditingDraft] = view.field('editingDraft');
   const [snapshot,updateSnapshot] = view.field('snapshot');
   const setSnapshot=useCallback((next:Snapshot | ((previous:Snapshot | undefined)=>Snapshot | undefined))=>updateSnapshot(previous=>{
@@ -162,12 +161,14 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
     const known = peekSessionSnapshot(card.id);
     if (known) setSnapshot(known as unknown as Snapshot);
   }, [card.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  // The conversation is a subscription: a snapshot first, then ordered deltas
-  // (see runtime/session-wire.mjs). A delta that does not fit means a missed
-  // event, repaired by fetching one full snapshot.
+  // The conversation follows its card on the app's one session stream: its
+  // current state first, then ordered deltas (see runtime/session-wire.mjs). A
+  // delta that does not fit means a missed event, repaired by reading one full
+  // snapshot. It folds them into its own state, which also holds the turns it
+  // just sent.
   useEffect(() => {
     if (!active) return;
-    let closed=false, resyncing=false, source:EventSource|undefined, retry:ReturnType<typeof setTimeout>|undefined, frame:ReturnType<typeof setTimeout>|undefined;
+    let closed=false, resyncing=false, frame:ReturnType<typeof setTimeout>|undefined;
     let queue:StreamEvent<Snapshot>[]=[];
     const resync=async()=>{
       if(resyncing)return;resyncing=true;
@@ -181,24 +182,12 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       setSnapshot(previous=>{const folded=foldEvents(previous,events);gap=folded.gap;return folded.snapshot;});
       if(gap)void resync();
     };
-    const enqueue=(event:StreamEvent<Snapshot>)=>{queue.push(event);frame??=setTimeout(flush,16);};
-    const connect=()=>{
-      const opened=new EventSource(`/api/acp/${encodeURIComponent(card.id)}/events`);
-      source=opened;
-      const parse=(event:Event)=>JSON.parse((event as MessageEvent).data);
-      opened.addEventListener('snapshot',event=>{streamHealth.failures=0;setConnectionError('');enqueue({event:'snapshot',data:parse(event)});});
-      opened.addEventListener('delta',event=>enqueue({event:'delta',data:parse(event)}));
-      opened.onerror=()=>{
-        if(closed||source!==opened)return;
-        // A failed read says nothing about the turn or selected model: keep the last state.
-        if(++streamHealth.failures>=3)setConnectionError('暂时无法刷新会话状态，正在重试…');
-        // EventSource gives up on a refused stream; reopen it with a short backoff.
-        if(opened.readyState===EventSource.CLOSED){source=undefined;retry=setTimeout(connect,Math.min(1000*streamHealth.failures,8000));}
-      };
-    };
-    connect();
-    return()=>{closed=true;clearTimeout(retry);clearTimeout(frame);source?.close();};
-  },[active,card.id,setSnapshot,setConnectionError,streamHealth]);
+    const stop=subscribeSessionEvents(card.id,event=>{queue.push(event as unknown as StreamEvent<Snapshot>);frame??=setTimeout(flush,16);});
+    void resync();
+    return()=>{closed=true;clearTimeout(frame);stop();};
+  },[active,card.id,setSnapshot]);
+  const streamHealthy=useSessionStreamHealthy();
+  useEffect(()=>{ if(active)setConnectionError(streamHealthy?'':'暂时无法刷新会话状态，正在重试…'); },[active,streamHealthy,setConnectionError]);
   // Where the transcript stands is the user's choice alone: following the end,
   // or the place they scrolled up to. Only their own scrolling (wheel, touch,
   // scrollbar, keys) changes it; a scroll caused by layout — a card mounting

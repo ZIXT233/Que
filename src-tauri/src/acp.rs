@@ -94,7 +94,6 @@ impl AcpRuntime {
     pub fn new(live: LiveBus) -> Self { Self { snapshots: Default::default(), generations:Default::default(), links: Default::default(), connecting:Default::default(), remote_mcp:Default::default(), updates: broadcast::channel(512).0, live } }
     /// Every change to any cached session, in order. A lagged receiver must resend a snapshot.
     pub fn updates(&self) -> broadcast::Receiver<AcpUpdate> { self.updates.subscribe() }
-    pub fn cached(&self, id: &str) -> Option<Value> { self.snapshots.lock().get(id).cloned() }
     pub fn cached_all(&self) -> Vec<(String, Value)> { self.snapshots.lock().iter().map(|(id, s)| (id.clone(), s.clone())).collect() }
     pub(crate) fn remote_requests(&self) -> mpsc::Receiver<RemoteMcpRequest> {
         let (sender, receiver) = mpsc::channel(128);
@@ -315,10 +314,11 @@ impl AcpRuntime {
         }
         Ok(result)
     }
-    pub async fn launch(&self, id: &str, kind: &str, workspace: &QueueWorkspace, resume: Option<HarnessSession>, _: &TerminalHub, _: &crate::settings::SettingsStore, bin: &Path, _: bool) -> AppResult<HarnessSession> {
+    /// Connects card `id` to its agent (a new session, or its own again).
+    pub async fn launch(&self, id: &str, kind: &str, workspace: &QueueWorkspace, resume: Option<HarnessSession>, bin: &Path) -> AppResult<HarnessSession> {
         let host_access = resume.as_ref().and_then(|h| h.host_access);
         self.request(workspace, bin, json!({"action":"ensure","id":id,"agent":kind,"cwd":workspace.cwd,"env":workspace.session_env,"hostAccess":host_access})).await?;
-        serde_json::from_value(json!({"kind":kind,"terminalId":id,"state":"attention","version":"acpx 0.19.3","remote":workspace.kind == "ssh"})).map_err(Into::into)
+        serde_json::from_value(json!({"kind":kind,"terminalId":id,"state":"attention","remote":workspace.kind == "ssh"})).map_err(Into::into)
     }
 }
 

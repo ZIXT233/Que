@@ -1,5 +1,6 @@
 "use client";
 import { apiUrlWithToken } from "@/lib/http";
+import { BUILD_COMMIT } from "@/lib/build";
 
 import { NativeHistory } from "./chat/NativeHistory";
 import { AgentPicker } from "./AgentPicker";
@@ -373,7 +374,7 @@ function CardQueueShellContent() {
   const ready = useMemo(() => {
     // The clock invalidates time-dependent ordering even when the API is unchanged.
     void scoreTick;
-    const list = queue ? sortedQueue(queue, Date.now(), true) : [];
+    const list = queue ? sortedQueue(queue, Date.now()) : [];
     const queued = pendingDetach.size === 0 ? list : list.filter((card) => !pendingDetach.has(card.id));
     return queued;
   }, [queue, scoreTick, pendingDetach]);
@@ -1111,7 +1112,7 @@ function CardQueueShellContent() {
         </button>)}</div></>}
         <div className="cq-sidebar-bottom">
           <div className="cq-sidebar-meta">
-            <span>v{appUpdate.version}</span>
+            <span title={`v${appUpdate.version}+${BUILD_COMMIT}`}>v{appUpdate.version} · {BUILD_COMMIT}</span>
             {(import.meta.env.DEV || appUpdate.result?.newer) && <>
               <a className="cq-sidebar-update" href={import.meta.env.DEV ? `${QUE_REPO_URL}/releases/latest` : appUpdate.result ? releaseUrl(appUpdate.result.tag) : `${QUE_REPO_URL}/releases/latest`} title={appUpdate.result?.newer ? t("settings.aboutUpdateAvailable", { version: appUpdate.result.version }) : t("settings.aboutViewRelease")} onClick={(event) => { event.preventDefault(); void openUrl(event.currentTarget.href).catch(() => showQueueToast(t("settings.aboutOpenFailed"))); }}>{t("settings.aboutUpdateLink")}</a>
             </>}

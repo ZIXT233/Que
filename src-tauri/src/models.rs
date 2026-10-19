@@ -132,59 +132,6 @@ pub struct HarnessSession {
     pub tmux: Option<bool>,
 }
 
-/// One message of an external session's own record, so a card can show the exchange
-/// instead of only that the session is waiting.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExternalTurn {
-    /// "user" or "assistant".
-    pub role: String,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExternalNotice {
-    /// Provider conversation id, or the workspace path when the CLI reports none.
-    /// Stable for the life of one external session, so the card survives reloads.
-    pub id: String,
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    /// Last path segment of the workspace the external session is working in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project: Option<String>,
-    /// Full workspace directory, so the card can name the folder it is really in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    /// Real session title from the provider's own store, when it can be read.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_name: Option<String>,
-    /// Latest user prompt, i.e. the ask whose turn just ended.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<String>,
-    /// Tail of the conversation, oldest first. Empty when only the hook reported it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub turns: Vec<ExternalTurn>,
-    /// "attention" while the session wants a human, "working" while it has the floor.
-    pub state: String,
-    /// The reply itself: a notice has no terminal, so this is the card's content.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notification: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<String>,
-    /// Manual weight for score ordering while this external notice is live.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub priority_weight: Option<i64>,
-    /// First timestamp of the current attention wait; unchanged by repeated hooks.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub waiting_since: Option<i64>,
-    /// When the session entered attention; drives ordering and the age label.
-    pub at: i64,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetachedLease {
@@ -344,37 +291,12 @@ fn default_developer_probes() -> bool {
     false
 }
 
-/// Every harness that serves sessions Que never launched under its own settings key
-/// starts enabled; family members covered by their host's key are not listed.
-fn default_external_ingress() -> std::collections::HashMap<String, bool> {
-    std::collections::HashMap::new()
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default = "default_powershell")]
     pub powershell_enabled: bool,
     #[serde(default = "default_developer_probes", alias = "developerProbes")]
     pub developer_probes: bool,
-    /// Master gate for external-session notices. Off by default: the feature
-    /// (and especially its jump-to-window action) is experimental and not
-    /// reliable yet. Per-harness keys only apply while this is on.
-    #[serde(default, alias = "externalNoticesEnabled")]
-    pub external_notices_enabled: bool,
-    #[serde(default = "default_external_ingress", alias = "externalIngress")]
-    pub external_ingress: std::collections::HashMap<String, bool>,
-}
-
-impl AppSettings {
-    pub fn is_external_ingress_enabled(&self, harness: &str) -> bool {
-        if !self.external_notices_enabled {
-            return false;
-        }
-        // Family members share their host's key: "gemini" toggles with "antigravity",
-        // "omp" with "pi". The registry is the one place that mapping lives.
-        let key = harness;
-        self.external_ingress.get(key).copied().unwrap_or(true)
-    }
 }
 
 impl Default for AppSettings {
@@ -382,8 +304,6 @@ impl Default for AppSettings {
         Self {
             powershell_enabled: default_powershell(),
             developer_probes: default_developer_probes(),
-            external_notices_enabled: false,
-            external_ingress: default_external_ingress(),
         }
     }
 }
@@ -437,33 +357,11 @@ mod tests {
         assert!(on.developer_probes);
         let camel: AppSettings = serde_json::from_str(r#"{"developerProbes":true}"#).unwrap();
         assert!(camel.developer_probes);
-        // Master gate off by default: a settings file without the key (and one
-        // with only per-harness keys) gates every harness off.
-        assert!(!missing.is_external_ingress_enabled("codex"));
-        assert!(!missing.is_external_ingress_enabled("cursor"));
-        assert!(!missing.is_external_ingress_enabled("antigravity"));
-        assert!(!missing.is_external_ingress_enabled("gemini"));
-
-        let disabled: AppSettings =
-            serde_json::from_str(r#"{"external_ingress":{"codex":false}}"#).unwrap();
-        assert!(!disabled.is_external_ingress_enabled("codex"));
-        assert!(!disabled.is_external_ingress_enabled("cursor"));
-
-        // With the gate on, per-harness keys apply: absent means enabled.
-        let on: AppSettings = serde_json::from_str(
-            r#"{"external_notices_enabled":true,"external_ingress":{"codex":false}}"#,
+        // Settings saved before external-session notices were removed still load.
+        let old: AppSettings = serde_json::from_str(
+            r#"{"external_notices_enabled":true,"external_ingress":{"codex":false},"developer_probes":true}"#,
         )
         .unwrap();
-        assert!(!on.is_external_ingress_enabled("codex"));
-        assert!(on.is_external_ingress_enabled("cursor"));
-        // The gate overrides even an explicit per-harness true.
-        let gated: AppSettings = serde_json::from_str(
-            r#"{"external_notices_enabled":false,"external_ingress":{"codex":true}}"#,
-        )
-        .unwrap();
-        assert!(!gated.is_external_ingress_enabled("codex"));
-        let camel: AppSettings =
-            serde_json::from_str(r#"{"externalNoticesEnabled":true}"#).unwrap();
-        assert!(camel.is_external_ingress_enabled("codex"));
+        assert!(old.developer_probes);
     }
 }

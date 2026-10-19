@@ -76,30 +76,6 @@ pub fn settings_file() -> PathBuf {
 pub fn logs_dir() -> PathBuf {
     data_dir().join("logs")
 }
-
-pub fn signal_dir(terminal_id: &str) -> PathBuf {
-    data_dir().join("harness-signals").join(terminal_id)
-}
-
-/// Signals from sessions Que never launched. Cursor's user-level `hooks.json` is
-/// global, so IDE chats and other terminals report here; they have no terminal id
-/// and must never be mistaken for a queue card.
-pub fn external_signal_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("QUE_EXTERNAL_SIGNAL_DIR") {
-        return PathBuf::from(path);
-    }
-    data_dir().join("external-signals")
-}
-
-/// Que's per-CLI hook plugins. Each kind owns one directory of files here.
-pub fn plugins_dir() -> PathBuf {
-    data_dir().join("harness-plugins")
-}
-
-pub fn plugin_root(kind: &str) -> PathBuf {
-    plugins_dir().join(kind)
-}
-
 pub fn ssh_runtime_dir(workspace_id: &str) -> PathBuf {
     data_dir().join("ssh").join(workspace_id)
 }

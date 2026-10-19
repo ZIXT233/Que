@@ -62,7 +62,6 @@ pub fn router(state: AppState) -> Router {
             post(crate::mcp::tools).layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .route("/api/acp/{id}", get(acp_read).post(acp_action))
-        .route("/api/acp/{id}/events", get(acp_events))
         .route("/api/acp/events", get(acp_all_events))
         .route("/api/speech/settings", get(crate::speech::settings).put(crate::speech::save_settings))
         .route("/api/speech/transcribe", post(crate::speech::transcribe).layer(DefaultBodyLimit::max(10_100_000)))
@@ -222,7 +221,7 @@ pub(crate) async fn post_queue(
     }
     if matches!(
         action.as_str(),
-        "harness_start" | "harness_reopen" | "harness_restart" | "harness_resume"
+        "harness_start" | "harness_resume"
     ) {
         return launch_harness(&state, &body, &action)
             .await
@@ -248,19 +247,10 @@ pub(crate) async fn post_queue(
         }
     }
     if action == "workspace_create" { normalize_workspace_create(&mut body).await?; }
-    // dismiss_external already did its work above and has no queue-side action; every
-    // other action goes through apply_action. Both share this one read+response path.
-    let external_action = matches!(
-        action.as_str(),
-        "dismiss_external" | "external_priority_weight" | "snooze_external"
-    );
     let (queue, created) = state
         .queue
         .with_queue(false, |queue| {
             refresh_queue(queue, &state);
-            if external_action {
-                return Ok((queue.clone(), None));
-            }
             let created = apply_action(queue, &body, &action, &state)?;
             refresh_queue(queue, &state);
             Ok((queue.clone(), created))
@@ -397,30 +387,12 @@ async fn acp_read(State(state): State<AppState>, Path(id): Path<String>) -> AppR
     let ws = acp_workspace(&state, &id).await?;
     Ok(Json(state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":id})).await?))
 }
-/// One conversation as a stream: its current snapshot, then every change in order
-/// (`snapshot` events replace the state, `delta` events extend it; see
-/// runtime/session-wire.mjs). Reconnecting simply starts again from a snapshot.
-async fn acp_events(State(state): State<AppState>, Path(id): Path<String>) -> AppResult<Sse<impl futures::Stream<Item = Result<Event, Infallible>>>> {
-    let ws = acp_workspace(&state, &id).await?;
-    // Subscribe before reading so nothing in between is lost; the UI skips what the snapshot already holds.
-    let updates = state.harness.updates();
-    let first = state.harness.request(&ws, &state.bin_dir, json!({"action":"read","id":id})).await?;
-    let runtime = state.harness.clone();
-    let watched = id.clone();
-    let initial = stream::once(async move { Ok::<Event, Infallible>(Event::default().event("snapshot").data(first.to_string())) });
-    let changes = BroadcastStream::new(updates).filter_map(move |item| match item {
-        Ok(update) if update.id == watched => Some(Ok::<Event, Infallible>(Event::default().event(update.event).data(update.data))),
-        Ok(_) => None,
-        // Updates were missed: the current state replaces them.
-        Err(_) => runtime.cached(&watched).map(|snapshot| Ok(Event::default().event("snapshot").data(snapshot.to_string()))),
-    });
-    Ok(Sse::new(initial.chain(changes)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
-}
-/// Every connected conversation on one stream, for views that show many cards
-/// at once: a browser opens only a few connections per host, so one stream per
-/// card would starve the rest. Each event is `{id, data}` with the same
-/// snapshot/delta data as the per-card stream; a missed delta is repaired the
-/// same way, by reading that card's snapshot.
+/// Every connected conversation on one stream, the app's only session stream: a
+/// browser opens only a few connections per host, so one stream per card would
+/// starve the rest. It starts from every card's snapshot, then each change in
+/// order; each event is `{id, data}`, where `snapshot` data replaces a card's
+/// state and `delta` data extends it (see runtime/session-wire.mjs). A missed
+/// delta is repaired by reading that card's snapshot (`GET /api/acp/{id}`).
 fn tagged(event: &'static str, id: &str, data: &str) -> Event {
     Event::default().event(event).data(format!("{{\"id\":{},\"data\":{data}}}", json!(id)))
 }
@@ -532,21 +504,10 @@ pub(crate) async fn launch_harness(
                 if card.session.is_some() || card.harness.is_some() {
                     return Err(AppError::machine("HARNESS_START_NOT_BLANK"));
                 }
-            } else {
-                let harness = card
-                    .harness
-                    .as_ref()
-                    .ok_or_else(|| AppError::machine("HARNESS_STILL_RUNNING"))?;
-                let dead = state
-                    .terminals
-                    .snapshot(&harness.terminal_id)
-                    .is_none_or(|t| t.exited);
-                if !["error", "exited", "not_running"].contains(&harness.state.as_str()) && !dead {
-                    return Err(AppError::machine("HARNESS_STILL_RUNNING"));
-                }
-                if action == "harness_reopen" && harness.provider_session_id.is_some() {
-                    return Err(AppError::machine("HARNESS_ALREADY_KNOWN"));
-                }
+            } else if card.harness.is_none() {
+                // Resuming connects the card's own agent again (the owner's ensure is
+                // idempotent: a card still connected just keeps its session).
+                return Err(AppError::msg("这张卡还没有选 Agent"));
             }
             let workspace = queue
                 .workspaces
@@ -575,17 +536,7 @@ pub(crate) async fn launch_harness(
     };
     // The CLI owns resume validation. A session may live outside Que's default
     // store, so a local filesystem miss must not turn resume into a new launch.
-    let resume = if action == "harness_start" || action == "harness_reopen" {
-        None
-    } else {
-        captured.0.harness.clone()
-    };
-    let use_tmux = body
-        .get("tmux")
-        .and_then(|v| v.as_bool())
-        .or_else(|| captured.0.harness.as_ref().and_then(|h| h.tmux))
-        .or_else(|| resume.as_ref().and_then(|r| r.tmux))
-        .unwrap_or(captured.1.kind == "ssh");
+    let resume = if action == "harness_start" { None } else { captured.0.harness.clone() };
     crate::debuglog::info_card(
         "harness",
         id,
@@ -597,16 +548,7 @@ pub(crate) async fn launch_harness(
     );
     let launched = match state
         .harness
-        .launch(
-            id,
-            kind,
-            &captured.1,
-            resume.clone(),
-            &state.terminals,
-            &state.settings,
-            &state.bin_dir,
-            use_tmux,
-        )
+        .launch(id, kind, &captured.1, resume.clone(), &state.bin_dir)
         .await
     {
         Ok(session) => session,
@@ -618,7 +560,6 @@ pub(crate) async fn launch_harness(
             return Err(error);
         }
     };
-    crate::debuglog::bind_term(&launched.terminal_id, id);
     crate::debuglog::info_card(
         "harness",
         id,
@@ -663,13 +604,6 @@ pub(crate) async fn launch_harness(
             Ok(queue.clone())
         })
         .await;
-    if result.is_ok() {
-        if let Some(id) = previous_id {
-            state.terminals.kill(&id);
-        }
-    } else {
-        state.terminals.kill(&launched.terminal_id);
-    }
     result
 }
 
@@ -685,15 +619,8 @@ fn kill_side_terminals(state: &AppState, card: &crate::models::QueueCard) {
     }
 }
 
-fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCard) {
-    let use_tmux = card
-        .harness
-        .as_ref()
-        .and_then(|harness| harness.tmux)
-        .unwrap_or(true);
-    if !use_tmux {
-        return;
-    }
+/// A remote card's side terminals live on in tmux; archiving the card ends them.
+fn try_kill_side_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCard) {
     let Some(host) = queue
         .workspaces
         .as_ref()
@@ -708,12 +635,7 @@ fn try_kill_card_tmux_sessions(queue: &CardQueue, card: &crate::models::QueueCar
         return;
     };
 
-    // Harness tmux sessions are keyed by card id. The terminal id is only the
-    // live SSH channel identity and does not name the persistent tmux session.
     let mut session_ids = Vec::new();
-    if card.harness.is_some() {
-        session_ids.push(crate::ssh::card_tmux_session_id(&card.id));
-    }
     if let Some(tabs) = &card.side_terminals {
         session_ids.extend(
             tabs.iter()
@@ -825,7 +747,7 @@ pub(crate) fn apply_action(
         }
         "harness_close" => {
             if let Some(card) = queue.cards.iter().find(|c| Some(c.id.as_str()) == id) {
-                try_kill_card_tmux_sessions(queue, card);
+                try_kill_side_tmux_sessions(queue, card);
             }
             let card = queue
                 .cards
@@ -1160,7 +1082,7 @@ pub(crate) fn apply_action(
                 card.harness.as_ref().map(|h| h.terminal_id.as_str()),
                 "archive",
             );
-            try_kill_card_tmux_sessions(queue, card);
+            try_kill_side_tmux_sessions(queue, card);
             if let Some(harness) = &card.harness {
                 state.terminals.stop(&harness.terminal_id);
             }
@@ -1340,9 +1262,6 @@ pub(crate) fn apply_action(
                 .ok_or_else(|| AppError::machine("CARD_GONE"))?;
             let open = body.get("open").and_then(|v| v.as_bool()).unwrap_or(false);
             card.side_terminal_open = open.then_some(true);
-        }
-        "adopt" | "attach" | "prompt_sources" => {
-            return Err(AppError::msg("Que 不托管 Pi 原生会话"))
         }
         _ => return Err(AppError::msg("未知队列操作")),
     }
@@ -1603,8 +1522,6 @@ fn tools_json(settings: &crate::models::AppSettings) -> Value {
         "debugLogging": crate::debuglog::verbose(),
         "logPath": crate::debuglog::log_path().to_string_lossy(),
         "logDir": crate::paths::logs_dir().to_string_lossy(),
-        "externalIngress": settings.external_ingress,
-        "externalNoticesEnabled": settings.external_notices_enabled,
     })
 }
 
@@ -1898,7 +1815,6 @@ async fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<Stri
     let rows = json_dimension(body.get("rows")).unwrap_or(24);
     let id = body.get("id").and_then(|v| v.as_str()).map(str::to_string);
     let target = terminal_target(cwd, terminal_ssh_host(body)?)?;
-    let queue = state.queue.read_snapshot()?;
     let created = match target {
         TerminalTarget::Local(cwd) => {
             state
@@ -2333,7 +2249,6 @@ fn with_cwd(queue: CardQueue, state: &AppState) -> Value {
         obj.insert("defaultCwd".into(), json!(state.default_cwd));
         // External sessions ride along in the snapshot so the deck can show them
         // without the queue store ever learning they exist.
-        obj.insert("external".into(), json!([]));
     }
     value
 }

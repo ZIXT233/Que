@@ -59,27 +59,4 @@ impl SettingsStore {
         Ok(settings)
     }
 
-    pub async fn set_external_ingress(
-        &self,
-        harness: &str,
-        enabled: bool,
-    ) -> AppResult<AppSettings> {
-        let _guard = self.lock.lock().await;
-        let mut settings = self.read()?;
-        settings
-            .external_ingress
-            .insert(harness.to_string(), enabled);
-        atomic_write(&settings_file(), &serde_json::to_string_pretty(&settings)?)?;
-        crate::debuglog::info("app", &format!("external_ingress[{}]={}", harness, enabled));
-        Ok(settings)
-    }
-
-    pub async fn set_external_notices(&self, enabled: bool) -> AppResult<AppSettings> {
-        let _guard = self.lock.lock().await;
-        let mut settings = self.read()?;
-        settings.external_notices_enabled = enabled;
-        atomic_write(&settings_file(), &serde_json::to_string_pretty(&settings)?)?;
-        crate::debuglog::info("app", &format!("external_notices={}", enabled));
-        Ok(settings)
-    }
 }

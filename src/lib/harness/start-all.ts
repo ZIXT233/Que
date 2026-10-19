@@ -52,7 +52,7 @@ async function startAll({ getCards, workspaces, launch }: Options): Promise<Fail
           continue;
         }
         try {
-          await launch(card.harness.providerSessionId ? "harness_resume" : "harness_reopen", { id });
+          await launch("harness_resume", { id });
         } catch (error) {
           const code = errorCode(error);
           // Backend guards remain authoritative if a different window won

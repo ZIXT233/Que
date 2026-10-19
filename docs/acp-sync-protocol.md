@@ -7,13 +7,13 @@
 ```
 Agent ──事件──▶ owner ──snapshot / delta──▶ Que ──SSE──▶ 界面
                   ▲                          │（增量原样转发）
-                  └──────── read ◀───────────┘（界面订阅时、或界面发现序号对不上时）
+                  └──────── read ◀───────────┘（界面打开卡片时、或发现序号对不上时）
 ```
 
 - owner → Que：stdio（本机）或 SSH 转发到 tmux 里的 owner（远程）上的按行 JSON。
-- Que → 界面：`GET /api/acp/{id}/events`（SSE）。订阅时 Que 先向 owner 取一份当前快照发出，之后转发该卡的所有事件。
-- `GET /api/acp/{id}`：取一份完整快照，界面在序号对不上时使用。
-- `GET /api/acp/events`：所有已连接卡片合在一条 SSE 里，每个事件是 `{id, data}`，`data` 与单卡流相同。连上时先发每张卡缓存的快照；Que 丢了更新就把缓存快照全部重发。同时显示很多卡的视图（总览）用它，因为浏览器对同一地址只开少数几条连接，一张卡一条流会把其他连接挤掉。界面按卡片用同一个 `foldEvents` 合并（`src/lib/session-store.ts`）。
+- Que → 界面：`GET /api/acp/events`（SSE），界面唯一的会话流。所有已连接卡片合在一条流里，每个事件是 `{id, data}`。连上时先发每张卡缓存的快照，之后按顺序转发每张卡的事件；Que 丢了更新就把缓存快照全部重发。只有一条流，是因为浏览器对同一地址只开少数几条连接，一张卡一条流会把其他连接挤掉。
+- `GET /api/acp/{id}`：取一份完整快照，界面打开一张卡、或序号对不上时使用。
+- 界面（`src/lib/session-store.ts`）只开这一条流：卡片面、总览、启动进度用按卡合并好的快照（`useSessionSnapshot`，同一个 `foldEvents`）；会话视图要叠加自己的乐观消息，取该卡的原始事件（`subscribeSessionEvents`）自己合并。
 
 ## 事件
 

@@ -15,8 +15,9 @@ const until = async (check, what, ms = 60000) => {
   for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) { const value = await check(); if (value) return value; }
   throw Error(`timed out waiting for ${what}`);
 };
-// Minimal EventSource: collects `event:`/`data:` blocks from the HTTP stream.
-async function subscribe(url) {
+// Minimal EventSource on the shared stream: collects one card's `event:`/`data:`
+// blocks, unwrapped from their `{id, data}`.
+async function subscribe(url, card) {
   const controller = new AbortController(), events = [];
   const response = await fetch(url, { signal: controller.signal });
   assert.equal(response.status, 200);
@@ -35,7 +36,8 @@ async function subscribe(url) {
             if (line.startsWith('event:')) event = line.slice(6).trim();
             else if (line.startsWith('data:')) data += line.slice(5).trimStart();
           }
-          if (data) events.push({ event, data: JSON.parse(data) });
+          const tagged = data && JSON.parse(data);
+          if (tagged?.id === card) events.push({ event, data: tagged.data });
         }
       }
     } catch (error) { if (error.name !== 'AbortError') throw error; }
@@ -66,7 +68,7 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
     card = (await request('/api/card-queue', { action: 'create', workspaceId: 'queacp-butler', kind: 'codex' })).createdId;
     await request('/api/card-queue', { action: 'harness_resume', id: card });
 
-    stream = await subscribe(`${base}/api/acp/${card}/events?token=${apiToken}`);
+    stream = await subscribe(`${base}/api/acp/events?token=${apiToken}`, card);
     await until(() => stream.events.length, 'the initial snapshot');
     ownerPid = Number(await readFile(path.join(acpRoot, 'owner.pid'), 'utf8'));
     assert.equal(stream.events[0].event, 'snapshot', 'a subscription starts from the current state');
@@ -98,7 +100,7 @@ test('a conversation stream rebuilds the exact server state from a snapshot and 
     assert.equal(state.revision, finalState.revision);
 
     // A late subscriber (reload, card moved) starts from the full current state.
-    second = await subscribe(`${base}/api/acp/${card}/events?token=${apiToken}`);
+    second = await subscribe(`${base}/api/acp/events?token=${apiToken}`, card);
     await until(() => second.events.length, 'a second snapshot');
     assert.equal(second.events[0].event, 'snapshot');
     assert.deepEqual(second.events[0].data.turns, finalState.turns);

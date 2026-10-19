@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { BUILD_COMMIT } from "@/lib/build";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "@/hooks/useI18n";
 import { QUE_REPO_URL, releaseUrl, type AppUpdateState } from "@/hooks/useAppUpdate";
@@ -29,7 +30,7 @@ export function AboutSettings({ update }: { update: AppUpdateState }) {
       <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("settings.aboutVersion")}</h3>
         <div className="settings-about-row">
-          <code>v{update.version}</code>
+          <code>v{update.version}+{BUILD_COMMIT}</code>
           <ConfigButton variant="secondary" size="small" onClick={() => void update.checkUpdates()} disabled={update.checking}>
             {update.checking ? t("settings.aboutChecking") : t("settings.aboutCheckUpdates")}
           </ConfigButton>
