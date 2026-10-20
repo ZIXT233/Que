@@ -52,7 +52,7 @@ export async function run(){
  const pushDelta=async data=>act(async()=>{streams.latest().emit('delta',data,shown);await sleep(30)});
  const receipt=await admissionId('reload','private message',[]);
  assert.equal(await admissionId('reload','private message',[]),receipt,'a lost acknowledgement survives view reload');
- assert.doesNotMatch(sessionStorage.getItem('queacp:admission:reload'),/private message/,'the receipt is not a second transcript');
+ assert.doesNotMatch(sessionStorage.getItem('que:admission:reload'),/private message/,'the receipt is not a second transcript');
  acknowledgeAdmission('reload','another-request');assert.equal(await admissionId('reload','private message',[]),receipt);
  acknowledgeAdmission('reload',receipt);assert.notEqual(await admissionId('reload','private message',[]),receipt,'an acknowledged identical message is a new submission');
  await render();assert.ok(document.querySelector('.cq-acp-loading'));
@@ -161,6 +161,6 @@ export async function run(){
  b.onLoad({filter:/components\/chat\/Composer.tsx$/},()=>({contents:'export function Composer(props){globalThis.__composer=props;return null}',loader:'tsx'}));
  b.onLoad({filter:/hooks\/useI18n.tsx$/},()=>({contents:'export function useI18n(){return {t:key=>key}}',loader:'js'}));
 }}],banner:{js:"import {createRequire} from 'node:module';const require=createRequire(import.meta.url);"}});
-const dir=await mkdtemp(join(tmpdir(),'queacp-conversation-'));
+const dir=await mkdtemp(join(tmpdir(),'que-conversation-'));
 try{const file=join(dir,'test.mjs');await writeFile(file,result.outputFiles[0].text);await(await import(pathToFileURL(file))).run();}
 finally{dom.window.close();channels.forEach(c=>{c.port1.close();c.port2.close()});await rm(dir,{recursive:true,force:true})}

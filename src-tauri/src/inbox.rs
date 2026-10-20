@@ -1,7 +1,7 @@
 //! Each card's inbox of messages from other cards. A message is handed over
 //! exactly once, by whichever comes first:
 //! - the card is idle: it becomes the card's next turn, sender named in its header;
-//! - the card is busy: it rides on the card's next QueACP tool result, or on its
+//! - the card is busy: it rides on the card's next Que tool result, or on its
 //!   `wait_messages` call — the closest ACP gets to reading mail between tool calls;
 //! - otherwise it becomes a turn once the current one ends.
 use crate::{api::AppState, error::{AppError, AppResult}};

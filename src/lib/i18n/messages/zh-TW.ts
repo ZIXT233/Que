@@ -94,7 +94,7 @@ export const zhTWLocale: LocalePlugin = {
     "speech.tooLarge": "錄音過大，請縮短錄音後重試。",
     "speech.invalidAudio": "錄音格式無效，請重新錄音。",
     "speech.unsupported": "目前環境不支援錄音，請使用支援麥克風的桌面應用程式或瀏覽器。",
-    "speech.permission": "未取得麥克風權限，請在系統設定中允許 QueACP 使用麥克風。",
+    "speech.permission": "未取得麥克風權限，請在系統設定中允許 Que 使用麥克風。",
     "speech.noMicrophone": "找不到可用的麥克風。",
     "speech.recordFailed": "無法啟動錄音，請檢查麥克風後重試。",
     "composer.quote": "引用訊息",

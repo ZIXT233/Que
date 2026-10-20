@@ -51,7 +51,7 @@ export function AboutSettings({ update }: { update: AppUpdateState }) {
       <section className="settings-general-section">
         <h3 className="settings-general-heading">GitHub</h3>
         <button type="button" className="settings-about-link" onClick={() => openExternal(QUE_REPO_URL)}>
-          github.com/ZIXT233/QueACP <span aria-hidden="true">↗</span>
+          github.com/ZIXT233/Que <span aria-hidden="true">↗</span>
         </button>
         {openFailed && <p className="settings-general-error" role="alert">{t("settings.aboutOpenFailed")}</p>}
       </section>

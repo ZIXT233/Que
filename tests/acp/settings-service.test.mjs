@@ -6,9 +6,9 @@ import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-const binary=process.env.QUEACP_SETTINGS_TEST_BINARY;
+const binary=process.env.QUE_SETTINGS_TEST_BINARY;
 test('settings MCP uses real API, validates scopes, redacts secrets and creates workspaces idempotently',{skip:!binary},async()=>{
- const root=await mkdtemp(path.join(tmpdir(),'queacp-settings-api-'));
+ const root=await mkdtemp(path.join(tmpdir(),'que-settings-api-'));
  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin')},stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',d=>stderr+=d);
  const lines=readline.createInterface({input:child.stdout});
  const controls=new Map();
@@ -35,9 +35,9 @@ test('settings MCP uses real API, validates scopes, redacts secrets and creates 
   assert.ok((await request('/api/card-queue')).cards.every(c=>c.harness),'no card is ever blank');
   const session=await request('/api/acp/'+card);ownerPid=Number(await readFile(path.join(acpRoot,'owner.pid'),'utf8'));
   const discovery=JSON.parse(await readFile(path.join(root,'que','mcp','endpoint.json'),'utf8'));
-  const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-QueACP-Source-Epoch':session.connectionId};
+  const headers={Authorization:'Bearer '+discovery.token,'X-Que-Client-Id':crypto.randomUUID(),'X-Que-Source-Terminal':card,'X-Que-Source-Epoch':session.connectionId};
   const call=(tool,args={})=>request('/api/mcp/tools',{tool,...args},headers);
-  const denied={...headers};delete denied['X-Que-Source-Terminal'];delete denied['X-QueACP-Source-Epoch'];
+  const denied={...headers};delete denied['X-Que-Source-Terminal'];delete denied['X-Que-Source-Epoch'];
   await assert.rejects(request('/api/mcp/tools',{tool:'update_settings',scope:'ui',patch:{theme:'dark'}},denied),/may not/);
   await assert.rejects(call('update_settings',{scope:'ui',patch:{theme:'dark'}}),/may not read or change settings/,'settings need the permission');
   await native('card_permissions_set',{id:card,permissions:{settings:true}});

@@ -17,7 +17,7 @@ const acpxInternals = { name: 'acpx-internals', setup(build) {
   });
 }};
 // acpx 0.19.3 prefers resume (no transcript replay) when adopting a native
-// session. First import into QueACP needs load so acpx stores the replayed messages.
+// session. First import into Que needs load so acpx stores the replayed messages.
 const nativeHistoryReplay = { name: 'native-history-replay', setup(build) {
   build.onLoad({filter: /acpx[\/]dist[\/]runtime\.js$/}, async ({path}) => {
     const source = await readFile(path, 'utf8');
@@ -37,7 +37,7 @@ const nativeHistoryReplay = { name: 'native-history-replay', setup(build) {
     return {contents:source.replace(before,after),loader:'js'};
   });
 }};
-await build({ define:{QUEACP_MCP_BRIDGE_SOURCE:JSON.stringify(await readFile('scripts/que-mcp.cjs','utf8'))}, plugins:[nativeHistoryReplay, acpxInternals], entryPoints: ['runtime/acp-owner.mjs'], outfile: 'src-tauri/resources/bin/acp-owner.mjs', bundle: true, platform: 'node', format: 'esm', target: 'node22', banner: { js: 'import { createRequire as queacpCreateRequire } from "node:module";const require=queacpCreateRequire(import.meta.url);' } });
+await build({ define:{QUE_MCP_BRIDGE_SOURCE:JSON.stringify(await readFile('scripts/que-mcp.cjs','utf8'))}, plugins:[nativeHistoryReplay, acpxInternals], entryPoints: ['runtime/acp-owner.mjs'], outfile: 'src-tauri/resources/bin/acp-owner.mjs', bundle: true, platform: 'node', format: 'esm', target: 'node22', banner: { js: 'import { createRequire as queCreateRequire } from "node:module";const require=queCreateRequire(import.meta.url);' } });
 
 // Tauri's existing development executable resolves resources from target/debug.
 // Refresh that copy too; a running owner still needs to reconnect to load it.

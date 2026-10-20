@@ -1,4 +1,4 @@
-//! Authenticated QueACP tools for agents and the user's own MCP clients.
+//! Authenticated Que tools for agents and the user's own MCP clients.
 //!
 //! A message between cards is a turn in the target's ACP session, written in the
 //! target's conversation with the sender named in its header. acpx queues it when
@@ -78,7 +78,7 @@ fn directory() -> std::path::PathBuf {
     crate::paths::data_dir().join("mcp")
 }
 fn client_config() -> Value {
-    json!({"mcpServers":{"queacp":{"command":"node","args":[directory().join("que-mcp.cjs")]}}})
+    json!({"mcpServers":{"que":{"command":"node","args":[directory().join("que-mcp.cjs")]}}})
 }
 
 pub fn publish(state: &AppState, port: u16) -> AppResult<()> {
@@ -145,7 +145,7 @@ fn start_remote_dispatch(state: &AppState) {
                 let result=match result {
                     Ok(Ok(value))=>value,
                     Ok(Err(error))=>json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}),
-                    Err(_)=>json!({"isError":true,"content":[{"type":"text","text":"QueACP MCP request timed out; execution may be unknown. No automatic retry was made."}]}),
+                    Err(_)=>json!({"isError":true,"content":[{"type":"text","text":"Que MCP request timed out; execution may be unknown. No automatic retry was made."}]}),
                 };
                 if state.harness.current_link(&request.machine,&request.generation) {
                     let _=request.reply.send(format!("{}\n",json!({"action":"_mcp_result","requestId":request.message["requestId"],"result":result})).into_bytes());
@@ -174,7 +174,7 @@ async fn remote_tool(state:&AppState, request:&crate::acp::RemoteMcpRequest)->Ap
         ("authorization",format!("Bearer {}",state.mcp.token.get().ok_or_else(||AppError::msg("MCP unavailable"))?)),
         ("x-que-client-id",required(&request.message,"clientId")?.to_string()),
         ("x-que-source-terminal",source.to_string()),
-        ("x-queacp-source-epoch",required(&request.message,"epoch")?.to_string()),
+        ("x-que-source-epoch",required(&request.message,"epoch")?.to_string()),
     ] {headers.insert(key,value.parse().map_err(|_|AppError::msg("Invalid MCP source header"))?);}
     if !request.message["body"].is_object() || !request.message["body"]["tool"].is_string() {return Err(AppError::msg("Invalid reverse MCP body"));}
     let response=tools_inner(state.clone(),headers,request.message["body"].clone(),Some((&request.machine,&request.generation))).await;
@@ -254,7 +254,7 @@ async fn tools_inner(state:AppState, headers:HeaderMap, body:Value, remote:Optio
         .get("x-que-source-terminal")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
-    if !source_terminal.is_empty() && headers.get("x-queacp-source-epoch").and_then(|h| h.to_str().ok()) != Some(state.harness.epoch(source_terminal).as_str()) {
+    if !source_terminal.is_empty() && headers.get("x-que-source-epoch").and_then(|h| h.to_str().ok()) != Some(state.harness.epoch(source_terminal).as_str()) {
         return (StatusCode::FORBIDDEN, Json(json!({"error":"Source agent run ended or changed"}))).into_response();
     }
     // Connecting a stopped target is app lifecycle, not an Agent task: do it
@@ -280,7 +280,7 @@ async fn tools_inner(state:AppState, headers:HeaderMap, body:Value, remote:Optio
             && state.queue.read_snapshot().is_ok_and(|queue|remote_source_matches(&queue,machine,source_terminal));
         if !valid {return (StatusCode::FORBIDDEN,Json(json!({"error":"Remote MCP source or connection changed"}))).into_response();}
     }
-    if !source_terminal.is_empty() && headers.get("x-queacp-source-epoch").and_then(|h| h.to_str().ok()) != Some(state.harness.epoch(source_terminal).as_str()) {
+    if !source_terminal.is_empty() && headers.get("x-que-source-epoch").and_then(|h| h.to_str().ok()) != Some(state.harness.epoch(source_terminal).as_str()) {
         return (StatusCode::FORBIDDEN, Json(json!({"error":"Source agent run ended or changed"}))).into_response();
     }
     let result = run_tool(&state, &state.mcp.tools, &body, client, source_terminal).await;
@@ -298,7 +298,7 @@ async fn tools_inner(state:AppState, headers:HeaderMap, body:Value, remote:Optio
         Ok(value) if mail.is_empty() => Json(value).into_response(),
         Ok(value) => {
             let mut value = if value.is_object() { value } else { json!({"result":value}) };
-            value["queacpMessages"] = crate::inbox::shown(&mail);
+            value["queMessages"] = crate::inbox::shown(&mail);
             Json(value).into_response()
         }
         Err(error) => error.into_response(),
@@ -403,7 +403,7 @@ async fn run_tool(
             let source = source_card.ok_or_else(|| AppError::msg("wait_messages is for a card's own Agent"))?;
             let seconds = body["timeoutSeconds"].as_u64().unwrap_or(crate::inbox::WAIT_DEFAULT_SECS);
             let letters = crate::inbox::wait(state, &source.id, seconds).await?;
-            return Ok(json!({"queacpMessages":crate::inbox::shown(&letters),
+            return Ok(json!({"queMessages":crate::inbox::shown(&letters),
                 "note":if letters.is_empty() { "No message yet. Call again to keep waiting, or finish your turn: messages that arrive later start your next turn." } else { "Each message is handed over once." }}));
         }
         "send_message" => return send_message(state, tools, body, &queue, source_card, &principal).await,
@@ -494,7 +494,7 @@ async fn send_message(state: &AppState, tools: &Mutex<ToolState>, body: &Value, 
     if !waiting.is_empty() { state.live.notify("channels"); }
     if sent.is_empty() && waiting.is_empty() { return Err(AppError::msg(refused[0]["error"].as_str().unwrap_or("Refused").to_string())); }
     Ok(json!({"sent":sent,"waitingForChannel":waiting,"refused":refused,
-        "note":"Cards in waitingForChannel get it once the user opens a channel to them; do not resend. Each card reads it now if idle, otherwise at its next QueACP tool call or when its current turn ends. Answers come back as messages to you: call wait_messages to wait within this turn, or finish your turn and they start your next one. Do not poll read_session for them."}))
+        "note":"Cards in waitingForChannel get it once the user opens a channel to them; do not resend. Each card reads it now if idle, otherwise at its next Que tool call or when its current turn ends. Answers come back as messages to you: call wait_messages to wait within this turn, or finish your turn and they start your next one. Do not poll read_session for them."}))
 }
 
 fn list_cards(state: &AppState, queue: &crate::models::CardQueue, source: Option<&crate::models::QueueCard>) -> Value {

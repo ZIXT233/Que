@@ -7,10 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {build} from 'esbuild';
 import {pathToFileURL} from 'node:url';
-const binary=process.env.QUEACP_HEADLESS_TEST_BINARY;
+const binary=process.env.QUE_HEADLESS_TEST_BINARY;
 // The UI's own folding, bundled from TypeScript.
 const {foldEvents}=await (async()=>{
-  const dir=mkdtempSync(path.join(os.tmpdir(),'queacp-fold-'));
+  const dir=mkdtempSync(path.join(os.tmpdir(),'que-fold-'));
   try{const out=path.join(dir,'fold.mjs');const result=await build({entryPoints:['src/lib/acp-delta.ts'],bundle:true,format:'esm',platform:'node',write:false});
     writeFileSync(out,result.outputFiles[0].text);return await import(pathToFileURL(out).href);}
   finally{rmSync(dir,{recursive:true,force:true});}
@@ -18,8 +18,8 @@ const {foldEvents}=await (async()=>{
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 test('cards talk over channels the user opens; both sides see the messages, also after a restart', {skip:!binary, timeout:120000}, async()=>{
-  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-messages-'));
-  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
+  const root=mkdtempSync(path.join(os.tmpdir(),'que-messages-'));
+  const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUE_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
   try {
     const controls=new Map();
     const {base,token:apiToken}=await new Promise((resolve,reject)=>{
@@ -50,7 +50,7 @@ test('cards talk over channels the user opens; both sides see the messages, also
           const event=frame.match(/^event: (.*)$/m)?.[1],data=frame.match(/^data: (.*)$/m)?.[1];if(event&&data)all.push({event,...JSON.parse(data)});}}
     }catch{}})();
     const {token}=JSON.parse(readFileSync(path.join(data,'mcp','endpoint.json'),'utf8'));
-    const as=id=>({authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':id,'x-queacp-source-epoch':sessions[id].connectionId});
+    const as=id=>({authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':id,'x-que-source-epoch':sessions[id].connectionId});
     const tool=(from,body)=>request('/api/mcp/tools',body,as(from));
     const send=(from,to,requestId,text)=>tool(from,{tool:'send_message',to,requestId,text});
     const turns=async id=>(await request('/api/acp/'+id)).turns;
@@ -81,7 +81,7 @@ test('cards talk over channels the user opens; both sides see the messages, also
     // Refused: the message is dropped and the sender is told.
     await send(shen,zhou,'ask-zhou','周大人在吗？');
     await native('channel_decide',{from:shen,to:zhou,allow:false});
-    const told=await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='QueACP'),'refusal told');
+    const told=await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='Que'),'refusal told');
     assert.match(told.text,/did not open a channel/);
     await settled(shen);
     assert.equal((await turns(zhou)).length,0);
@@ -105,14 +105,14 @@ test('cards talk over channels the user opens; both sides see the messages, also
     assert.equal(out.direction,'out');assert.equal(out.all,true);assert.equal(out.text,'请拉取后重启');
     await until(async()=>(await turns(yang)).some(t=>t.text==='请拉取后重启'),'broadcast delivered');
     await settled(yang);
-    // The answer rides on the sender's next QueACP tool result, once, and shows in its turn.
+    // The answer rides on the sender's next Que tool result, once, and shows in its turn.
     await send(yang,shen,'answer-1','构建好了，版本 1.2');
     await sleep(1500);
     assert.equal((await turns(shen)).length,2,'a busy card is not given a second turn');
     const listed=await tool(shen,{tool:'list_cards'});
-    assert.equal(listed.queacpMessages.length,1);
-    assert.equal(listed.queacpMessages[0].from.name,'杨金水');assert.equal(listed.queacpMessages[0].text,'构建好了，版本 1.2');
-    assert.equal((await tool(shen,{tool:'list_cards'})).queacpMessages,undefined,'handed over exactly once');
+    assert.equal(listed.queMessages.length,1);
+    assert.equal(listed.queMessages[0].from.name,'杨金水');assert.equal(listed.queMessages[0].text,'构建好了，版本 1.2');
+    assert.equal((await tool(shen,{tool:'list_cards'})).queMessages,undefined,'handed over exactly once');
     const shown=(await working()).blocks.filter(b=>b.type==='message'&&b.direction==='in');
     assert.deepEqual(shown.map(b=>[b.from.name,b.text]),[['杨金水','构建好了，版本 1.2']]);
 
@@ -121,8 +121,8 @@ test('cards talk over channels the user opens; both sides see the messages, also
     await sleep(300);
     await send(yang,shen,'answer-2','测试也过了');
     const waited=await waiting;
-    assert.deepEqual(waited.queacpMessages.map(m=>m.text),['测试也过了']);
-    assert.deepEqual((await tool(shen,{tool:'wait_messages',timeoutSeconds:1})).queacpMessages,[],'an empty wait ends on time');
+    assert.deepEqual(waited.queMessages.map(m=>m.text),['测试也过了']);
+    assert.deepEqual((await tool(shen,{tool:'wait_messages',timeoutSeconds:1})).queMessages,[],'an empty wait ends on time');
 
     // 4. Not picked up while busy: it becomes a turn once the current one ends.
     await send(yang,shen,'answer-3','我先下班了');
@@ -147,13 +147,13 @@ test('cards talk over channels the user opens; both sides see the messages, also
     assert.equal(creation.from.name,'沈一石');assert.equal(creation.workspace,'Distro');assert.equal(creation.kind,'fixture');assert.equal(creation.nickname,'胡宗宪');
     await native('create_decide',{id:creation.id,allow:false});
     assert.deepEqual(await native('create_requests'),[]);
-    await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='QueACP'&&/did not allow/.test(t.text)),'refusal told');
+    await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='Que'&&/did not allow/.test(t.text)),'refusal told');
     await settled(shen);
     assert.ok(!(await request('/api/card-queue')).cards.some(c=>c.id===creation.id),'refused: nothing made');
     await tool(shen,{tool:'create_card',workspaceId:'w',kind:'fixture',requestId:'new-2',nickname:'胡宗宪'});
     const [allowed]=await native('create_requests');
     await native('create_decide',{id:allowed.id,allow:true});
-    const made=await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='QueACP'&&/allowed/.test(t.text)),'creation told');
+    const made=await until(async()=>(await turns(shen)).find(t=>t.sender?.name==='Que'&&/allowed/.test(t.text)),'creation told');
     assert.match(made.text,/is started and joined to you/);
     await settled(shen);
     const queue=await request('/api/card-queue');

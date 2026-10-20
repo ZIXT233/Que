@@ -94,7 +94,7 @@ export const enLocale: LocalePlugin = {
     "speech.tooLarge": "Recording is too large. Try a shorter recording.",
     "speech.invalidAudio": "Invalid recording format. Record again.",
     "speech.unsupported": "Recording is unavailable here. Use a microphone-enabled desktop app or browser.",
-    "speech.permission": "Microphone permission denied. Allow QueACP to use your microphone in system settings.",
+    "speech.permission": "Microphone permission denied. Allow Que to use your microphone in system settings.",
     "speech.noMicrophone": "No microphone found.",
     "speech.recordFailed": "Cannot start recording. Check your microphone and retry.",
     "composer.quote": "Quoted message",

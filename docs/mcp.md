@@ -1,12 +1,12 @@
-# QueACP MCP
+# Que MCP
 
-QueACP MCP lets an agent — another card, or your own MCP client — read and talk to QueACP's cards. Every session it reaches is still an ordinary card in the queue that you can operate directly.
+Que MCP lets an agent — another card, or your own MCP client — read and talk to Que's cards. Every session it reaches is still an ordinary card in the queue that you can operate directly.
 
 ## Connect
 
-Cards started by QueACP get the server automatically. For your own MCP client, copy the JSON from **Settings → General → MCP**; the generated config is also written to `client.json` in the data directory (`~/.queacp/mcp`, development builds `~/.queacp-dev/mcp`, or `$QUEACP_DATA_DIR/mcp`).
+Cards started by Que get the server automatically. For your own MCP client, copy the JSON from **Settings → General → MCP**; the generated config is also written to `client.json` in the data directory (`~/.que/mcp`, development builds `~/.que-dev/mcp`, or `$QUE_DATA_DIR/mcp`).
 
-The stdio bridge needs Node.js. It reads the private `endpoint.json` on each call, so QueACP can rotate its port and credentials at every start without changing your configuration. While QueACP is not running, calls fail explicitly; nothing is retried automatically.
+The stdio bridge needs Node.js. It reads the private `endpoint.json` on each call, so Que can rotate its port and credentials at every start without changing your configuration. While Que is not running, calls fail explicitly; nothing is retried automatically.
 
 ## Access
 
@@ -21,7 +21,7 @@ Sessions — a card is one Agent session, addressed by its `cardId` from `list_c
 - `list_cards()` — cards with their name, workspace, Agent and state.
 - `read_session(cardId, limit?, turnId?, detail?)` — compact by default: state, pending decisions, and the last few turns as message plus final-reply excerpts. `turnId` returns that one turn in full; `detail: "full"` returns everything.
 - `send_message(to, requestId, text)` — puts a message, signed with your card, in the inbox of each card in `to`: a cardId, a list of them, or `"all"` for every other card with an Agent. A stopped card is connected. Nothing comes back by itself: an answer is a message from the target. Reuse `requestId` only to retry the same message. Repeats and floods are refused.
-- `wait_messages(timeoutSeconds?)` — waits up to 50 s (at most 120 s) for messages to your card and returns them. Messages also ride on any QueACP tool result as `queacpMessages`, or start your next turn when you are idle; each is handed over once.
+- `wait_messages(timeoutSeconds?)` — waits up to 50 s (at most 120 s) for messages to your card and returns them. Messages also ride on any Que tool result as `queMessages`, or start your next turn when you are idle; each is handed over once.
 - `cancel_turn(cardId, turnId)` — cancels a running turn or withdraws a queued message (another card's: needs manage cards); read the session to confirm.
 - `set_card_nickname(cardId, nickname, requestId)`.
 

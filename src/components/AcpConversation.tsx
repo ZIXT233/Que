@@ -33,8 +33,8 @@ const useConversationView = createRetainedConversationView(key => {
   const [id] = JSON.parse(key) as string[];
   return {
     snapshot: undefined as Snapshot | undefined,
-    draft: sessionStorage.getItem(`queacp:draft:${id}`) || '',
-    quote: sessionStorage.getItem(`queacp:quote:${id}`) || '',
+    draft: sessionStorage.getItem(`que:draft:${id}`) || '',
+    quote: sessionStorage.getItem(`que:quote:${id}`) || '',
     attachments: [] as Turn['attachments'],
     editingDraft: null as EditingDraft | null,
     error: '', connectionError: '', sending: false, controlBusy: false, follow: true, readingAt: 0, shownFrom: -1,
@@ -151,8 +151,8 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
   const scroll = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
   const draftNow=useRef({text:draft,quote,attachments});draftNow.current={text:draft,quote,attachments};
   const archived = card.archivedAt !== undefined;
-  useEffect(() => { if(quote) sessionStorage.setItem(`queacp:quote:${card.id}`,quote); else sessionStorage.removeItem(`queacp:quote:${card.id}`); },[card.id,quote]);
-  useEffect(() => { sessionStorage.setItem(`queacp:draft:${card.id}`, draft); }, [card.id,draft]);
+  useEffect(() => { if(quote) sessionStorage.setItem(`que:quote:${card.id}`,quote); else sessionStorage.removeItem(`que:quote:${card.id}`); },[card.id,quote]);
+  useEffect(() => { sessionStorage.setItem(`que:draft:${card.id}`, draft); }, [card.id,draft]);
   // A card shown elsewhere (a tile) already has its conversation in the shared
   // store: open with it, before the first paint, instead of a loading state.
   useLayoutEffect(() => {
@@ -332,7 +332,7 @@ export function AcpConversation({ card, active, onResume }: {card: QueueCard; ac
       setAttachments(v=>v===attachments?(editingDraft?.attachments || []):v);
       setEditingDraft(null);admission.current=null;
       // A crash before clearing the draft must keep the receipt for a safe retry.
-      if(sessionStorage.getItem(`queacp:draft:${card.id}`)===messageDraft)sessionStorage.setItem(`queacp:draft:${card.id}`,editingDraft?.text || '');
+      if(sessionStorage.getItem(`que:draft:${card.id}`)===messageDraft)sessionStorage.setItem(`que:draft:${card.id}`,editingDraft?.text || '');
       acknowledgeAdmission(viewKey,message.id);setError('');setConnectionError('');
       // The admission response is sufficient. A later history read failing must
       // not make a successfully accepted message look like a failed submission.

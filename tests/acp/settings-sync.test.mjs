@@ -9,7 +9,7 @@ import {pathToFileURL} from 'node:url';
 test('settings synchronize both directions, preserve remote values and reject stale reads',async()=>{
  const dom=new JSDOM('',{url:'http://localhost'});
  for(const key of ['window','document','StorageEvent','CustomEvent'])globalThis[key]=dom.window[key];
- const dir=await mkdtemp(join(tmpdir(),'queacp-settings-ui-'));
+ const dir=await mkdtemp(join(tmpdir(),'que-settings-ui-'));
  const originalInterval=globalThis.setInterval,originalClear=globalThis.clearInterval;let poll;
  globalThis.setInterval=fn=>(poll=fn,1);globalThis.clearInterval=()=>{};
  let values={theme:'dark',language:'zh-CN'};let held;let hold=false;let offline=false;const writes=[];let events=0;

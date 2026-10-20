@@ -1,23 +1,23 @@
 import readline from 'node:readline';
 import fs from 'node:fs';
-if(process.env.QUEACP_TEST_PID_FILE)fs.appendFileSync(process.env.QUEACP_TEST_PID_FILE,process.pid+'\n');
+if(process.env.QUE_TEST_PID_FILE)fs.appendFileSync(process.env.QUE_TEST_PID_FILE,process.pid+'\n');
 // Simulates an agent that ignores losing its client and must be killed.
-if(process.env.QUEACP_TEST_IGNORE_EOF){setInterval(()=>{},1000);process.stdout.on('error',()=>{});}
+if(process.env.QUE_TEST_IGNORE_EOF){setInterval(()=>{},1000);process.stdout.on('error',()=>{});}
 let model='small', respond;
 const send = value => process.stdout.write(JSON.stringify({jsonrpc:'2.0',...value})+'\n');
 const notify = update => send({method:'session/update',params:{sessionId:'test-session',update}});
 readline.createInterface({input:process.stdin}).on('line', async line => {
   const message=JSON.parse(line), {id, method,params}=message;
   if (!method) {respond?.(message.result ?? {error:message.error});return;}
-  if(process.env.QUEACP_TEST_EMPTY_ROLLOUT && ['session/load','session/resume'].includes(method) && !fs.existsSync(process.env.QUEACP_TEST_EMPTY_ROLLOUT)) {
+  if(process.env.QUE_TEST_EMPTY_ROLLOUT && ['session/load','session/resume'].includes(method) && !fs.existsSync(process.env.QUE_TEST_EMPTY_ROLLOUT)) {
     // Codex reports a missing rollout; Devin just says the session is unknown.
-    if(process.env.QUEACP_TEST_LOAD_ERROR==='not-found'){send({id,error:{code:-32602,message:'Session not found'}});return;}
+    if(process.env.QUE_TEST_LOAD_ERROR==='not-found'){send({id,error:{code:-32602,message:'Session not found'}});return;}
     send({id,error:{code:-32603,message:'Internal error',data:{details:'no rollout found for thread id '+params.sessionId}}});return;
   }
   if(method==='session/load' && params.sessionId==='locked-native') {
     send({id,error:{code:-32603,message:'Internal error',data:{details:'thread locked-native already has an active writer'}}});return;
   }
-  if(process.env.QUEACP_TEST_MCP_FILE && ['session/new','session/load'].includes(method))fs.writeFileSync(process.env.QUEACP_TEST_MCP_FILE,JSON.stringify(params.mcpServers));
+  if(process.env.QUE_TEST_MCP_FILE && ['session/new','session/load'].includes(method))fs.writeFileSync(process.env.QUE_TEST_MCP_FILE,JSON.stringify(params.mcpServers));
   let result={};
   if(method==='initialize')result={protocolVersion:1,agentCapabilities:{loadSession:true,sessionCapabilities:{list:{},resume:{}},promptCapabilities:{image:true,audio:true}},authMethods:[]};
   if(method==='session/new'||method==='session/load')result={sessionId:'test-session',models:{currentModelId:model,availableModels:[{modelId:'small',name:'Small'},{modelId:'large',name:'Large'}]},configOptions:[{id:'mode',name:'权限模式',category:'mode',type:'select',currentValue:'ask',options:[{value:'ask',name:'每次询问'},{value:'auto',name:'自动模式'}]}]};
@@ -33,7 +33,7 @@ readline.createInterface({input:process.stdin}).on('line', async line => {
     // A permission request after the turn has ended: no turn can show it.
     if(params.prompt[0].text==='after-turn-request'){
       send({id,result:{stopReason:'end_turn'}});
-      setTimeout(()=>{respond=answer=>fs.writeFileSync(process.env.QUEACP_TEST_LATE_FILE,JSON.stringify(answer));
+      setTimeout(()=>{respond=answer=>fs.writeFileSync(process.env.QUE_TEST_LATE_FILE,JSON.stringify(answer));
         send({id:98,method:'session/request_permission',params:{sessionId:'test-session',toolCall:{toolCallId:'late1',title:'后台写入文件',kind:'edit'},options:[{optionId:'yes',kind:'allow_once',name:'允许一次'},{optionId:'no',kind:'reject_once',name:'拒绝'}]}});},300);
       return;
     }
@@ -44,10 +44,12 @@ readline.createInterface({input:process.stdin}).on('line', async line => {
       send({id,result:{stopReason:'end_turn'}});return;
     }
     if(params.prompt[0].text.includes('stream-many')){
-      for(let i=0;i<3000;i++){notify({sessionUpdate:'agent_message_chunk',content:{type:'text',text:`token${i} `}});if(i%100===0)await new Promise(resolve=>setImmediate(resolve));}
+      // Span several 60 ms batching windows so the integration test exercises
+      // deltas even when this fixture can emit the whole reply in one burst.
+      for(let i=0;i<3000;i++){notify({sessionUpdate:'agent_message_chunk',content:{type:'text',text:`token${i} `}});if(i%100===0)await new Promise(resolve=>setTimeout(resolve,30));}
       send({id,result:{stopReason:'end_turn'}});return;
     }
-    if(process.env.QUEACP_TEST_EMPTY_ROLLOUT)fs.writeFileSync(process.env.QUEACP_TEST_EMPTY_ROLLOUT,'persisted');
+    if(process.env.QUE_TEST_EMPTY_ROLLOUT)fs.writeFileSync(process.env.QUE_TEST_EMPTY_ROLLOUT,'persisted');
     if(params.prompt[0].text==='host-terminal-check') {
       const call=(method,params)=>new Promise(resolve=>{respond=resolve;send({id:98,method,params:{sessionId:'test-session',...params}})});
       const terminal=await call('terminal/create',{command:process.execPath,args:['-e','process.stdout.write("host-terminal-ok")']});

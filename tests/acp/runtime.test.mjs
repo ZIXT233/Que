@@ -7,11 +7,11 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 test('real acpx owner: approval, queued message, controls, restart, persistent resume', async () => {
- const root=mkdtempSync(path.join(os.tmpdir(),'queacp-acp-test-'));
+ const root=mkdtempSync(path.join(os.tmpdir(),'que-acp-test-'));
  writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
  let child, serial=0;const pending=new Map();
  const connect=()=>{
-   child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env:{...process.env,QUEACP_ACP_ROOT:root,QUEACP_ACP_STORE_DIR:path.join(root,"acpx")},stdio:['pipe','pipe','pipe']});
+   child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env:{...process.env,QUE_ACP_ROOT:root,QUE_ACP_STORE_DIR:path.join(root,"acpx")},stdio:['pipe','pipe','pipe']});
    child.stderr.on('data',d=>process.stderr.write(d));
    readline.createInterface({input:child.stdout}).on('line',line=>{const v=JSON.parse(line);if(v.rpc){const p=pending.get(v.rpc);pending.delete(v.rpc);v.error?p.reject(Error(v.error)):p.resolve(v.result)}});
  };
@@ -110,11 +110,11 @@ test('real acpx owner: approval, queued message, controls, restart, persistent r
    assert.equal((await rpc({action:'attach',id:'duplicate-native',nativeSessionId:'native-one',agent:'fixture',cwd:root})).id,'native-card');
    await rpc({action:'close',id:'native-card'});
    const configFile=path.join(root,'mcp-config.json');
-   const senderSession=await rpc({action:'ensure',id:'sender',agent:'fixture',cwd:root,mcpBridge:'/fixture/que-mcp.cjs',env:{QUEACP_TEST_MCP_FILE:configFile}});
+   const senderSession=await rpc({action:'ensure',id:'sender',agent:'fixture',cwd:root,mcpBridge:'/fixture/que-mcp.cjs',env:{QUE_TEST_MCP_FILE:configFile}});
    const config=JSON.parse(readFileSync(configFile,'utf8'))[0];
-   assert.equal(config.name,'queacp');assert.equal(config.args[0],'/fixture/que-mcp.cjs');
-   assert.equal(config.env.find(e=>e.name==='QUEACP_SOURCE_CARD').value,'sender');
-   assert.equal(config.env.find(e=>e.name==='QUEACP_SOURCE_EPOCH').value,senderSession.connectionId);
+   assert.equal(config.name,'que');assert.equal(config.args[0],'/fixture/que-mcp.cjs');
+   assert.equal(config.env.find(e=>e.name==='QUE_SOURCE_CARD').value,'sender');
+   assert.equal(config.env.find(e=>e.name==='QUE_SOURCE_EPOCH').value,senderSession.connectionId);
    await rpc({action:'ensure',id:'card',agent:'fixture',cwd:root});
    const sender={cardId:'sender',name:'Fixture A',epoch:senderSession.connectionId};
    await rpc({action:'send',id:'card',requestId:'peer',text:'Agent message',sender});

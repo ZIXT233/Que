@@ -34,7 +34,7 @@ jobs:
           if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > draft-state.txt; then
             test "$(cat draft-state.txt)" = true || { echo "Release $RELEASE_TAG is already published" >&2; exit 1; }
           else
-            gh release create "$RELEASE_TAG" --draft --verify-tag --title "QueACP $RELEASE_TAG" --notes ""
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "Que $RELEASE_TAG" --notes ""
           fi
 
   release:
@@ -98,10 +98,10 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
           tagName: ${{ matrix.platform != 'macos' && github.ref_name || '' }}
-          releaseName: QueACP ${{ github.ref_name }}
+          releaseName: Que ${{ github.ref_name }}
           releaseDraft: true
           prerelease: false
-          releaseAssetNamePattern: QueACP-${{ matrix.platform }}-${{ matrix.arch }}[ext]
+          releaseAssetNamePattern: Que-${{ matrix.platform }}-${{ matrix.arch }}[ext]
           uploadUpdaterJson: false
           retryAttempts: 3
 
@@ -119,7 +119,7 @@ jobs:
           count=$(find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')
           test "$count" -eq 1 || { echo "Expected one DMG, found $count" >&2; exit 1; }
           dmg=$(find "$bundle_dir" -maxdepth 1 -type f -name '*.dmg' -print -quit)
-          asset="$RUNNER_TEMP/QueACP-macos-$RELEASE_ARCH.dmg"
+          asset="$RUNNER_TEMP/Que-macos-$RELEASE_ARCH.dmg"
           cp "$dmg" "$asset"
           gh release upload "$RELEASE_TAG" "$asset" --clobber
 

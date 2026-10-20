@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import packageJson from "../../package.json";
 
-export const QUE_REPO_URL = "https://github.com/ZIXT233/QueACP";
-const LATEST_RELEASE_URL = "https://api.github.com/repos/ZIXT233/QueACP/releases/latest";
+export const QUE_REPO_URL = "https://github.com/ZIXT233/Que";
+const LATEST_RELEASE_URL = "https://api.github.com/repos/ZIXT233/Que/releases/latest";
 
 export interface AppReleaseResult {
   version: string;

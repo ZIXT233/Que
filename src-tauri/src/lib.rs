@@ -47,7 +47,7 @@ struct ApiAccess { port: Mutex<u16>, token: std::sync::Arc<str> }
 // Channels change only from the main window: the local HTTP API is not
 // authenticated, and an Agent must not open its own channels.
 fn main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
-    if window.label() == "main" { Ok(()) } else { Err("Use the main QueACP window".into()) }
+    if window.label() == "main" { Ok(()) } else { Err("Use the main Que window".into()) }
 }
 #[tauri::command]
 async fn channel_requests(state: tauri::State<'_, api::AppState>, window: tauri::WebviewWindow) -> Result<serde_json::Value, String> {

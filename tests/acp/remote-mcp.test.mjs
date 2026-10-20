@@ -15,7 +15,7 @@ const socketCall=(socketPath,capability,body)=>new Promise((resolve,reject)=>{
  socket.on('data',chunk=>{data+=chunk;if(data.includes('\n')){socket.destroy();resolve(JSON.parse(data.split('\n')[0]))}});
 });
 test('reverse MCP routes one card, rejects spoofed replies and never replays uncertain calls',async()=>{
- const root=await mkdtemp(path.join(tmpdir(),'queacp-mcp-'));const address=path.join(root,'mcp.sock');
+ const root=await mkdtemp(path.join(tmpdir(),'que-mcp-'));const address=path.join(root,'mcp.sock');
  const sessions={a:{connectionId:'run-a',state:'working'},b:{connectionId:'run-b',state:'attention'}};
  const messages=[],otherMessages=[];
  const client={write:line=>messages.push(JSON.parse(line))},other={write:line=>otherMessages.push(JSON.parse(line))};
@@ -42,9 +42,9 @@ test('reverse MCP routes one card, rejects spoofed replies and never replays unc
 });
 
 test('real owner injects remote bridge and relays reverse calls over its stdio stream',async()=>{
- const root=await mkdtemp(path.join(tmpdir(),'queacp-mcp-owner-'));const children=[];let ownerPid;
+ const root=await mkdtemp(path.join(tmpdir(),'que-mcp-owner-'));const children=[];let ownerPid;
  await writeFile(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
- const env={...process.env,QUEACP_ACP_ROOT:root,QUEACP_ACP_STORE_DIR:path.join(root,'acpx'),QUEACP_TEST_MCP_FILE:path.join(root,'mcp.json')};
+ const env={...process.env,QUE_ACP_ROOT:root,QUE_ACP_STORE_DIR:path.join(root,'acpx'),QUE_TEST_MCP_FILE:path.join(root,'mcp.json')};
  function connect(){
   const child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env});children.push(child);
   const pending=new Map(),reverse=[];let count=0,error='';child.stderr.on('data',d=>error+=d);child.stdin.on('error',()=>{});
@@ -62,9 +62,9 @@ test('real owner injects remote bridge and relays reverse calls over its stdio s
  try{
   const a=connect();const session=await a.rpc({action:'ensure',id:'remote-card',agent:'fixture',cwd:root,mcpRelay:true});
   ownerPid=Number(await readFile(path.join(root,'owner.pid'),'utf8'));
-  const config=JSON.parse(await readFile(path.join(root,'mcp.json'),'utf8'))[0];assert.equal(config.name,'queacp');
-  assert.ok(config.env.some(e=>e.name==='QUEACP_MCP_SOCKET'));assert.ok(!config.env.some(e=>e.name==='QUE_MCP_ENDPOINT_FILE'));
-  const token=config.env.find(e=>e.name==='QUEACP_MCP_CAPABILITY').value;assert.ok(!JSON.stringify(session).includes(token));
+  const config=JSON.parse(await readFile(path.join(root,'mcp.json'),'utf8'))[0];assert.equal(config.name,'que');
+  assert.ok(config.env.some(e=>e.name==='QUE_MCP_SOCKET'));assert.ok(!config.env.some(e=>e.name==='QUE_MCP_ENDPOINT_FILE'));
+  const token=config.env.find(e=>e.name==='QUE_MCP_CAPABILITY').value;assert.ok(!JSON.stringify(session).includes(token));
   const call=bridge(config);const result=call({name:'list_cards',arguments:{}});const request=await waitReverse(a);
   assert.equal(request.cardId,'remote-card');assert.equal(request.epoch,session.connectionId);
   assert.equal((await a.rpc({action:'read',id:'remote-card'})).connectionId,session.connectionId,'normal ACP replies continue while a reverse call waits');

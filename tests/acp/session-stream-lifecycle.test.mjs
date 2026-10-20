@@ -88,7 +88,7 @@ export async function run() {
   } }],
   banner: { js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);" },
 });
-const dir = await mkdtemp(join(tmpdir(), 'queacp-stream-lifecycle-'));
+const dir = await mkdtemp(join(tmpdir(), 'que-stream-lifecycle-'));
 try {
   const entry = join(dir, 'test.mjs');
   await writeFile(entry, bundle.outputFiles[0].text);

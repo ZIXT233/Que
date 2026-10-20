@@ -25,7 +25,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     for (name, path) in [
         ("HOME", home.clone()),
         ("USERPROFILE", home.clone()),
-        ("QUEACP_DATA_DIR", root.join("que")),
+        ("QUE_DATA_DIR", root.join("que")),
         ("CODEX_HOME", home.join(".codex")),
         ("CLAUDE_CONFIG_DIR", home.join(".claude")),
         ("CODEBUDDY_CONFIG_DIR", home.join(".codebuddy")),

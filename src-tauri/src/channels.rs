@@ -79,7 +79,7 @@ pub async fn decide(state: &AppState, from: &str, to: &str, allow: bool) -> AppR
         let target = queue.cards.iter().find(|c| c.id == to)
             .map(|c| crate::session_view::card_name(c, &state.harness.debug_snapshot(&c.id, &state.terminals))).unwrap_or_default();
         crate::inbox::post(crate::inbox::Letter { id: uuid::Uuid::new_v4().to_string(), to: from.into(), held: false,
-            from: json!({"cardId":"","name":"QueACP"}), at: crate::queue::now_ms(),
+            from: json!({"cardId":"","name":"Que"}), at: crate::queue::now_ms(),
             text: format!("The user did not open a channel to card {to} \"{target}\"; your message was not delivered. Do not send it again unless the user asks.") }).await?;
     }
     state.live.notify("channels");

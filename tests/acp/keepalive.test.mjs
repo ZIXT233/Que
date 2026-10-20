@@ -8,9 +8,9 @@ import readline from 'node:readline';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 test('background connections retain idle agents, recover a dead process and never replay prompts', async()=>{
- const root=mkdtempSync(path.join(os.tmpdir(),'queacp-keepalive-'));
+ const root=mkdtempSync(path.join(os.tmpdir(),'que-keepalive-'));
  writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
- const child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env:{...process.env,QUEACP_ACP_ROOT:root,QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
+ const child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env:{...process.env,QUE_ACP_ROOT:root,QUE_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
  let serial=0;const pending=new Map();
  readline.createInterface({input:child.stdout}).on('line',line=>{const v=JSON.parse(line),p=pending.get(v.rpc);if(p){pending.delete(v.rpc);v.error?p.reject(Error(v.error)):p.resolve(v.result)}});
  child.stderr.on('data',d=>process.stderr.write(d));

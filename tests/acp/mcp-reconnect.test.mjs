@@ -5,12 +5,12 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync} from
 import readline from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
-const binary=process.env.QUEACP_HEADLESS_TEST_BINARY;
+const binary=process.env.QUE_HEADLESS_TEST_BINARY;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 test('a message to a disconnected card connects it, once per request', {skip:!binary}, async()=>{
- const root=mkdtempSync(path.join(os.tmpdir(),'queacp-mcp-reconnect-'));
- const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
+ const root=mkdtempSync(path.join(os.tmpdir(),'que-mcp-reconnect-'));
+ const child=spawn(binary,[root],{env:{...process.env,QUE_BIN_DIR:path.resolve('src-tauri/resources/bin'),QUE_ACP_STORE_DIR:path.join(root,'acpx')},stdio:['pipe','pipe','pipe']});
  let ownerPid;
  try {
   const {base,token:apiToken}=await new Promise((resolve,reject)=>{
@@ -35,7 +35,7 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
   const first=await api(target,{action:'ensure',agent:'fixture',cwd});
   await api(target,{action:'close'});
   const {token}=JSON.parse(readFileSync(path.join(data,'mcp','endpoint.json'),'utf8'));
-  const headers={authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':source,'x-queacp-source-epoch':sourceSession.connectionId};
+  const headers={authorization:'Bearer '+token,'x-que-client-id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','x-que-source-terminal':source,'x-que-source-epoch':sourceSession.connectionId};
   const message={tool:'send_message',to:target,requestId:'once',text:'fixture message'};
   const submitted=await post('/api/mcp/tools',message,headers);
   assert.deepEqual(submitted.sent.map(c=>c.cardId),[target]);
@@ -49,7 +49,7 @@ test('a message to a disconnected card connects it, once per request', {skip:!bi
   assert.deepEqual((await post('/api/mcp/tools',message,headers)).sent.map(c=>c.cardId),[target],'a retry is the same message');
   await sleep(1500);
   assert.equal((await (await fetch(base+'/api/acp/'+target,{headers:{'x-que-token':apiToken}})).json()).turns.length,1);
-  await assert.rejects(post('/api/mcp/tools',{...message,requestId:'stale'}, {...headers,'x-queacp-source-epoch':'stale-source'}),/Source agent run ended/);
+  await assert.rejects(post('/api/mcp/tools',{...message,requestId:'stale'}, {...headers,'x-que-source-epoch':'stale-source'}),/Source agent run ended/);
   await api(target,{action:'close'});
   queue.cards[1].archivedAt=1;writeFileSync(path.join(data,'queue.json'),JSON.stringify(queue));
   await assert.rejects(post('/api/mcp/tools',{...message,requestId:'archived'},headers),/archived/);

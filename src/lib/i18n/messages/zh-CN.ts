@@ -94,7 +94,7 @@ export const zhCNLocale: LocalePlugin = {
     "speech.tooLarge": "录音过大，请缩短录音后重试。",
     "speech.invalidAudio": "录音格式无效，请重新录音。",
     "speech.unsupported": "当前环境不支持录音，请使用支持麦克风的桌面应用或浏览器。",
-    "speech.permission": "未获得麦克风权限，请在系统设置中允许 QueACP 使用麦克风。",
+    "speech.permission": "未获得麦克风权限，请在系统设置中允许 Que 使用麦克风。",
     "speech.noMicrophone": "未找到可用麦克风。",
     "speech.recordFailed": "无法启动录音，请检查麦克风后重试。",
     "composer.quote": "引用消息",

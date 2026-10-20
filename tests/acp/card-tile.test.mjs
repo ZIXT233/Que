@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 async function load(entry) {
-  const dir = await mkdtemp(join(tmpdir(), "queacp-tile-"));
+  const dir = await mkdtemp(join(tmpdir(), "que-tile-"));
   try {
     const out = join(dir, "module.mjs");
     const result = await build({ entryPoints: [entry], bundle: true, format: "esm", platform: "node", write: false });

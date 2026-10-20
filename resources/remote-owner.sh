@@ -13,7 +13,7 @@ if command -v tmux >/dev/null 2>&1; then
   i=0
   while tmux has-session -t que-acp 2>/dev/null && [ "$i" -lt 10 ]; do sleep 1; i=$((i + 1)); done
   # tmux may hold an older environment: start the owner with this login's.
-  L="$HOME/.queacp/runtime/serve.sh"
+  L="$HOME/.que/runtime/serve.sh"
   { export -p; printf 'exec "%s" "%s" --serve\n' "$N" "$B"; } > "$L"
   tmux new-session -d -s que-acp "sh '$L'"
   exec "$N" "$B" --connect --wait

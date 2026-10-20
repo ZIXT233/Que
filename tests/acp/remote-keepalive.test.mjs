@@ -12,13 +12,13 @@ async function until(predicate,ms=10000){for(let i=0;i<ms/25;i++){if(await predi
 // tmux only keeps the `--serve` owner alive on the remote host; a detached
 // process stands in for it here. Que reaches it through `--connect`.
 function setup(){
-  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-keep-'));
+  const root=mkdtempSync(path.join(os.tmpdir(),'que-keep-'));
   writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-  const env={...process.env,QUEACP_ACP_ROOT:root,QUEACP_ACP_STORE_DIR:path.join(root,'acpx')};
+  const env={...process.env,QUE_ACP_ROOT:root,QUE_ACP_STORE_DIR:path.join(root,'acpx')};
   return {root,env};
 }
 function daemon(bundle,env){
-  const log=openSync(path.join(env.QUEACP_ACP_ROOT,'owner.log'),'a');
+  const log=openSync(path.join(env.QUE_ACP_ROOT,'owner.log'),'a');
   const child=spawn(process.execPath,[bundle,'--serve'],{env,stdio:['ignore',log,log],detached:true});child.unref();return child;
 }
 function relay(bundle,env,args=['--connect']){

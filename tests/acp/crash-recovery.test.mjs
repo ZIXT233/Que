@@ -7,13 +7,13 @@ import path from 'node:path';
 import readline from 'node:readline';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 test('after an owner crash the card shows its acpx record and nothing is re-executed',async()=>{
- const root=mkdtempSync(path.join(os.tmpdir(),'queacp-crash-'));
+ const root=mkdtempSync(path.join(os.tmpdir(),'que-crash-'));
  const pidFile=path.join(root,'fixture-pids');
  writeFileSync(path.join(root,'agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
  const relays=[];let serial=0;
  const killAgents=()=>{if(existsSync(pidFile))for(const pid of readFileSync(pidFile,'utf8').trim().split('\n'))try{process.kill(Number(pid),'SIGKILL')}catch{}};
  function connect(){
-  const child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env:{...process.env,QUEACP_ACP_ROOT:root,QUEACP_ACP_STORE_DIR:path.join(root,'acpx'),QUEACP_TEST_PID_FILE:pidFile},stdio:['pipe','pipe','pipe']});relays.push(child);
+  const child=spawn(process.execPath,['src-tauri/resources/bin/acp-owner.mjs'],{env:{...process.env,QUE_ACP_ROOT:root,QUE_ACP_STORE_DIR:path.join(root,'acpx'),QUE_TEST_PID_FILE:pidFile},stdio:['pipe','pipe','pipe']});relays.push(child);
   const pending=new Map();let errors='';child.stderr.on('data',d=>errors+=d);child.stdin.on('error',()=>{});
   readline.createInterface({input:child.stdout}).on('line',line=>{const v=JSON.parse(line),p=pending.get(v.rpc);if(p){pending.delete(v.rpc);v.error?p.reject(Error(v.error)):p.resolve(v.result)}});
   child.on('exit',()=>{for(const p of pending.values())p.reject(Error(errors||'relay ended'));pending.clear()});

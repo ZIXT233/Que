@@ -15,14 +15,14 @@ fn identity(source:&str,body:&Value)->AppResult<(String,String)> {
 fn created_id(key:&str)->String {let hash=Sha256::digest(key.as_bytes());let mut bytes=[0u8;16];bytes.copy_from_slice(&hash[..16]);uuid::Uuid::from_bytes(bytes).to_string()}
 fn insert_card(queue:&mut CardQueue,id:&str,workspace:&str,kind:&str,nickname:Option<&str>,key:&str,fingerprint:&str)->AppResult<()> {
  if let Some(card)=queue.cards.iter().find(|c|c.id==id) {
-  if card.prompt_sources.as_ref().map(|p|&p["queacpMcpCreate"]["fingerprint"])!=Some(&json!(fingerprint)) {return Err(AppError::msg("requestId was already used for another creation"));}
+  if card.prompt_sources.as_ref().map(|p|&p["queMcpCreate"]["fingerprint"])!=Some(&json!(fingerprint)) {return Err(AppError::msg("requestId was already used for another creation"));}
   return Ok(());
  }
  let ws=queue.workspaces.as_ref().and_then(|items|items.iter().find(|w|w.id==workspace)).ok_or_else(||AppError::msg("Workspace not found; use list_workspaces"))?;
  let ws=ws.clone();
  crate::queue::new_card(queue,id,&ws,kind,nickname)?;
  // The request that made it, so a retry finds it instead of making another.
- if let Some(card)=queue.cards.iter_mut().find(|c|c.id==id) {card.prompt_sources=Some(json!({"queacpMcpCreate":{"key":key,"fingerprint":fingerprint}}));}
+ if let Some(card)=queue.cards.iter_mut().find(|c|c.id==id) {card.prompt_sources=Some(json!({"queMcpCreate":{"key":key,"fingerprint":fingerprint}}));}
  Ok(())
 }
 /// A card asked for a new card; it waits for the user.
@@ -97,7 +97,7 @@ pub async fn decide(state:&AppState,id:&str,allow:bool)->AppResult<()> {
   "The user did not allow the card you asked for; it was not created. Do not ask again unless the user asks.".to_string()
  };
  crate::inbox::post(crate::inbox::Letter{id:uuid::Uuid::new_v4().to_string(),to:request.from,held:false,
-  from:json!({"cardId":"","name":"QueACP"}),at:crate::queue::now_ms(),text}).await
+  from:json!({"cardId":"","name":"Que"}),at:crate::queue::now_ms(),text}).await
 }
 pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> {
  let id=required(body,"cardId")?;let(key,fingerprint)=identity(source,body)?;
@@ -105,7 +105,7 @@ pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> 
  let _lifecycle_guard=crate::api::try_acquire_launch(state,id)?;
  let queue=state.queue.read_snapshot()?;
  let card=queue.cards.iter().find(|c|c.id==id).ok_or_else(||AppError::msg("Card not found"))?;
- if let Some(prior)=card.prompt_sources.as_ref().and_then(|p|p["queacpMcpArchives"].get(&key)) {
+ if let Some(prior)=card.prompt_sources.as_ref().and_then(|p|p["queMcpArchives"].get(&key)) {
   if prior!=&json!(fingerprint){return Err(AppError::msg("requestId conflict"));}
   return Ok(json!({"cardId":id,"delivery":"archived","replayed":true}));
  }
@@ -123,15 +123,15 @@ pub async fn archive(state:&AppState,source:&str,body:&Value)->AppResult<Value> 
   crate::queue::archive_card(q,id)?;
   let card=q.cards.iter_mut().find(|c|c.id==id).unwrap();
   let meta=card.prompt_sources.get_or_insert_with(||json!({}));
-  if !meta["queacpMcpArchives"].is_object(){meta["queacpMcpArchives"]=json!({});}
-  meta["queacpMcpArchives"][&key]=json!(fingerprint);Ok(())
+  if !meta["queMcpArchives"].is_object(){meta["queMcpArchives"]=json!({});}
+  meta["queMcpArchives"][&key]=json!(fingerprint);Ok(())
  }).await?;
  Ok(json!({"cardId":id,"delivery":"archived","historyPreserved":true}))
 }
 #[cfg(test)] mod tests {
  use super::*;
  #[test] fn creation_is_durable_and_does_not_reuse_draft(){
-  let mut q=CardQueue::empty();let cwd="/tmp/queacp-card-test";
+  let mut q=CardQueue::empty();let cwd="/tmp/que-card-test";
   q.workspaces=Some(vec![serde_json::from_value(json!({"id":"ws","name":"test","kind":"local","cwd":cwd,"runtimeCwd":cwd})).unwrap()]);
   q.cards.push(serde_json::from_value(json!({"id":"draft","cwd":cwd,"phase":"draft","createdAt":1})).unwrap());
   insert_card(&mut q,"new","ws","codex",None,"key","fp").unwrap();

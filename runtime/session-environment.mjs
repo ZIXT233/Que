@@ -21,15 +21,15 @@ export async function sessionEnvironment({root, cwd, env = {}, terminalRc = '', 
   fs.mkdirSync(directory, {recursive:true, mode:0o700});
   const rcPath = path.join(directory, windows ? 'rc.ps1' : 'rc.sh');
   fs.writeFileSync(rcPath, terminalRc, {mode:0o600});
-  const marker = `QUEACP_ENV_${randomUUID()}`;
-  const dump = `process.stdout.write(${JSON.stringify(marker)}+JSON.stringify({env:process.env,customCodex:process.env.QUEACP_CUSTOM_CODEX==='1'})+${JSON.stringify(marker)})`;
+  const marker = `QUE_ENV_${randomUUID()}`;
+  const dump = `process.stdout.write(${JSON.stringify(marker)}+JSON.stringify({env:process.env,customCodex:process.env.QUE_CUSTOM_CODEX==='1'})+${JSON.stringify(marker)})`;
   let program, args;
   if (windows) {
     program = 'powershell.exe';
-    args = ['-NoLogo', '-NonInteractive', '-Command', `$ErrorActionPreference='Stop'; Set-Location -LiteralPath ${psQuote(cwd)}; . ${psQuote(rcPath)}; $c=Get-Command codex -ErrorAction SilentlyContinue; if ($c.CommandType -in @('Alias','Function')) {$env:QUEACP_CUSTOM_CODEX='1'}; & ${psQuote(process.execPath)} -e ${psQuote(dump)}`];
+    args = ['-NoLogo', '-NonInteractive', '-Command', `$ErrorActionPreference='Stop'; Set-Location -LiteralPath ${psQuote(cwd)}; . ${psQuote(rcPath)}; $c=Get-Command codex -ErrorAction SilentlyContinue; if ($c.CommandType -in @('Alias','Function')) {$env:QUE_CUSTOM_CODEX='1'}; & ${psQuote(process.execPath)} -e ${psQuote(dump)}`];
   } else {
     program = shell;
-    args = ['-ilc', `cd ${quote(cwd)} || exit $?\n. ${quote(rcPath)} || exit $?\nif alias codex >/dev/null 2>&1 || typeset -f codex >/dev/null 2>&1; then export QUEACP_CUSTOM_CODEX=1; else unset QUEACP_CUSTOM_CODEX; fi\n${quote(process.execPath)} -e ${quote(dump)}`];
+    args = ['-ilc', `cd ${quote(cwd)} || exit $?\n. ${quote(rcPath)} || exit $?\nif alias codex >/dev/null 2>&1 || typeset -f codex >/dev/null 2>&1; then export QUE_CUSTOM_CODEX=1; else unset QUE_CUSTOM_CODEX; fi\n${quote(process.execPath)} -e ${quote(dump)}`];
   }
   let output;
   try {
@@ -41,7 +41,7 @@ export async function sessionEnvironment({root, cwd, env = {}, terminalRc = '', 
   const start = output.stdout.indexOf(marker), end = output.stdout.indexOf(marker, start + marker.length);
   if (start < 0 || end < 0) throw Error('机器启动脚本没有返回环境，请检查 RC 是否提前退出');
   const result = JSON.parse(output.stdout.slice(start + marker.length, end));
-  delete result.env.QUEACP_CUSTOM_CODEX;
+  delete result.env.QUE_CUSTOM_CODEX;
   // codex-acp otherwise launches its bundled Codex and bypasses shell aliases.
   // Keep that default unless the user actually configured an alias/function.
   if (result.customCodex && !overrides.CODEX_PATH) {
@@ -51,13 +51,13 @@ export async function sessionEnvironment({root, cwd, env = {}, terminalRc = '', 
       fs.writeFileSync(script, `$ErrorActionPreference='Stop'\nSet-Location -LiteralPath ${psQuote(cwd)}\n. ${psQuote(rcPath)}\n& codex @args\nexit $LASTEXITCODE\n`, {mode:0o600});
       fs.writeFileSync(wrapper, `@echo off\r\npowershell.exe -NoLogo -NonInteractive -File "${script}" %*\r\n`, {mode:0o700});
     } else {
-      const ready = `QUEACP_CODEX_${randomUUID()}`;
+      const ready = `QUE_CODEX_${randomUUID()}`;
       const command = `cd ${quote(cwd)} || exit $?\nif [ -n "\${BASH_VERSION:-}" ]; then shopt -s expand_aliases; elif [ -n "\${ZSH_VERSION:-}" ]; then setopt aliases; fi\n. ${quote(rcPath)} || exit $?\nprintf ${quote(ready)}\neval 'codex "$@"'`;
       // Login scripts can close inherited descriptors and print banners. Strip
       // only the pre-start output; after the marker, forward protocol bytes as-is.
       fs.writeFileSync(wrapper, `#!${process.execPath}
 const {spawn}=require('node:child_process');
-const child=spawn(${JSON.stringify(shell)},['-ilc',${JSON.stringify(command)},'queacp-codex',...process.argv.slice(2)],{stdio:['pipe','pipe','inherit']});
+const child=spawn(${JSON.stringify(shell)},['-ilc',${JSON.stringify(command)},'que-codex',...process.argv.slice(2)],{stdio:['pipe','pipe','inherit']});
 const marker=Buffer.from(${JSON.stringify(ready)});let pending=Buffer.alloc(0),started=false;
 process.stdin.pipe(child.stdin);child.stdin.on('error',()=>{});
 child.stdout.on('data',chunk=>{if(started){process.stdout.write(chunk);return;}pending=Buffer.concat([pending,chunk]);const at=pending.indexOf(marker);if(at>=0){process.stderr.write(pending.subarray(0,at));process.stdout.write(pending.subarray(at+marker.length));pending=Buffer.alloc(0);started=true;}else if(pending.length>marker.length){const end=pending.length-marker.length;process.stderr.write(pending.subarray(0,end));pending=pending.subarray(end);}});

@@ -45,7 +45,7 @@ import {I18nProvider} from './src/hooks/useI18n';
 import {AcpConversation} from './src/components/AcpConversation';
 export async function run(){
  globalThis.sessionStorage=window.sessionStorage;
- sessionStorage.setItem('queacp:draft:card','original draft');
+ sessionStorage.setItem('que:draft:card','original draft');
  const queued={id:'queued',text:'queued draft',state:'queued',blocks:[],attachments:[{name:'test.txt',mediaType:'text/plain',data:'sample'}]};
  const snapshot={state:'working',turns:[{id:'active',text:'active',state:'running',blocks:[],attachments:[]},queued]};
  const requests=[];let deny=false,denyRestore=false;
@@ -91,7 +91,7 @@ export async function run(){
     js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);",
   },
 });
-const dir = await mkdtemp(join(tmpdir(), "queacp-composer-"));
+const dir = await mkdtemp(join(tmpdir(), "que-composer-"));
 try {
   const entry = join(dir, "test.mjs");
   await writeFile(entry, result.outputFiles[0].text);

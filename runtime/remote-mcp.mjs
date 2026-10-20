@@ -14,7 +14,7 @@ export function callBudget(body, timeoutMs) {
 export function remoteMcpHub({socketPath, sessions, timeoutMs = 20000}) {
   const routes = new Map(), capabilities = new Map(), pending = new Map(), sockets = new Set();
   const failure = message => ({isError:true,content:[{type:'text',text:message}]});
-  const unavailable = 'QueACP connection interrupted; execution may be unknown. No automatic retry was made.';
+  const unavailable = 'Que connection interrupted; execution may be unknown. No automatic retry was made.';
   function finish(id, result) {
     const entry = pending.get(id);
     if (!entry) return;
@@ -70,7 +70,7 @@ export function remoteMcpHub({socketPath, sessions, timeoutMs = 20000}) {
         if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body) || typeof request.body.tool !== 'string') throw Error('Invalid MCP request');
         if (pending.size >= 128) throw Error('Too many pending MCP calls');
         const id = randomUUID();
-        const timer = setTimeout(()=>finish(id,failure('QueACP tool request timed out; execution may be unknown. No automatic retry was made.')),callBudget(request.body,timeoutMs));
+        const timer = setTimeout(()=>finish(id,failure('Que tool request timed out; execution may be unknown. No automatic retry was made.')),callBudget(request.body,timeoutMs));
         pending.set(id,{socket,client,card,epoch,timer});
         client.write(JSON.stringify({event:'mcp_request',requestId:id,cardId:card,epoch,clientId,body:request.body})+'\n');
       } catch (error) {socket.end(JSON.stringify(failure(error.message))+'\n');}

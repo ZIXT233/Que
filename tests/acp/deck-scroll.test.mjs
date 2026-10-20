@@ -186,7 +186,7 @@ export async function run() {
   jsx: 'automatic',
   banner: { js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);" },
 });
-const dir = await mkdtemp(join(tmpdir(), 'queacp-deck-'));
+const dir = await mkdtemp(join(tmpdir(), 'que-deck-'));
 try {
   const entry = join(dir, 'test.mjs');
   await writeFile(entry, bundle.outputFiles[0].text);

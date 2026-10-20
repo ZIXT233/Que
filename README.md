@@ -3,8 +3,8 @@
 <p align="center"><strong>Queue of Agent Cues</strong></p>
 
 <p align="center">
-  <a href="https://github.com/ZIXT233/QueACP/releases/latest"><img src="https://img.shields.io/github/v/release/ZIXT233/QueACP?style=flat-square&amp;color=3b82f6" alt="Latest release" /></a>
-  <a href="https://github.com/ZIXT233/QueACP/releases"><img src="https://img.shields.io/github/downloads/ZIXT233/QueACP/total?style=flat-square&amp;color=2ea66f" alt="Downloads" /></a>
+  <a href="https://github.com/ZIXT233/Que/releases/latest"><img src="https://img.shields.io/github/v/release/ZIXT233/Que?style=flat-square&amp;color=3b82f6" alt="Latest release" /></a>
+  <a href="https://github.com/ZIXT233/Que/releases"><img src="https://img.shields.io/github/downloads/ZIXT233/Que/total?style=flat-square&amp;color=2ea66f" alt="Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b5cf6?style=flat-square" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-3b82f6?style=flat-square" alt="Windows, macOS, Linux" />
   <img src="https://img.shields.io/badge/Rust%20%2B%20Tauri%202-e88a39?style=flat-square" alt="Rust + Tauri 2" />
@@ -12,10 +12,10 @@
 
 <p align="center">
   <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="https://github.com/ZIXT233/QueACP/issues">Issues</a>
+  <a href="https://github.com/ZIXT233/Que/issues">Issues</a>
 </p>
 
-<h3 align="center"><a href="https://github.com/ZIXT233/QueACP/releases/latest">Download Que</a></h3>
+<h3 align="center"><a href="https://github.com/ZIXT233/Que/releases/latest">Download Que</a></h3>
 
 Que schedules your attention with a unified queue of agent sessions, so you can just handle the one at the front without wondering which agents are still waiting for your reply.
 
@@ -68,7 +68,7 @@ Use your existing CLIs, accounts and model settings. Que sets up the integration
 
 ## Quick start
 
-1. Download the build for your OS and architecture from [Releases](https://github.com/ZIXT233/QueACP/releases/latest).
+1. Download the build for your OS and architecture from [Releases](https://github.com/ZIXT233/Que/releases/latest).
 2. Install and sign in to your CLI tool.
 3. Choose a tool and workspace in Que, then create a session.
 
@@ -77,15 +77,15 @@ Use your existing CLIs, accounts and model settings. Que sets up the integration
 Requires Node.js 22+, Rust and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
-git clone https://github.com/ZIXT233/QueACP.git
-cd QueACP
+git clone https://github.com/ZIXT233/Que.git
+cd Que
 npm ci
 npm run tauri dev
 # Package for the current platform
 npm run tauri build
 ```
 
-App data lives in `~/.queacp`. See the [architecture](docs/architecture.md).
+App data lives directly in `~/.que` (`~/.que-dev` for development; override with `QUE_DATA_DIR`). This ACP application does not import the former `~/.queacp` profile automatically. The terminal edition is now [QueTerm](https://github.com/ZIXT233/QueTerm), with its data in `~/.que-term`; run its first-launch migration before reusing a legacy terminal `~/.que` directory here. See the [architecture](docs/architecture.md).
 
 ## License
 

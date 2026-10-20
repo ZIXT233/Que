@@ -42,7 +42,7 @@ import {I18nProvider} from './src/hooks/useI18n';
 import {Composer} from './src/components/chat/Composer';
 import {encodeWav,audioBase64,appendTranscript,startRecorder} from './src/lib/speech';
 let tracksStopped=0, contextsClosed=0, node, configured=true, resolveTranscription, editDraft, activate, setRunning;
-const sent=[];const requests=[];let settingsSection;window.addEventListener('queacp:open-settings',event=>settingsSection=event.detail.section);globalThis.CustomEvent=window.CustomEvent;
+const sent=[];const requests=[];let settingsSection;window.addEventListener('que:open-settings',event=>settingsSection=event.detail.section);globalThis.CustomEvent=window.CustomEvent;
 Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:async()=>({getTracks:()=>[{stop:()=>tracksStopped++}]})}}});
 class Context { sampleRate=16000; destination={}; audioWorklet={addModule:async()=>{}};createMediaStreamSource(){return {connect(){},disconnect(){}}}async resume(){}async close(){contextsClosed++} }
 window.AudioContext=globalThis.AudioContext=Context;
@@ -115,7 +115,7 @@ console.log('PASS: WAV contract, draft preservation, no auto-send, cancellation,
     js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);",
   },
 });
-const dir = await mkdtemp(join(tmpdir(), "queacp-speech-"));
+const dir = await mkdtemp(join(tmpdir(), "que-speech-"));
 try {
   const entry = join(dir, "test.mjs");
   await writeFile(entry, result.outputFiles[0].text);

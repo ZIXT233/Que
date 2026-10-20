@@ -1,4 +1,4 @@
-class QueAcpPcmRecorder extends AudioWorkletProcessor {
+class QuePcmRecorder extends AudioWorkletProcessor {
   process(inputs) {
     const channels = inputs[0];
     if (channels?.length && channels[0].length) {
@@ -9,4 +9,4 @@ class QueAcpPcmRecorder extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor('queacp-pcm-recorder', QueAcpPcmRecorder);
+registerProcessor('que-pcm-recorder', QuePcmRecorder);

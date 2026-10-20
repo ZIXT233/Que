@@ -1,4 +1,4 @@
-# 通过 QueACP MCP 配置 QueACP
+# 通过 Que MCP 配置 Que
 
 你在卡片上打开了“修改设置”的运行中 Agent，可以读取和修改下列设置。复用设置界面的服务、校验和存储；不会另起一套设置界面。只有用户要求的字段才应修改，有这个权限不代表可以自行调整用户偏好。
 
@@ -24,7 +24,7 @@
 ## 工作区与远程主机
 
 - `create_workspace({name, kind, cwd, sshHost?})`：将本机或 SSH 上的已有目录加入工作区。相同位置返回已有工作区，不改名、不重置权重、不自动建卡片。需要卡片时继续调用既有 `create_card`。
-- `list_remote_hosts()`：列出 QueACP 已保存和 SSH config 中的主机。
+- `list_remote_hosts()`：列出 Que 已保存和 SSH config 中的主机。
 - `configure_remote_host({operation:"save", host:{name,hostname,user?,port?,id?}})`：新增或修改保存的主机；修改时传 id。新增时若主机、用户名和端口已存在则返回已有项。
 - `configure_remote_host({operation:"set-visibility",hostId,visible})`：调整 SSH config 主机在界面中的可见性。保存的主机不使用此开关。
 
@@ -32,6 +32,6 @@
 
 ## 验证范围
 
-`tests/acp/settings-service.test.mjs` 通过隔离 headless 服务和 fixture Agent 检查权限边界、设置读写、凭据隐藏、工作区去重、主机配置和错误时不部分提交。运行时设置 `QUEACP_SETTINGS_TEST_BINARY` 指向 headless 可执行文件；未设置时跳过。
+`tests/acp/settings-service.test.mjs` 通过隔离 headless 服务和 fixture Agent 检查权限边界、设置读写、凭据隐藏、工作区去重、主机配置和错误时不部分提交。运行时设置 `QUE_SETTINGS_TEST_BINARY` 指向 headless 可执行文件；未设置时跳过。
 
 `tests/acp/settings-sync.test.mjs` 检查界面双向同步、旧响应隔离、后端重启后的初始化重试及无效本地值处理。远程 SSH 实机和原生 WebView 视觉验收尚未覆盖。

@@ -158,8 +158,8 @@ impl AcpRuntime {
             use sha2::{Digest, Sha256};
             let bytes = tokio::fs::read(&bundle).await?;
             let hash = hex::encode(Sha256::digest(&bytes));
-            let remote = format!("$HOME/.queacp/runtime/{hash}.mjs");
-            let install = format!("umask 077; mkdir -p \"$HOME/.queacp/runtime\"; cat > \"{remote}.tmp\" && mv \"{remote}.tmp\" \"{remote}\"");
+            let remote = format!("$HOME/.que/runtime/{hash}.mjs");
+            let install = format!("umask 077; mkdir -p \"$HOME/.que/runtime\"; cat > \"{remote}.tmp\" && mv \"{remote}.tmp\" \"{remote}\"");
             tokio::time::timeout(Duration::from_secs(15),crate::ssh::ssh_exec_stdin(host, &install, &bytes)).await.map_err(|_|AppError::msg("远程连接超时，请重试"))??;
             // The remote owner lives in tmux and outlives this connection; see the script.
             let command = crate::ssh::ssh_login_command(&include_str!("../../resources/remote-owner.sh").replace("@BUNDLE@", &remote));
@@ -175,7 +175,7 @@ impl AcpRuntime {
             let env = crate::harness::local_environment(false).await?;
             let node = which::which_in("node", env.get("PATH"), ".").map_err(|_| AppError::msg("需要 Node.js 22.13 或更新版本"))?;
             use crate::winproc::NoWindow;
-            let mut child = tokio::process::Command::new(node).no_window().arg(&bundle).envs(env).env("QUEACP_ACP_ROOT", crate::paths::data_dir().join("acp"))
+            let mut child = tokio::process::Command::new(node).no_window().arg(&bundle).envs(env).env("QUE_ACP_ROOT", crate::paths::data_dir().join("acp"))
                 .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn()?;
             let mut stderr=child.stderr.take().unwrap();
             let error_output=output.clone();
@@ -246,7 +246,7 @@ impl AcpRuntime {
                             let request_id=value["requestId"].clone();
                             let request=RemoteMcpRequest{machine:machine.clone(),generation:generation.clone(),message:value,reply:reverse_input.clone()};
                             let delivered=remote_mcp.lock().as_ref().is_some_and(|sender|sender.try_send(request).is_ok());
-                            if !delivered {let _=reverse_input.send(format!("{}\n",json!({"action":"_mcp_result","requestId":request_id,"result":{"isError":true,"content":[{"type":"text","text":"QueACP MCP relay is unavailable or busy; no retry was made"}]}})).into_bytes());}
+                            if !delivered {let _=reverse_input.send(format!("{}\n",json!({"action":"_mcp_result","requestId":request_id,"result":{"isError":true,"content":[{"type":"text","text":"Que MCP relay is unavailable or busy; no retry was made"}]}})).into_bytes());}
                         } else if let Some(rpc) = value["rpc"].as_str() {
                             if let Some(sender) = pending.lock().remove(rpc) { let _ = sender.send(value); }
                         }

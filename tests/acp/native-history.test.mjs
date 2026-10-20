@@ -10,7 +10,7 @@ test('native history selects Harness before searching, loads pages, filters acti
  for(const k of ['window','document','HTMLElement','Element','Node','Event','MouseEvent'])globalThis[k]=dom.window[k];
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;
  const channels=[],NativeChannel=globalThis.MessageChannel;globalThis.MessageChannel=class extends NativeChannel{constructor(){super();channels.push(this);}};
- const dir=await mkdtemp(join(tmpdir(),'queacp-native-ui-'));
+ const dir=await mkdtemp(join(tmpdir(),'que-native-ui-'));
  try{
  const compiled=await build({stdin:{resolveDir:process.cwd(),loader:'tsx',contents:`
  import React,{act,useState} from 'react';import {createRoot} from 'react-dom/client';import assert from 'node:assert/strict';

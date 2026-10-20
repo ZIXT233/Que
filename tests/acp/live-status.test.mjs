@@ -7,9 +7,9 @@ import path from 'node:path';
 import readline from 'node:readline';
 
 test('a mode or config change made by the agent mid-turn reaches the session before the turn ends', async () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'queacp-live-status-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'que-live-status-'));
   writeFileSync(path.join(root, 'agents.json'), JSON.stringify({ fixture: [process.execPath, path.resolve('tests/acp/agent.mjs')] }));
-  const child = spawn(process.execPath, ['src-tauri/resources/bin/acp-owner.mjs'], { env: { ...process.env, QUEACP_ACP_ROOT: root, QUEACP_ACP_STORE_DIR: path.join(root, 'acpx') }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['src-tauri/resources/bin/acp-owner.mjs'], { env: { ...process.env, QUE_ACP_ROOT: root, QUE_ACP_STORE_DIR: path.join(root, 'acpx') }, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stderr.on('data', d => process.stderr.write(d));
   let serial = 0; const pending = new Map(), events = [];
   readline.createInterface({ input: child.stdout }).on('line', line => {

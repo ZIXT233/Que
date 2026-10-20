@@ -11,19 +11,19 @@ async function until(predicate,ms=15000){for(let i=0;i<ms/50;i++){if(await predi
 // The script Que runs over SSH, run here by sh with a stand-in tmux that only
 // keeps the command alive in the background (what matters to the owner).
 function host({tmux=true}={}){
-  const root=mkdtempSync(path.join(os.tmpdir(),'queacp-host-'));
-  const home=path.join(root,'home'),bin=path.join(root,'bin'),runtime=path.join(home,'.queacp','runtime');
+  const root=mkdtempSync(path.join(os.tmpdir(),'que-host-'));
+  const home=path.join(root,'home'),bin=path.join(root,'bin'),runtime=path.join(home,'.que','runtime');
   for(const dir of [bin,runtime,path.join(root,'acp')])mkdirSync(dir,{recursive:true});
   const bundle=path.join(runtime,'build.mjs');copyFileSync('src-tauri/resources/bin/acp-owner.mjs',bundle);
   writeFileSync(path.join(root,'acp','agents.json'),JSON.stringify({fixture:[process.execPath,path.resolve('tests/acp/agent.mjs')]}));
-  for(const tool of ['node','sh','cat','sleep','printf','setsid','kill'])try{const found=process.env.PATH.split(':').map(d=>path.join(d,tool)).find(existsSync);if(found)writeFileSync(path.join(bin,tool),`#!/bin/sh\nexec ${found} "$@"\n`,{mode:0o755})}catch{}
+  for(const tool of ['node','sh','cat','sleep','printf','nohup','kill'])try{const found=process.env.PATH.split(':').map(d=>path.join(d,tool)).find(existsSync);if(found)writeFileSync(path.join(bin,tool),`#!/bin/sh\nexec ${found} "$@"\n`,{mode:0o755})}catch{}
   if(tmux)writeFileSync(path.join(bin,'tmux'),`#!/bin/sh
 case "$1" in
   has-session) [ -f "${root}/tmux.pid" ] && kill -0 "$(cat "${root}/tmux.pid")" 2>/dev/null ;;
-  new-session) setsid sh -c "$5" </dev/null >>"${root}/tmux.log" 2>&1 & echo $! > "${root}/tmux.pid" ;;
+  new-session) nohup sh -c "$5" </dev/null >>"${root}/tmux.log" 2>&1 & echo $! > "${root}/tmux.pid" ;;
 esac
 `,{mode:0o755});
-  const env={HOME:home,PATH:bin,QUEACP_ACP_ROOT:path.join(root,'acp'),QUEACP_ACP_STORE_DIR:path.join(root,'acpx')};
+  const env={HOME:home,PATH:bin,QUE_ACP_ROOT:path.join(root,'acp'),QUE_ACP_STORE_DIR:path.join(root,'acpx')};
   const script=readFileSync('resources/remote-owner.sh','utf8').replace('@BUNDLE@',bundle);
   const connect=()=>{
     const child=spawn('/bin/sh',['-c',script],{env,stdio:['pipe','pipe','pipe']});
@@ -49,7 +49,7 @@ test('over SSH, Que starts the owner in tmux once and reconnects to it afterward
     const after=await que.rpc({action:'read',id:'card'});
     assert.ok(after.turns.at(-1).blocks.some(b=>b.type==='decision'&&b.state==='pending'),'the remote turn is still waiting');
     assert.equal(Number(readFileSync(path.join(h.root,'acp','owner.pid'),'utf8')),owner,'the same tmux owner, not a new one');
-    assert.match(readFileSync(path.join(h.root,'home','.queacp','runtime','serve.sh'),'utf8'),/export QUEACP_ACP_ROOT=/,'the owner starts with this login\'s environment');
+    assert.match(readFileSync(path.join(h.root,'home','.que','runtime','serve.sh'),'utf8'),/export QUE_ACP_ROOT=/,'the owner starts with this login\'s environment');
     que.child.kill();await que.exited;
   }finally{await h.cleanup();}
 });

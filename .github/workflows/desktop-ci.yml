@@ -46,8 +46,8 @@ jobs:
 
       - name: ACP tests
         env:
-          QUEACP_HEADLESS_TEST_BINARY: ${{ github.workspace }}/src-tauri/target/debug/que-headless
-          QUEACP_SETTINGS_TEST_BINARY: ${{ github.workspace }}/src-tauri/target/debug/que-headless
+          QUE_HEADLESS_TEST_BINARY: ${{ github.workspace }}/src-tauri/target/debug/que-headless
+          QUE_SETTINGS_TEST_BINARY: ${{ github.workspace }}/src-tauri/target/debug/que-headless
         run: npm run test:acp
 
   build:
@@ -109,4 +109,4 @@ jobs:
           args: --target ${{ matrix.target }}
           uploadUpdaterJson: false
           uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: QueACP-${{ matrix.platform }}-${{ matrix.arch }}-[bundle]
+          workflowArtifactNamePattern: Que-${{ matrix.platform }}-${{ matrix.arch }}-[bundle]
