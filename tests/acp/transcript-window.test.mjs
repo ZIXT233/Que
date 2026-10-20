@@ -51,9 +51,12 @@ import {AcpConversation} from './src/components/AcpConversation';
 export async function run(){
  globalThis.sessionStorage=window.sessionStorage;
  const turn=i=>({id:'t'+i,text:'q'+i,state:'completed',attachments:[],blocks:[
+  {type:'text_delta',stream:'message',text:'progress '+i},
   {type:'text_delta',stream:'thought',text:'thinking '+i},{type:'tool_call',toolCallId:'c'+i,title:'read '+i,status:'completed',content:[{type:'content',content:{type:'text',text:'output '+i}}]},
   {type:'text_delta',stream:'message',text:'reply '+i}]});
  const snapshot={state:'attention',turns:Array.from({length:75},(_,i)=>turn(i))};
+ snapshot.turns[61].state='history';snapshot.turns[61].blocks.pop();
+ snapshot.turns[74].state='running';snapshot.turns[74].blocks.pop();snapshot.turns[74].blocks.at(-1).status='in_progress';
  globalThis.fetch=async()=>({ok:true,json:async()=>structuredClone(snapshot)});
  const root=createRoot(document.getElementById('root'));
  const render=(key,active=true)=>act(async()=>root.render(<I18nProvider><AcpConversation key={key} card={{id:'card'}} active={active} onResume={async()=>{}}/></I18nProvider>));
@@ -69,7 +72,10 @@ export async function run(){
  assert.equal(document.querySelectorAll('.cq-acp-steps').length,14,'every finished turn but the last folds its steps');
  assert.equal(turns.at(-1).querySelector('.cq-acp-steps'),null,'the last turn shows its steps');
  assert.match(turns[0].querySelector('.cq-acp-steps summary').textContent,/2 步/,'the fold counts each thought and tool');
+ assert.match(turns[0].textContent,/progress 60/,'ordinary prose before a tool stays outside the process fold');
  assert.match(turns[0].textContent,/reply 60/,'a folded turn still shows its answer');
+ assert.ok(turns[0].textContent.indexOf('progress 60')<turns[0].textContent.indexOf('reply 60'),'ordinary prose keeps its order');
+ assert.match(turns[1].textContent,/progress 61/,'loaded history without a closing answer retains visible prose');
  assert.doesNotMatch(turns[0].textContent,/output 60|thinking 60/,'its steps are not in the page while folded');
  const steps=turns[0].querySelector('.cq-acp-steps');
  await act(async()=>{steps.open=true;steps.dispatchEvent(new window.Event('toggle'));});
@@ -79,9 +85,15 @@ export async function run(){
  await scrollTo(200);
  assert.equal(shown().length,30,'near the top, earlier turns are added');assert.equal(shown()[0],45);
  assert.equal(box().scrollTop,1700,'and what was being read stays in place');
+ snapshot.turns[74].state='cancelled';snapshot.turns[74].blocks.at(-1).status='failed';
  snapshot.turns.push(turn(75));await push();
  assert.equal(shown()[0],45,'a new turn does not move the window');assert.equal(shown().length,31);
+ const stopped=()=>[...document.querySelectorAll('.cq-acp-turn')].find(t=>t.querySelector('.cq-acp-user')?.textContent==='q74');
+ assert.match(stopped().textContent,/progress 74/,'stopping then sending a new message never hides ordinary prose');
+ assert.match(stopped().textContent,/已停止/,'the stopped turn keeps its cancellation receipt');
+ assert.doesNotMatch(stopped().textContent,/thinking 74|output 74/,'only process details are folded');
  await render('b');await push();
+ assert.match(stopped().textContent,/progress 74/,'ordinary prose stays visible after reopening the card');
  assert.equal(shown()[0],45,'opened again, the same turns are shown');assert.equal(box().scrollTop,1700);
  await act(async()=>document.querySelector('.cq-acp-earlier').click());
  assert.equal(shown()[0],30,'the button shows 15 more');
@@ -95,7 +107,7 @@ export async function run(){
  await act(async()=>hidden.render(<I18nProvider><AcpConversation card={{id:'hidden'}} active={true} onResume={async()=>{}}/></I18nProvider>));await push('hidden');
  assert.equal(shown().length,15,'a hidden conversation (no height) does not load its whole history');
  await act(async()=>hidden.unmount());globalThis.__hidden=false;
- console.log('PASS: long conversations render their last turns, fold finished steps, and grow upward on demand');
+ console.log('PASS: long conversations fold process details while keeping ordinary prose visible after cancellation, new turns and remounts');
 }
 `,
     loader: "tsx",

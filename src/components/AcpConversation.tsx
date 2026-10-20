@@ -77,9 +77,9 @@ function Decision({ block, answer, disabled }: { block: Block; answer: (answer: 
  * so a turn that did not change keeps its object and is not rendered again when
  * another one streams; a long conversation stays cheap to update.
  *
- * A finished turn that is not the last one shows what was said — the request,
- * messages between cards, and its closing answer — and folds the steps that led
- * there (thinking, tools, plans, text between them) into one line.
+ * A finished turn that is not the last one keeps all ordinary prose visible,
+ * including progress text before a tool or interruption. Only process details
+ * (thinking, tools, plans and decisions) fold into one line.
  */
 const TurnView = memo(function TurnView({ turn, folded, archived, controlBusy, onQuote, onAnswer }: {
   turn: Turn; folded: boolean; archived: boolean; controlBusy: boolean;
@@ -87,10 +87,8 @@ const TurnView = memo(function TurnView({ turn, folded, archived, controlBusy, o
 }) {
   const quote = archived ? undefined : onQuote;
   const groups = groupActivityBlocks(turn.blocks);
-  const isAnswer = (group: typeof groups[number]) => group.block?.type === 'text_delta' && group.block.stream !== 'thought';
-  let answerFrom = groups.length;
-  while (answerFrom > 0 && isAnswer(groups[answerFrom - 1])) answerFrom--;
-  const stepOf = (group: typeof groups[number], index: number) => folded && index < answerFrom && group.block?.type !== 'message';
+  const isProse = (group: typeof groups[number]) => group.block?.type === 'text_delta' && group.block.stream !== 'thought';
+  const stepOf = (group: typeof groups[number]) => folded && !isProse(group) && group.block?.type !== 'message';
   const steps = groups.filter(stepOf);
   const stepCount = steps.reduce((count, step) => count + (step.activities?.length ?? 1), 0);
   const render = ({ block: b, activities, index: i }: typeof groups[number]) => activities ? <ActivityGroup key={i} blocks={activities} running={busyTurn(turn)}/>
@@ -114,7 +112,7 @@ const TurnView = memo(function TurnView({ turn, folded, archived, controlBusy, o
       {steps.length > 0 && <Disclosure className="cq-acp-activity fc-activity-group cq-acp-steps" summary={<span className="fc-activity-label">过程 · {stepCount} 步</span>}>
         <div className="fc-activity-items">{steps.map(step => step.activities ? <ActivityItems key={step.index} blocks={step.activities}/> : render(step))}</div>
       </Disclosure>}
-      {groups.filter((group, index) => !stepOf(group, index)).map(render)}
+      {groups.filter(group => !stepOf(group)).map(render)}
     </div>
     {!busyTurn(turn) && <MessageActions text={turn.blocks.filter(b => b.type === 'text_delta' && b.stream !== 'thought').map(b => b.text || '').join('\n\n')} onQuote={quote}/>}
     {turnLabel[turn.state] && <div className="cq-acp-turn-state" role="status">{turn.blocks.some(b => b.type === 'decision' && b.state === 'pending') ? '等待你的确认' : turnLabel[turn.state]}</div>}
